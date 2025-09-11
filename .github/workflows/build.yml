@@ -32,18 +32,9 @@ jobs:
           sudo apt-get install -y build-essential ninja-build pkg-config \
                libssl-dev libminiupnpc-dev libqrencode-dev libudev-dev \
                libunwind-dev liblzma-dev qtbase5-dev qtbase5-dev-tools
-          # Build and cache Boost 1.89.0
-          BOOST_VER=1.89.0
-          BOOST_DIR=$HOME/.cache/boost-$BOOST_VER
-          if [ ! -d "$BOOST_DIR/lib" ]; then
-            wget -qO- https://boostorg.jfrog.io/artifactory/main/release/$BOOST_VER/source/boost_${BOOST_VER//./_}.tar.gz | tar xz
-            cd boost_* && ./bootstrap.sh
-            ./b2 cxxflags='-fPIC' --prefix=$BOOST_DIR --with-filesystem --with-program_options install
-            cd ..
-          fi
-          echo "BOOST_ROOT=$BOOST_DIR" >> $GITHUB_ENV
-          echo "$BOOST_DIR/lib" | sudo tee /etc/ld.so.conf.d/boost.conf
-          sudo ldconfig
+
+          # Install Boost using apt (more reliable)
+          sudo apt-get install -y libboost-all-dev
 
       # -------------------- macOS --------------------
       - name: Install dependencies (macOS)
