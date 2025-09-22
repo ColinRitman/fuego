@@ -64,7 +64,7 @@ jobs:
         if: matrix.os == 'macos-14'
         run: |
           brew update
-          brew install ninja boost qt@5 miniupnpc qrencode icu4c@77
+          brew install ninja boost qt@5 miniupnpc qrencode icu4c
           echo "BOOST_ROOT=$(brew --prefix boost)" >> $GITHUB_ENV
           echo "ICU_ROOT=$(brew --prefix icu4c@77)" >> $GITHUB_ENV
           echo "PATH=$(brew --prefix icu4c@77)/bin:$PATH" >> $GITHUB_ENV
@@ -77,9 +77,10 @@ jobs:
         shell: pwsh
         run: |
           choco install -y ninja vcpkg miniupnpc qrencode qt5-default
-          vcpkg install boost-filesystem boost-thread boost-date-time `
+          vcpkg install --triplet x64-windows boost-filesystem boost-thread boost-date-time `
             boost-chrono boost-regex boost-serialization boost-program-options `
-            boost-multi-index boost-uuid boost-asio boost-scope-exit boost-format --triplet x64-windows
+            boost-multi-index boost-uuid boost-asio boost-scope-exit boost-format `
+            icu openssl
 
       # -------------------- Configure & Build --------------------
       - name: Configure
@@ -133,16 +134,19 @@ jobs:
               -DCMAKE_LIBRARY_PATH="$ICU_ROOT/lib" \
               -DCMAKE_INCLUDE_PATH="$ICU_ROOT/include" \
               -DBoost_USE_STATIC_LIBS=ON \
+              -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
               -DDISABLE_ASYNC_CONSOLE=$([[ "$CMAKE_BUILD_TYPE" == "RelWithDebInfo" ]] && echo ON || echo OFF)
           elif [ "${{ matrix.os }}" = "windows-2022" ]; then
             cmake -S . -B build \
               -G Ninja \
               -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
-              -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake"
+              -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+              -DCMAKE_POLICY_DEFAULT_CMP0167=OLD
           else
             cmake -S . -B build \
               -G Ninja \
-              -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE
+              -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
+              -DCMAKE_POLICY_DEFAULT_CMP0167=OLD
           fi
 
       - name: Build
