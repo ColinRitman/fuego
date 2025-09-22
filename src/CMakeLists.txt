@@ -153,7 +153,8 @@ target_link_libraries(Optimizer PRIVATE
 # ICU linking fix for executables (macOS)
 # --------------------------
 if(APPLE)
-    foreach(exec_target fuegod walletd optimizer BurnDepositValidationService)
+    # Ensure ICU is linked on macOS for produced executables
+    foreach(exec_target Daemon PaymentGateService Optimizer)
         if(TARGET ${exec_target})
             message(STATUS "Fixing ICU linkage for ${exec_target}")
             target_link_libraries(${exec_target} PRIVATE

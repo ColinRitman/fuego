@@ -114,18 +114,4 @@ if(BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
-# --------------------------
-# Link ICU to executables (macOS)
-# --------------------------
-if(APPLE)
-    foreach(exec_target fuegod walletd optimizer BurnDepositValidationService)
-        if(TARGET ${exec_target})
-            message(STATUS "Force-linking ICU to ${exec_target}")
-            target_link_libraries(${exec_target} PRIVATE ${ICU_LIBRARIES})
-            set_target_properties(${exec_target} PROPERTIES
-                BUILD_WITH_INSTALL_RPATH TRUE
-                INSTALL_RPATH "${ICU_LIBRARY_DIRS}"
-            )
-        endif()
-    endforeach()
-endif()
+# Intentionally avoid extra macOS ICU link manipulation here. Handled in src/CMakeLists.txt
