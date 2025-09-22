@@ -111,14 +111,17 @@ add_subdirectory(src)
 # Link ICU to executables (macOS)
 # --------------------------
 if(APPLE)
-    foreach(exec_target fuegod walletd optimizer BurnDepositValidationService)
+    foreach(exec_target Daemon SimpleWallet PaymentGateService Optimizer BurnDepositValidationService)
         if(TARGET ${exec_target})
             message(STATUS "Force-linking ICU to ${exec_target}")
             target_link_libraries(${exec_target} PRIVATE ${ICU_LIBRARIES})
             set_target_properties(${exec_target} PROPERTIES
                 BUILD_WITH_INSTALL_RPATH TRUE
                 INSTALL_RPATH "${ICU_LIBRARY_DIRS}"
+                LINK_FLAGS "-L${ICU_LIBRARY_DIRS}"
             )
+            # Add ICU library directory to link directories
+            target_link_directories(${exec_target} PRIVATE ${ICU_LIBRARY_DIRS})
         endif()
     endforeach()
 endif()
