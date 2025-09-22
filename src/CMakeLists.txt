@@ -59,9 +59,11 @@ add_library(PaymentGate STATIC ${PaymentGate})
 add_library(JsonRpcServer STATIC ${JsonRpcServer})
 
 # --------------------------
-# Apply AES/SSE compile options to Crypto library only
+# Apply AES/SSE compile options to Crypto library only (x86/x64 non-Android)
 # --------------------------
-if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+if ((CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" OR CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    AND NOT ANDROID
+    AND (CMAKE_SYSTEM_PROCESSOR MATCHES "x86|i[3-6]86|amd64|x86_64"))
     target_compile_options(Crypto PRIVATE -maes -msse2 -msse4.1)
 endif()
 

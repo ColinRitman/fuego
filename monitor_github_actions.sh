@@ -4,7 +4,7 @@
 # Monitors build status every 2 minutes
 
 REPO="${REPO:-$(git remote get-url origin 2>/dev/null | sed 's/.*github\.com[:/]\([^/]*\/[^/.]*\).*/\1/') }"
-WORKFLOW_FILE="${WORKFLOW_FILE:-build.yml}"
+WORKFLOW_FILE="${WORKFLOW_FILE:-termux.yml}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-$GH_TOKEN}"
 
 if [ -z "$REPO" ]; then

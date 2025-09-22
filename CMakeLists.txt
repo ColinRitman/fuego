@@ -76,20 +76,24 @@ include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
 message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
 # --------------------------
-# ICU
+# ICU (skipped on Android)
 # --------------------------
-if(APPLE)
-    list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/icu4c" "/usr/local/opt/icu4c")
-endif()
-
-find_package(ICU REQUIRED COMPONENTS data i18n uc)
-
-if(ICU_FOUND)
-    message(STATUS "Found ICU includes: ${ICU_INCLUDE_DIRS}")
-    message(STATUS "Found ICU libraries: ${ICU_LIBRARIES}")
-    include_directories(${ICU_INCLUDE_DIRS})
+if(ANDROID)
+    message(STATUS "Android build detected: skipping ICU discovery")
 else()
-    message(FATAL_ERROR "ICU not found, install via Homebrew: brew install icu4c")
+    if(APPLE)
+        list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/icu4c" "/usr/local/opt/icu4c")
+    endif()
+
+    find_package(ICU REQUIRED COMPONENTS data i18n uc)
+
+    if(ICU_FOUND)
+        message(STATUS "Found ICU includes: ${ICU_INCLUDE_DIRS}")
+        message(STATUS "Found ICU libraries: ${ICU_LIBRARIES}")
+        include_directories(${ICU_INCLUDE_DIRS})
+    else()
+        message(FATAL_ERROR "ICU not found, install via Homebrew: brew install icu4c")
+    endif()
 endif()
 
 # --------------------------
