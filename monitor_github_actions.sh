@@ -4,7 +4,7 @@
 # Monitors all workflow builds and provides detailed status
 
 REPO="ColinRitman/fuego"
-WORKFLOWS=("build.yml" "docker.yml" "raspberry-pi.yml" "test-dynamic-supply.yml" "testnet.yml" "termux.yml" "release.yml")
+WORKFLOWS=("build.yml" "appimage.yml" "docker.yml" "raspberry-pi.yml" "test-dynamic-supply.yml" "testnet.yml" "termux.yml" "release.yml")
 CHECK_INTERVAL=120  # 2 minutes
 
 echo "🔍 Enhanced GitHub Actions Monitor for $REPO"
