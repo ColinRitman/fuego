@@ -99,6 +99,18 @@ add_subdirectory(external)
 add_subdirectory(src)
 
 # --------------------------
+# Tests
+# --------------------------
+# Expose a toggle to optionally build the test suite. This preserves all
+# existing behavior when disabled and allows CI to turn tests on explicitly.
+option(BUILD_TESTS "Build tests" OFF)
+if(BUILD_TESTS)
+    set(DO_TESTS ON)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+# --------------------------
 # Link ICU to executables (macOS)
 # --------------------------
 if(APPLE)
