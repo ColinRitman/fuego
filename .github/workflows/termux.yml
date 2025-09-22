@@ -3,6 +3,8 @@ name: Android (Termux)
 on:
   workflow_dispatch:
   push:
+    branches:
+      - "**"
     tags:
       - "*"
 
