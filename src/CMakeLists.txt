@@ -153,17 +153,15 @@ target_link_libraries(Optimizer PRIVATE
 # ICU linking fix for executables (macOS)
 # --------------------------
 if(APPLE)
-    # Ensure ICU is linked on macOS for produced executables
-    foreach(exec_target Daemon PaymentGateService Optimizer)
-        if(TARGET ${exec_target})
-            message(STATUS "Fixing ICU linkage for ${exec_target}")
-            target_link_libraries(${exec_target} PRIVATE
-                ${ICU_DATA_LIBRARY}
-                ${ICU_I18N_LIBRARY}
-                ${ICU_UC_LIBRARY}
-            )
-        endif()
-    endforeach()
+    # Ensure ICU is linked on macOS via imported targets
+    if(TARGET ICU::i18n AND TARGET ICU::uc AND TARGET ICU::data)
+        foreach(exec_target Daemon PaymentGateService Optimizer)
+            if(TARGET ${exec_target})
+                message(STATUS "Fixing ICU linkage for ${exec_target} using ICU imported targets")
+                target_link_libraries(${exec_target} PRIVATE ICU::i18n ICU::uc ICU::data)
+            endif()
+        endforeach()
+    endif()
 endif()
 
 # --------------------------
