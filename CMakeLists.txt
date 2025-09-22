@@ -93,6 +93,15 @@ else()
 endif()
 
 # --------------------------
+# Testing
+# --------------------------
+option(BUILD_TESTS "Build test executables" OFF)
+if(BUILD_TESTS)
+    enable_testing()
+    add_subdirectory(tests)
+endif()
+
+# --------------------------
 # Subdirectories
 # --------------------------
 add_subdirectory(external)

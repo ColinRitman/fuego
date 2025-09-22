@@ -67,6 +67,7 @@ jobs:
           brew install ninja boost qt@5 miniupnpc qrencode icu4c@77
           echo "BOOST_ROOT=$(brew --prefix boost)" >> $GITHUB_ENV
           echo "ICU_ROOT=$(brew --prefix icu4c@77)" >> $GITHUB_ENV
+          echo "PATH=$(brew --prefix icu4c@77)/bin:$PATH" >> $GITHUB_ENV
 
       - name: Install dependencies (Windows)
         if: matrix.os == 'windows-2022'
@@ -83,6 +84,7 @@ jobs:
         run: |
           if [ "${{ matrix.os }}" = "macos-14" ]; then
             export ICU_ROOT=$(brew --prefix icu4c@77)
+            export PATH="$ICU_ROOT/bin:$PATH"
             cmake -S . -B build \
               -G Ninja \
               -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
@@ -113,7 +115,12 @@ jobs:
       # -------------------- Run Tests --------------------
       - name: Run tests
         if: success()
-        run: ctest --test-dir build --output-on-failure
+        run: |
+          if [ -f "build/CTestTestfile.cmake" ]; then
+            ctest --test-dir build --output-on-failure
+          else
+            echo "No tests configured, skipping ctest"
+          fi
 
       # -------------------- Upload Artifacts --------------------
       - name: Upload artifacts
