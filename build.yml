@@ -137,40 +137,47 @@ jobs:
         if: ${{ success() && hashFiles('build/tests/**') != '' }}
         run: ctest --test-dir build --output-on-failure
 
+      # -------------------- Bundle Shared Libraries --------------------
+      - name: Bundle Linux artifacts
+        if: matrix.os == 'ubuntu-22.04' && success()
+        run: |
+          chmod +x scripts/bundle_linux.sh
+          ./scripts/bundle_linux.sh build fuego-linux-bundle
+
+      - name: Bundle macOS artifacts
+        if: matrix.os == 'macos-14' && success()
+        run: |
+          chmod +x scripts/bundle_macos.sh
+          ./scripts/bundle_macos.sh build fuego-macos-bundle
+
+      - name: Bundle Windows artifacts
+        if: matrix.os == 'windows-2022' && success()
+        shell: pwsh
+        run: |
+          ./scripts/bundle_windows.ps1 -BuildDir build -OutputDir fuego-windows-bundle
+
       # -------------------- Upload Artifacts --------------------
-      - name: Upload macOS artifacts
+      - name: Upload macOS bundle
         if: matrix.os == 'macos-14' && success()
         uses: actions/upload-artifact@v4
         with:
-          name: fuego-macos-${{ github.sha }}
-          path: |
-            build/fuegod
-            build/fuego-wallet-cli
-            build/walletd
-            build/optimizer
+          name: fuego-macos-bundle-${{ github.sha }}
+          path: fuego-macos-bundle/
           retention-days: 30
 
-      - name: Upload Windows artifacts
+      - name: Upload Windows bundle
         if: matrix.os == 'windows-2022' && success()
         uses: actions/upload-artifact@v4
         with:
-          name: fuego-windows-${{ github.sha }}
-          path: |
-            build/fuegod.exe
-            build/fuego-wallet-cli.exe
-            build/walletd.exe
-            build/optimizer.exe
+          name: fuego-windows-bundle-${{ github.sha }}
+          path: fuego-windows-bundle/
           retention-days: 30
 
-      - name: Upload Ubuntu artifacts
+      - name: Upload Ubuntu bundle
         if: matrix.os == 'ubuntu-22.04' && success()
         uses: actions/upload-artifact@v4
         with:
-          name: fuego-ubuntu-${{ github.sha }}
-          path: |
-            build/fuegod
-            build/fuego-wallet-cli
-            build/walletd
-            build/optimizer
+          name: fuego-linux-bundle-${{ github.sha }}
+          path: fuego-linux-bundle/
           retention-days: 30
     

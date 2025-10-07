@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Wrapper script for optimizer
+# This script sets up the library path and runs the executable
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Set library path to include bundled libraries
+export LD_LIBRARY_PATH="${SCRIPT_DIR}/lib:${LD_LIBRARY_PATH}"
+
+# Run the actual executable from bin directory
+exec "${SCRIPT_DIR}/bin/optimizer" "$@"
