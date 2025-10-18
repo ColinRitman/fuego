@@ -2,14 +2,14 @@
 
 ## Overview
 
-The Staged Yield Deposit Unlocking System implements a progressive unlock mechanism for yield deposits in the Fuego blockchain. Instead of unlocking all funds at once, deposits are unlocked in stages over a 120-day period.
+The Staged Yield Deposit Unlocking System implements a progressive unlock mechanism for yield deposits in the Fuego blockchain. Instead of unlocking all funds at once, deposits are unlocked in stages over a 120-day period. Only the principal amount is unlocked in stages, while interest remains locked for the full term.
 
 ## Key Features
 
 - **1/4 of deposit unlocks every 30 days** (4 stages)
 - **Final 4/4 principal unlocks** (final stage)
 - **Total unlock period**: 120 days (4 stages × 30 days)
-- **All interest unlocks in stage 1** (immediate access to earned interest)
+- **No interest unlocks** (interest remains locked)
 - **Automatic processing** at each block height
 - **Backward compatibility** with existing deposit system
 
@@ -25,7 +25,7 @@ The Staged Yield Deposit Unlocking System implements a progressive unlock mechan
 ### Unlock Schedule
 
 ```
-Stage 1 (Day 30):  25% Principal + 100% Interest
+Stage 1 (Day 30):  25% Principal + 0% Interest
 Stage 2 (Day 60):  25% Principal + 0% Interest  
 Stage 3 (Day 90):  25% Principal + 0% Interest
 Stage 4 (Day 120): 25% Principal + 0% Interest
@@ -99,7 +99,7 @@ namespace StagedUnlockConfig {
     static const uint32_t STAGE_2_UNLOCK_PERCENT = 25; // 1/4
     static const uint32_t STAGE_3_UNLOCK_PERCENT = 25; // 1/4
     static const uint32_t STAGE_4_UNLOCK_PERCENT = 25; // 1/4 (remaining)
-    static const uint32_t STAGE_1_INTEREST_PERCENT = 100; // All interest
+    static const uint32_t STAGE_1_INTEREST_PERCENT = 0; // No interest unlocks
 }
 ```
 
@@ -125,7 +125,7 @@ auto newlyUnlocked = stagedUnlock.checkUnlockStages(currentHeight);
 
 for (const auto& stage : newlyUnlocked) {
     std::cout << "Stage " << stage.stageNumber << " unlocked: "
-              << stage.principalAmount + stage.interestAmount << " XFG" << std::endl;
+              << stage.principalAmount << " XFG principal" << std::endl;
 }
 ```
 
@@ -159,15 +159,15 @@ curl -X POST http://localhost:28180/getStagedUnlockSchedule \
     {
       "stageNumber": 1,
       "unlockHeight": 143200,
-      "principalAmount": 330000000,
-      "interestAmount": 100000000,
+      "principalAmount": 250000000,
+      "interestAmount": 0,
       "isUnlocked": true,
       "unlockTimestamp": 1640995200
     },
     {
       "stageNumber": 2,
       "unlockHeight": 186400,
-      "principalAmount": 330000000,
+      "principalAmount": 250000000,
       "interestAmount": 0,
       "isUnlocked": false,
       "unlockTimestamp": 0
@@ -175,15 +175,23 @@ curl -X POST http://localhost:28180/getStagedUnlockSchedule \
     {
       "stageNumber": 3,
       "unlockHeight": 229600,
-      "principalAmount": 340000000,
+      "principalAmount": 250000000,
+      "interestAmount": 0,
+      "isUnlocked": false,
+      "unlockTimestamp": 0
+    },
+    {
+      "stageNumber": 4,
+      "unlockHeight": 272800,
+      "principalAmount": 250000000,
       "interestAmount": 0,
       "isUnlocked": false,
       "unlockTimestamp": 0
     }
   ],
   "status": "Stage 2 in 43200 blocks",
-  "totalUnlockedAmount": 430000000,
-  "remainingLockedAmount": 670000000
+  "totalUnlockedAmount": 250000000,
+  "remainingLockedAmount": 750000000
 }
 ```
 
@@ -224,10 +232,10 @@ The staged unlock system integrates with the existing wallet system:
 
 ### For Users
 
-- **Immediate Access to Interest** - Earned interest unlocks in stage 1
 - **Gradual Principal Access** - Reduces risk of large withdrawals with 4 equal stages
 - **Predictable Schedule** - Clear timeline for fund availability over 120 days
 - **Flexibility** - Can spend unlocked amounts as they become available
+- **Interest Preservation** - Interest remains locked for the full term
 
 ### For Network
 

@@ -53,8 +53,8 @@ void StagedDepositUnlock::calculateStages() {
     uint64_t stage3Principal = (m_totalAmount * StagedUnlockConfig::STAGE_3_UNLOCK_PERCENT) / 100;
     uint64_t stage4Principal = m_totalAmount - stage1Principal - stage2Principal - stage3Principal; // Remaining principal
     
-    // All interest unlocks in stage 1
-    uint64_t stage1Interest = m_totalInterest;
+    // No interest unlocks in any stage
+    uint64_t stage1Interest = 0;
     
     // Calculate unlock heights
     uint32_t stage1Height = m_depositHeight + StagedUnlockConfig::STAGE_INTERVAL_BLOCKS;

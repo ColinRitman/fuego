@@ -32,7 +32,7 @@ namespace StagedUnlockConfig {
     static const uint32_t STAGE_2_UNLOCK_PERCENT = 25; // 1/4
     static const uint32_t STAGE_3_UNLOCK_PERCENT = 25; // 1/4
     static const uint32_t STAGE_4_UNLOCK_PERCENT = 25; // 1/4 (remaining principal)
-    static const uint32_t STAGE_1_INTEREST_PERCENT = 100; // All interest unlocks in stage 1
+    static const uint32_t STAGE_1_INTEREST_PERCENT = 0; // No interest unlocks
 }
 
 // Individual unlock stage information
