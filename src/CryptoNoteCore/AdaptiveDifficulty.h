@@ -52,7 +52,8 @@ namespace CryptoNote {
         uint64_t calculateNextDifficulty(
             uint32_t height,
             const std::vector<uint64_t>& timestamps,
-            const std::vector<uint64_t>& cumulativeDifficulties
+            const std::vector<uint64_t>& cumulativeDifficulties,
+            bool testnet = false
         );
 
         // Emergency response for sudden hash rate changes
@@ -64,7 +65,8 @@ namespace CryptoNote {
         // Anti-block-stealing mechanism
         bool detectBlockStealingAttempt(
             const std::vector<uint64_t>& timestamps,
-            const std::vector<uint64_t>& difficulties
+            const std::vector<uint64_t>& difficulties,
+            bool testnet = false
         );
 
     private:
@@ -73,7 +75,8 @@ namespace CryptoNote {
         // Calculate difficulty using multiple windows
         uint64_t calculateMultiWindowDifficulty(
             const std::vector<uint64_t>& timestamps,
-            const std::vector<uint64_t>& cumulativeDifficulties
+            const std::vector<uint64_t>& cumulativeDifficulties,
+            bool testnet = false
         );
         
         // Calculate LWMA for a specific window
@@ -93,20 +96,22 @@ namespace CryptoNote {
         // Detect hash rate anomalies
         bool detectHashRateAnomaly(
             const std::vector<uint64_t>& timestamps,
-            const std::vector<uint64_t>& difficulties
+            const std::vector<uint64_t>& difficulties,
+            bool testnet = false
         );
         
         // Apply smoothing to prevent oscillations
-        uint64_t applySmoothing(uint64_t newDifficulty, uint64_t previousDifficulty);
+        uint64_t applySmoothing(uint64_t newDifficulty, uint64_t previousDifficulty, bool testnet = false);
         
         // Calculate confidence score for difficulty adjustment
         double calculateConfidenceScore(
             const std::vector<uint64_t>& timestamps,
-            const std::vector<uint64_t>& difficulties
+            const std::vector<uint64_t>& difficulties,
+            bool testnet = false
         );
     };
 
     // Default configuration for Fuego
-    AdaptiveDifficulty::DifficultyConfig getDefaultFuegoConfig();
+    AdaptiveDifficulty::DifficultyConfig getDefaultFuegoConfig(bool testnet = false);
 
 } // namespace CryptoNote

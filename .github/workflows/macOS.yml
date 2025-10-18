@@ -24,7 +24,6 @@ jobs:
       - name: Build
         id: build
         run: |
-          set -e
           build_folder="build/"
           xfg_ver=$(echo ${{ github.ref }} | sed 's|refs/tags/||')
           release_name="fuego-cli-macOS-${{ matrix.arch }}-v$xfg_ver"
@@ -88,13 +87,14 @@ jobs:
           echo "xfg_version=${xfg_ver}" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
           files: ${{ steps.build.outputs.asset_path }}
-          name: Fuego CLI Suite v${{ steps.build.outputs.xfg_ver }}
+          name: Fuego CLI Suite v${{ steps.build.outputs.xfg_version }}
           body: |
-            **${{ steps.build.outputs.release_name }}**
-            ${{ steps.build.outputs.sha256 }}
+            🍏 [Download for macOS](../../releases/download/${{ steps.build.outputs.xfg_version }}/${{ steps.build.outputs.release_name }}) **${{ steps.build.outputs.release_name }}**
+            
+            `SHA256 : ${{ steps.build.outputs.sha256 }}`
           append_body: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
