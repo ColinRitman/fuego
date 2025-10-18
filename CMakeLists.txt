@@ -74,6 +74,12 @@ if(BUILD_LOWEND_ARM64)
   include(arm64-lowend.cmake)
 endif()
 
+# Hardcore ultra-low-end device build option
+option(BUILD_HARDCORE_ARM64 "Build ultra-optimized for hardcore ARM64 devices" OFF)
+if(BUILD_HARDCORE_ARM64)
+  include(arm64-hardcore.cmake)
+endif()
+
 # Check support for AES
 option(NO_AES "Explicitly disable AES support" ${NO_AES})
 
