@@ -2,16 +2,34 @@
 
 ## Overview
 
-The Staged Yield Deposit Unlocking System implements a progressive unlock mechanism for yield deposits in the Fuego blockchain. Instead of unlocking all funds at once, deposits are unlocked in stages over a 120-day period. Only the principal amount is unlocked in stages, while interest remains locked for the full term.
+The Staged Yield Deposit Unlocking System implements an **optional** progressive unlock mechanism for yield deposits in the Fuego blockchain. Users can choose between traditional full-term unlock (1 transaction fee) or staged unlock (4 transaction fees) at the time of deposit creation. When staged unlock is selected, deposits are unlocked in stages over a 120-day period. Only the principal amount is unlocked in stages, while interest remains locked for the full term.
 
 ## Key Features
 
+- **Optional staged unlock** - Users choose at deposit creation time
 - **1/4 of deposit unlocks every 30 days** (4 stages)
 - **Final 4/4 principal unlocks** (final stage)
 - **Total unlock period**: 120 days (4 stages × 30 days)
 - **No interest unlocks** (interest remains locked)
+- **Flexible fee structure** - 1x fee for traditional, 4x fee for staged
 - **Automatic processing** at each block height
 - **Backward compatibility** with existing deposit system
+
+## Fee Structure
+
+The system offers two unlock options with different fee structures:
+
+### Traditional Unlock (Default)
+- **Transaction Fee**: 0.008 XFG (1 transaction)
+- **Total Fees**: 0.008 XFG
+- **Unlock Method**: Full amount unlocks at term end
+- **Use Case**: Standard deposits, immediate full access
+
+### Staged Unlock (Optional)
+- **Transaction Fee**: 0.008 XFG per stage (4 transactions)
+- **Total Fees**: 0.032 XFG (4 × 0.008 XFG)
+- **Unlock Method**: 25% every 30 days over 120 days
+- **Use Case**: Risk management, gradual access, network stability
 
 ## Architecture
 
@@ -105,7 +123,99 @@ namespace StagedUnlockConfig {
 
 ## Usage Examples
 
-### Creating a Staged Unlock
+### Creating a Deposit with Optional Staged Unlock
+
+#### Traditional Deposit (Default)
+```bash
+curl -X POST http://localhost:8070/createDeposit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000000000000,
+    "term": 100000,
+    "sourceAddress": "fuego1...",
+    "useStagedUnlock": false
+  }'
+```
+
+**Response:**
+```json
+{
+  "transactionHash": "abc123...",
+  "isBurnDeposit": false,
+  "useStagedUnlock": false,
+  "transactionFee": 800000,
+  "totalFees": 800000
+}
+```
+
+#### Staged Unlock Deposit (Optional)
+```bash
+curl -X POST http://localhost:8070/createDeposit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000000000000,
+    "term": 100000,
+    "sourceAddress": "fuego1...",
+    "useStagedUnlock": true
+  }'
+```
+
+**Response:**
+```json
+{
+  "transactionHash": "def456...",
+  "isBurnDeposit": false,
+  "useStagedUnlock": true,
+  "transactionFee": 800000,
+  "totalFees": 3200000
+}
+```
+
+### Querying Deposit Information
+
+```bash
+curl -X POST http://localhost:8070/getDeposit \
+  -H "Content-Type: application/json" \
+  -d '{"depositId": 123}'
+```
+
+**Response (Traditional Deposit):**
+```json
+{
+  "amount": 1000000000000,
+  "term": 100000,
+  "interest": 100000000000,
+  "height": 100000,
+  "unlockHeight": 200000,
+  "locked": true,
+  "useStagedUnlock": false,
+  "transactionFee": 800000,
+  "totalFees": 800000,
+  "creatingTransactionHash": "abc123...",
+  "spendingTransactionHash": "",
+  "address": "fuego1..."
+}
+```
+
+**Response (Staged Unlock Deposit):**
+```json
+{
+  "amount": 1000000000000,
+  "term": 100000,
+  "interest": 100000000000,
+  "height": 100000,
+  "unlockHeight": 200000,
+  "locked": true,
+  "useStagedUnlock": true,
+  "transactionFee": 800000,
+  "totalFees": 3200000,
+  "creatingTransactionHash": "def456...",
+  "spendingTransactionHash": "",
+  "address": "fuego1..."
+}
+```
+
+### Programmatic Usage
 
 ```cpp
 // Create staged unlock for a deposit
@@ -142,6 +252,58 @@ auto newlyUnlocked = EnhancedDepositManager::processAllUnlocks(currentHeight, en
 ```
 
 ## RPC API Extensions
+
+### Create Deposit (Updated)
+
+**Request:**
+```bash
+curl -X POST http://localhost:8070/createDeposit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 1000000000000,
+    "term": 100000,
+    "sourceAddress": "fuego1...",
+    "useStagedUnlock": true
+  }'
+```
+
+**Response:**
+```json
+{
+  "transactionHash": "def456...",
+  "isBurnDeposit": false,
+  "useStagedUnlock": true,
+  "transactionFee": 800000,
+  "totalFees": 3200000
+}
+```
+
+### Get Deposit (Updated)
+
+**Request:**
+```bash
+curl -X POST http://localhost:8070/getDeposit \
+  -H "Content-Type: application/json" \
+  -d '{"depositId": 123}'
+```
+
+**Response:**
+```json
+{
+  "amount": 1000000000000,
+  "term": 100000,
+  "interest": 100000000000,
+  "height": 100000,
+  "unlockHeight": 200000,
+  "locked": true,
+  "useStagedUnlock": true,
+  "transactionFee": 800000,
+  "totalFees": 3200000,
+  "creatingTransactionHash": "def456...",
+  "spendingTransactionHash": "",
+  "address": "fuego1..."
+}
+```
 
 ### Get Staged Unlock Schedule
 

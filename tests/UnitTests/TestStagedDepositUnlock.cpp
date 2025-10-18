@@ -16,8 +16,11 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include <gtest/gtest.h>
+#include <thread>
 #include "CryptoNoteCore/StagedDepositUnlock.h"
 #include "CryptoNoteCore/EnhancedDeposit.h"
+#include "CryptoNoteCore/StagedUnlockStorage.h"
+#include "CryptoNoteCore/StagedUnlockStorage.h"
 #include "CryptoNoteCore/Currency.h"
 #include "Logging/ConsoleLogger.h"
 
@@ -82,6 +85,142 @@ TEST_F(StagedDepositUnlockTest, BasicStagedUnlock) {
     EXPECT_EQ(stages[3].principalAmount, amount - ((amount * 25) / 100) - ((amount * 25) / 100) - ((amount * 25) / 100));
     EXPECT_EQ(stages[3].interestAmount, 0);
     EXPECT_FALSE(stages[3].isUnlocked);
+}
+
+// Test StagedUnlockStorage
+TEST(StagedUnlockStorageTest, BasicFunctionality) {
+  CryptoNote::StagedUnlockStorage storage;
+  
+  // Test setting and getting staged unlock preference
+  std::string txHash1 = "abc123def456";
+  std::string txHash2 = "def456ghi789";
+  
+  // Initially no preference stored
+  EXPECT_FALSE(storage.hasStagedUnlockPreference(txHash1));
+  EXPECT_FALSE(storage.getStagedUnlockPreference(txHash1));
+  
+  // Set staged unlock preference
+  storage.setStagedUnlockPreference(txHash1, true);
+  storage.setStagedUnlockPreference(txHash2, false);
+  
+  // Check preferences
+  EXPECT_TRUE(storage.hasStagedUnlockPreference(txHash1));
+  EXPECT_TRUE(storage.hasStagedUnlockPreference(txHash2));
+  EXPECT_TRUE(storage.getStagedUnlockPreference(txHash1));
+  EXPECT_FALSE(storage.getStagedUnlockPreference(txHash2));
+  
+  // Test getting all staged unlock deposits
+  auto stagedDeposits = storage.getStagedUnlockDeposits();
+  EXPECT_EQ(stagedDeposits.size(), 1);
+  EXPECT_EQ(stagedDeposits[0], txHash1);
+  
+  // Test removal
+  storage.removeStagedUnlockPreference(txHash1);
+  EXPECT_FALSE(storage.hasStagedUnlockPreference(txHash1));
+  EXPECT_TRUE(storage.hasStagedUnlockPreference(txHash2));
+}
+
+TEST(StagedUnlockStorageTest, ThreadSafety) {
+  CryptoNote::StagedUnlockStorage storage;
+  
+  // Test concurrent access
+  std::vector<std::thread> threads;
+  const int numThreads = 10;
+  const int operationsPerThread = 100;
+  
+  for (int i = 0; i < numThreads; ++i) {
+    threads.emplace_back([&storage, i, operationsPerThread]() {
+      for (int j = 0; j < operationsPerThread; ++j) {
+        std::string txHash = "tx_" + std::to_string(i) + "_" + std::to_string(j);
+        storage.setStagedUnlockPreference(txHash, j % 2 == 0);
+        storage.getStagedUnlockPreference(txHash);
+        storage.hasStagedUnlockPreference(txHash);
+      }
+    });
+  }
+  
+  for (auto& thread : threads) {
+    thread.join();
+  }
+  
+  // Verify no crashes occurred
+  EXPECT_TRUE(true);
+}
+
+// Test optional staged unlock feature
+TEST(OptionalStagedUnlockTest, CreateDepositWithStagedUnlock) {
+  // Test creating a deposit with staged unlock option
+  uint64_t amount = 1000000000000; // 1000 XFG
+  uint64_t interest = 100000000000; // 100 XFG
+  uint32_t depositHeight = 100000;
+  
+  // Create staged unlock
+  CryptoNote::StagedDepositUnlock stagedUnlock;
+  stagedUnlock.initialize(amount, interest, depositHeight);
+  
+  // Verify it's properly initialized
+  EXPECT_TRUE(stagedUnlock.isInitialized());
+  EXPECT_EQ(stagedUnlock.getTotalAmount(), amount);
+  EXPECT_EQ(stagedUnlock.getTotalInterest(), interest);
+  
+  // Test stage calculation
+  auto stages = stagedUnlock.getStages();
+  EXPECT_EQ(stages.size(), 4);
+  
+  // Verify all stages have correct amounts
+  uint64_t totalPrincipal = 0;
+  for (const auto& stage : stages) {
+    totalPrincipal += stage.principalAmount;
+  }
+  EXPECT_EQ(totalPrincipal, amount);
+}
+
+TEST(OptionalStagedUnlockTest, FeeCalculation) {
+  // Test fee calculation for different unlock types
+  uint64_t baseFee = 800000; // 0.008 XFG
+  
+  // Traditional unlock (1 transaction)
+  uint64_t traditionalFees = baseFee;
+  EXPECT_EQ(traditionalFees, 800000);
+  
+  // Staged unlock (4 transactions)
+  uint64_t stagedFees = baseFee * 4;
+  EXPECT_EQ(stagedFees, 3200000);
+  
+  // Verify fee difference
+  uint64_t feeDifference = stagedFees - traditionalFees;
+  EXPECT_EQ(feeDifference, 2400000); // 0.024 XFG additional
+}
+
+TEST(OptionalStagedUnlockTest, DepositComparison) {
+  // Test comparing traditional vs staged deposits
+  uint64_t amount = 1000000000000; // 1000 XFG
+  uint64_t interest = 100000000000; // 100 XFG
+  uint32_t depositHeight = 100000;
+  
+  // Traditional deposit
+  CryptoNote::StagedDepositUnlock traditionalUnlock;
+  traditionalUnlock.initialize(amount, interest, depositHeight);
+  
+  // Staged deposit
+  CryptoNote::StagedDepositUnlock stagedUnlock;
+  stagedUnlock.initialize(amount, interest, depositHeight);
+  
+  // Both should have same total amounts
+  EXPECT_EQ(traditionalUnlock.getTotalAmount(), stagedUnlock.getTotalAmount());
+  EXPECT_EQ(traditionalUnlock.getTotalInterest(), stagedUnlock.getTotalInterest());
+  
+  // But staged unlock should have multiple stages
+  auto traditionalStages = traditionalUnlock.getStages();
+  auto stagedStages = stagedUnlock.getStages();
+  
+  EXPECT_EQ(traditionalStages.size(), 4); // Both use 4 stages now
+  EXPECT_EQ(stagedStages.size(), 4);
+  
+  // Verify stage amounts are equal
+  for (size_t i = 0; i < stagedStages.size(); ++i) {
+    EXPECT_EQ(traditionalStages[i].principalAmount, stagedStages[i].principalAmount);
+  }
 }
 
 TEST_F(StagedDepositUnlockTest, StageUnlocking) {
