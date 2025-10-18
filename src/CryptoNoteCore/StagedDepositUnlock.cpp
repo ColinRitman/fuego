@@ -54,7 +54,7 @@ void StagedDepositUnlock::calculateStages() {
     uint64_t stage4Principal = (m_totalAmount * StagedUnlockConfig::STAGE_4_UNLOCK_PERCENT) / 100;
     uint64_t stage5Principal = m_totalAmount - stage1Principal - stage2Principal - stage3Principal - stage4Principal; // Remaining principal
     
-    // No interest unlocks in any stage
+    // Interest is paid off-chain at deposit time, on-chain interest is always 0
     uint64_t stage1Interest = 0;
     
     // Calculate unlock heights (every 18 days)
@@ -64,7 +64,7 @@ void StagedDepositUnlock::calculateStages() {
     uint32_t stage4Height = m_depositHeight + (4 * StagedUnlockConfig::STAGE_INTERVAL_BLOCKS);
     uint32_t stage5Height = m_depositHeight + (5 * StagedUnlockConfig::STAGE_INTERVAL_BLOCKS);
     
-    // Create stages
+    // Create stages (interest always 0 as it's paid off-chain)
     m_stages.emplace_back(1, stage1Height, stage1Principal, stage1Interest);
     m_stages.emplace_back(2, stage2Height, stage2Principal, 0);
     m_stages.emplace_back(3, stage3Height, stage3Principal, 0);

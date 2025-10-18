@@ -7,11 +7,11 @@ The Staged Yield Deposit Unlocking System implements an **optional** progressive
 ## Key Features
 
 - **Optional staged unlock** - Users choose at deposit creation time
-- **1/4 of deposit unlocks every 30 days** (4 stages)
-- **Final 4/4 principal unlocks** (final stage)
-- **Total unlock period**: 120 days (4 stages × 30 days)
-- **No interest unlocks** (interest remains locked)
-- **Flexible fee structure** - 1x fee for traditional, 4x fee for staged
+- **1/5 of deposit unlocks every 18 days** (5 stages)
+- **Final 5/5 principal unlocks** (final stage)
+- **Total unlock period**: 90 days (5 stages × 18 days)
+- **Off-chain interest payments** - Interest paid via CD system at deposit time, on-chain interest always 0
+- **Flexible fee structure** - 1x fee for traditional, 5x fee for staged (0.04 XFG total)
 - **Automatic processing** at each block height
 - **Backward compatibility** with existing deposit system
 
@@ -26,10 +26,17 @@ The system offers two unlock options with different fee structures:
 - **Use Case**: Standard deposits, immediate full access
 
 ### Staged Unlock (Optional)
-- **Transaction Fee**: 0.008 XFG per stage (4 transactions)
-- **Total Fees**: 0.032 XFG (4 × 0.008 XFG)
-- **Unlock Method**: 25% every 30 days over 120 days
+- **Transaction Fee**: 0.008 XFG per stage (5 transactions)
+- **Total Fees**: 0.040 XFG (5 × 0.008 XFG)
+- **Unlock Method**: 20% every 18 days over 90 days
 - **Use Case**: Risk management, gradual access, network stability
+
+## Interest Payment System
+
+- **On-chain Interest**: Always 0 (no supply inflation from block rewards)
+- **Off-chain Interest**: Paid via CD (Certificate of Deposit) system at deposit time
+- **Staged Unlock**: Only affects principal amount, not interest
+- **Interest Locking**: Interest remains locked regardless of unlock method chosen
 
 ## Architecture
 
@@ -167,7 +174,7 @@ curl -X POST http://localhost:8070/createDeposit \
   "isBurnDeposit": false,
   "useStagedUnlock": true,
   "transactionFee": 800000,
-  "totalFees": 3200000
+  "totalFees": 4000000
 }
 ```
 
@@ -208,7 +215,7 @@ curl -X POST http://localhost:8070/getDeposit \
   "locked": true,
   "useStagedUnlock": true,
   "transactionFee": 800000,
-  "totalFees": 3200000,
+  "totalFees": 4000000,
   "creatingTransactionHash": "def456...",
   "spendingTransactionHash": "",
   "address": "fuego1..."
@@ -274,7 +281,7 @@ curl -X POST http://localhost:8070/createDeposit \
   "isBurnDeposit": false,
   "useStagedUnlock": true,
   "transactionFee": 800000,
-  "totalFees": 3200000
+  "totalFees": 4000000
 }
 ```
 
@@ -298,7 +305,7 @@ curl -X POST http://localhost:8070/getDeposit \
   "locked": true,
   "useStagedUnlock": true,
   "transactionFee": 800000,
-  "totalFees": 3200000,
+  "totalFees": 4000000,
   "creatingTransactionHash": "def456...",
   "spendingTransactionHash": "",
   "address": "fuego1..."

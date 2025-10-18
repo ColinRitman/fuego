@@ -33,7 +33,7 @@ namespace StagedUnlockConfig {
     static const uint32_t STAGE_3_UNLOCK_PERCENT = 20; // 1/5
     static const uint32_t STAGE_4_UNLOCK_PERCENT = 20; // 1/5
     static const uint32_t STAGE_5_UNLOCK_PERCENT = 20; // 1/5 (remaining principal)
-    static const uint32_t STAGE_1_INTEREST_PERCENT = 0; // No interest unlocks
+    static const uint32_t STAGE_1_INTEREST_PERCENT = 0; // Interest paid off-chain at deposit time, on-chain interest always 0
 }
 
 // Individual unlock stage information

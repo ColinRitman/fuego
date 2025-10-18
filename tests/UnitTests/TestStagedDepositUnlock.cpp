@@ -56,33 +56,34 @@ TEST_F(StagedDepositUnlockTest, BasicStagedUnlock) {
     
     // Check stages
     auto stages = stagedUnlock.getStages();
-    EXPECT_EQ(stages.size(), 4);
+    EXPECT_EQ(stages.size(), 5);
     
     // Stage 1: 25% principal + 0% interest
     EXPECT_EQ(stages[0].stageNumber, 1);
     EXPECT_EQ(stages[0].unlockHeight, depositHeight + StagedUnlockConfig::STAGE_INTERVAL_BLOCKS);
-    EXPECT_EQ(stages[0].principalAmount, (amount * 25) / 100);
+    EXPECT_EQ(stages[0].principalAmount, (amount * 20) / 100);
     EXPECT_EQ(stages[0].interestAmount, 0);
     EXPECT_FALSE(stages[0].isUnlocked);
     
     // Stage 2: 25% principal
     EXPECT_EQ(stages[1].stageNumber, 2);
     EXPECT_EQ(stages[1].unlockHeight, depositHeight + (2 * StagedUnlockConfig::STAGE_INTERVAL_BLOCKS));
-    EXPECT_EQ(stages[1].principalAmount, (amount * 25) / 100);
+    EXPECT_EQ(stages[1].principalAmount, (amount * 20) / 100);
     EXPECT_EQ(stages[1].interestAmount, 0);
     EXPECT_FALSE(stages[1].isUnlocked);
     
     // Stage 3: 25% principal
     EXPECT_EQ(stages[2].stageNumber, 3);
     EXPECT_EQ(stages[2].unlockHeight, depositHeight + (3 * StagedUnlockConfig::STAGE_INTERVAL_BLOCKS));
-    EXPECT_EQ(stages[2].principalAmount, (amount * 25) / 100);
+    EXPECT_EQ(stages[2].principalAmount, (amount * 20) / 100);
     EXPECT_EQ(stages[2].interestAmount, 0);
     EXPECT_FALSE(stages[2].isUnlocked);
     
     // Stage 4: 25% principal (remaining)
     EXPECT_EQ(stages[3].stageNumber, 4);
     EXPECT_EQ(stages[3].unlockHeight, depositHeight + (4 * StagedUnlockConfig::STAGE_INTERVAL_BLOCKS));
-    EXPECT_EQ(stages[3].principalAmount, amount - ((amount * 25) / 100) - ((amount * 25) / 100) - ((amount * 25) / 100));
+    EXPECT_EQ(stages[3].principalAmount, (amount * 20) / 100);
+    EXPECT_EQ(stages[4].principalAmount, amount - ((amount * 20) / 100) - ((amount * 20) / 100) - ((amount * 20) / 100) - ((amount * 20) / 100));
     EXPECT_EQ(stages[3].interestAmount, 0);
     EXPECT_FALSE(stages[3].isUnlocked);
 }
@@ -165,7 +166,7 @@ TEST(OptionalStagedUnlockTest, CreateDepositWithStagedUnlock) {
   
   // Test stage calculation
   auto stages = stagedUnlock.getStages();
-  EXPECT_EQ(stages.size(), 4);
+  EXPECT_EQ(stages.size(), 5);
   
   // Verify all stages have correct amounts
   uint64_t totalPrincipal = 0;
@@ -184,12 +185,12 @@ TEST(OptionalStagedUnlockTest, FeeCalculation) {
   EXPECT_EQ(traditionalFees, 800000);
   
   // Staged unlock (4 transactions)
-  uint64_t stagedFees = baseFee * 4;
-  EXPECT_EQ(stagedFees, 3200000);
+  uint64_t stagedFees = baseFee * 5;
+  EXPECT_EQ(stagedFees, 4000000);
   
   // Verify fee difference
   uint64_t feeDifference = stagedFees - traditionalFees;
-  EXPECT_EQ(feeDifference, 2400000); // 0.024 XFG additional
+  EXPECT_EQ(feeDifference, 3200000); // 0.032 XFG additional
 }
 
 TEST(OptionalStagedUnlockTest, DepositComparison) {
@@ -239,7 +240,7 @@ TEST_F(StagedDepositUnlockTest, StageUnlocking) {
     EXPECT_TRUE(newlyUnlocked[0].isUnlocked);
     
     // Check totals after stage 1
-    uint64_t expectedStage1Amount = (amount * 25) / 100;
+    uint64_t expectedStage1Amount = (amount * 20) / 100;
     EXPECT_EQ(stagedUnlock.getTotalUnlockedAmount(), expectedStage1Amount);
     EXPECT_EQ(stagedUnlock.getRemainingLockedAmount(), amount - expectedStage1Amount);
     
@@ -376,12 +377,12 @@ TEST_F(StagedDepositUnlockTest, EdgeCases) {
     // Test very small amounts
     StagedDepositUnlock smallUnlock(1, 1, 1000);
     auto stages = smallUnlock.getStages();
-    EXPECT_EQ(stages.size(), 4);
+    EXPECT_EQ(stages.size(), 5);
     
     // Test large amounts
     StagedDepositUnlock largeUnlock(1000000000000, 100000000000, 1000);
     stages = largeUnlock.getStages();
-    EXPECT_EQ(stages.size(), 4);
+    EXPECT_EQ(stages.size(), 5);
     
     // Verify total amounts are preserved
     uint64_t totalPrincipal = 0;
