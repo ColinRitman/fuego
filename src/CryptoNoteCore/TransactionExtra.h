@@ -36,7 +36,7 @@
 #define TX_EXTRA_ELDERFIER_DEPOSIT          0x06
 #define TX_EXTRA_YIELD_COMMITMENT           0x07
 #define TX_EXTRA_HEAT_COMMITMENT            0x08
-#define TX_EXTRA_CD_DEPOSIT_SECRET          0x09
+#define TX_EXTRA_CD_DEPOSIT_SECRET          0xCD
 
 #define TX_EXTRA_NONCE_PAYMENT_ID           0x00
 
