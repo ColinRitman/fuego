@@ -77,6 +77,8 @@ namespace CryptoNote
 
 		const uint64_t DEPOSIT_MIN_AMOUNT = 800 * COIN;    // 800 XFG (8,000,000,000 atomic units) - for CD deposits
 		const uint64_t YIELD_DEPOSIT_MIN_AMOUNT = 80000000; // 8 XFG (80,000,000 atomic units) - for yield deposits (0x07)
+		const uint64_t MIXER_DEPOSIT_MIN_AMOUNT = 1000000;  // 1 XFG (1,000,000 atomic units) - for mixer deposits (0x13)
+		const uint64_t MIXER_DEPOSIT_MAX_AMOUNT = 100000000000; // 1000 XFG (100,000,000,000 atomic units) - for mixer deposits
 		const uint64_t BURN_DEPOSIT_MIN_AMOUNT = 8000000;  // 0.8 XFG (8,000,000 atomic units)
 		const uint64_t BURN_DEPOSIT_STANDARD_AMOUNT = 8000000;  // Standard burn: 0.8 XFG (8,000,000 atomic units)
 		const uint64_t BURN_DEPOSIT_8000_AMOUNT = 8000 * COIN;  // 8000 XFG (80,000,000,000 atomic units)
@@ -92,6 +94,10 @@ namespace CryptoNote
                 
                 // Yield deposit specific constants
                 const uint32_t YIELD_DEPOSIT_MIN_TERM = 16440;  // 16440 blocks (3 months) for yield deposits
+                
+                // Mixer deposit specific constants
+                const uint32_t MIXER_DEPOSIT_MIN_TERM = 5480;   // 5480 blocks (1 month) for mixer deposits
+                const uint32_t MIXER_DEPOSIT_MAX_TERM = 65760;  // 65760 blocks (12 months) for mixer deposits
 
 		static_assert(DEPOSIT_MIN_TERM > 0, "Bad DEPOSIT_MIN_TERM");
 		static_assert(DEPOSIT_MIN_TERM <= DEPOSIT_MAX_TERM, "Bad DEPOSIT_MAX_TERM");

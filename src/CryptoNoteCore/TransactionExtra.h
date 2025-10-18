@@ -37,6 +37,7 @@
 #define TX_EXTRA_YIELD_COMMITMENT           0x07
 #define TX_EXTRA_HEAT_COMMITMENT            0x08
 #define TX_EXTRA_CD_DEPOSIT_SECRET          0xCD
+#define TX_EXTRA_MIXER_DEPOSIT              0x13
 
 #define TX_EXTRA_NONCE_PAYMENT_ID           0x00
 
@@ -117,12 +118,27 @@ struct TransactionExtraCDDepositSecret {
   bool serialize(ISerializer& serializer);
 };
 
+struct TransactionExtraMixerDeposit {
+  Crypto::Hash depositHash;           // Unique deposit identifier
+  uint64_t depositAmount;             // XFG amount (minimum 1 XFG)
+  Crypto::PublicKey recipientKey;     // Recipient's public key (encrypted)
+  uint32_t mixingTerm;                // Mixing period in blocks (1-12 months)
+  std::vector<uint8_t> nullifier;     // Nullifier to prevent double-spending
+  std::vector<uint8_t> commitment;    // ZK commitment for privacy
+  std::vector<uint8_t> metadata;      // Additional metadata
+  std::vector<uint8_t> signature;     // Deposit signature
+  
+  bool serialize(ISerializer& serializer);
+  bool isValid() const;
+  std::string toString() const;
+};
+
 // Removed duplicate TransactionExtraElderfierDeposit struct
 // tx_extra_field format, except tx_extra_padding and tx_extra_pub_key:
 //   varint tag;
 //   varint size;
 //   varint data[];
-typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraCDDepositSecret> TransactionExtraField;
+typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraCDDepositSecret, CryptoNote::TransactionExtraMixerDeposit> TransactionExtraField;
 
 
 
@@ -174,8 +190,13 @@ bool getElderfierDepositFromExtra(const std::vector<uint8_t>& tx_extra, Transact
 
 // CD Deposit Secret helper functions
 bool createTxExtraWithCDDepositSecret(const std::vector<uint8_t>& secret_key, uint64_t xfg_amount, uint32_t apr_basis_points, uint8_t term_code, uint8_t chain_code, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
+
+bool createTxExtraWithMixerDeposit(const Crypto::Hash& depositHash, uint64_t depositAmount, const Crypto::PublicKey& recipientKey, uint32_t mixingTerm, const std::vector<uint8_t>& nullifier, const std::vector<uint8_t>& commitment, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
 bool addCDDepositSecretToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraCDDepositSecret& deposit_secret);
 bool getCDDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraCDDepositSecret& deposit_secret);
+
+bool addMixerDepositToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraMixerDeposit& deposit);
+bool getMixerDepositFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraMixerDeposit& deposit);
 
 // Helper APIs for wallet integration
 // Computes Keccak256(address || "recipient") into out_hash

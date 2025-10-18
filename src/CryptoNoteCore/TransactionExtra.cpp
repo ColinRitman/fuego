@@ -166,6 +166,17 @@ namespace CryptoNote
           }
           break;
         }
+
+        case TX_EXTRA_MIXER_DEPOSIT:
+        {
+          TransactionExtraMixerDeposit mixerDeposit;
+          if (getMixerDepositFromExtra(transactionExtra, mixerDeposit)) {
+            transactionExtraFields.push_back(mixerDeposit);
+          } else {
+            return false;
+          }
+          break;
+        }
         }
       }
     }
@@ -982,6 +993,86 @@ namespace CryptoNote
     // Implementation would parse the extra field to extract CD deposit secret
     // This is a placeholder - full implementation would need proper parsing logic
     return false;
+  }
+
+  // Mixer Deposit Functions
+  bool TransactionExtraMixerDeposit::serialize(ISerializer& s)
+  {
+    s(depositHash, "depositHash");
+    s(depositAmount, "depositAmount");
+    s(recipientKey, "recipientKey");
+    s(mixingTerm, "mixingTerm");
+    s(nullifier, "nullifier");
+    s(commitment, "commitment");
+    s(metadata, "metadata");
+    s(signature, "signature");
+    return true;
+  }
+
+  bool TransactionExtraMixerDeposit::isValid() const
+  {
+    return depositAmount >= CryptoNote::parameters::MIXER_DEPOSIT_MIN_AMOUNT &&
+           depositAmount <= CryptoNote::parameters::MIXER_DEPOSIT_MAX_AMOUNT &&
+           mixingTerm >= CryptoNote::parameters::MIXER_DEPOSIT_MIN_TERM &&
+           mixingTerm <= CryptoNote::parameters::MIXER_DEPOSIT_MAX_TERM &&
+           !nullifier.empty() &&
+           !commitment.empty() &&
+           !signature.empty();
+  }
+
+  std::string TransactionExtraMixerDeposit::toString() const
+  {
+    std::ostringstream oss;
+    oss << "MixerDeposit{"
+        << "hash=" << Common::podToHex(depositHash)
+        << ", amount=" << depositAmount
+        << ", term=" << mixingTerm
+        << ", nullifier=" << Common::podToHex(nullifier)
+        << "}";
+    return oss.str();
+  }
+
+  bool addMixerDepositToExtra(std::vector<uint8_t> &tx_extra, const TransactionExtraMixerDeposit &deposit)
+  {
+    if (!deposit.isValid()) {
+      return false;
+    }
+
+    tx_extra.push_back(TX_EXTRA_MIXER_DEPOSIT);
+    
+    // Serialize the deposit data
+    BinaryArray depositData;
+    if (!deposit.serialize(Common::toBinaryArray(depositData))) {
+      return false;
+    }
+
+    // Add size and data
+    tx_extra.insert(tx_extra.end(), depositData.begin(), depositData.end());
+    return true;
+  }
+
+  bool getMixerDepositFromExtra(const std::vector<uint8_t> &tx_extra, TransactionExtraMixerDeposit &deposit)
+  {
+    // Implementation would parse the extra field to extract mixer deposit
+    // This is a placeholder - full implementation would need proper parsing logic
+    return false;
+  }
+
+  bool createTxExtraWithMixerDeposit(const Crypto::Hash& depositHash, uint64_t depositAmount, const Crypto::PublicKey& recipientKey, uint32_t mixingTerm, const std::vector<uint8_t>& nullifier, const std::vector<uint8_t>& commitment, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra)
+  {
+    TransactionExtraMixerDeposit deposit;
+    deposit.depositHash = depositHash;
+    deposit.depositAmount = depositAmount;
+    deposit.recipientKey = recipientKey;
+    deposit.mixingTerm = mixingTerm;
+    deposit.nullifier = nullifier;
+    deposit.commitment = commitment;
+    deposit.metadata = metadata;
+    
+    // Generate signature (placeholder - would need proper signing logic)
+    deposit.signature.resize(64, 0);
+    
+    return addMixerDepositToExtra(extra, deposit);
   }
 
 } // namespace CryptoNote
