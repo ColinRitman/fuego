@@ -2,13 +2,13 @@
 
 ## Overview
 
-The Staged Yield Deposit Unlocking System implements a progressive unlock mechanism for yield deposits in the Fuego blockchain. Instead of unlocking all funds at once, deposits are unlocked in stages over a 90-day period.
+The Staged Yield Deposit Unlocking System implements a progressive unlock mechanism for yield deposits in the Fuego blockchain. Instead of unlocking all funds at once, deposits are unlocked in stages over a 120-day period.
 
 ## Key Features
 
-- **1/3 of deposit unlocks every 30 days** (2 stages)
-- **Final 3/3 principal unlocks** (final stage)
-- **Total unlock period**: 90 days (3 stages × 30 days)
+- **1/4 of deposit unlocks every 30 days** (4 stages)
+- **Final 4/4 principal unlocks** (final stage)
+- **Total unlock period**: 120 days (4 stages × 30 days)
 - **All interest unlocks in stage 1** (immediate access to earned interest)
 - **Automatic processing** at each block height
 - **Backward compatibility** with existing deposit system
@@ -25,9 +25,10 @@ The Staged Yield Deposit Unlocking System implements a progressive unlock mechan
 ### Unlock Schedule
 
 ```
-Stage 1 (Day 30):  33% Principal + 100% Interest
-Stage 2 (Day 60):  33% Principal + 0% Interest  
-Stage 3 (Day 90):  34% Principal + 0% Interest
+Stage 1 (Day 30):  25% Principal + 100% Interest
+Stage 2 (Day 60):  25% Principal + 0% Interest  
+Stage 3 (Day 90):  25% Principal + 0% Interest
+Stage 4 (Day 120): 25% Principal + 0% Interest
 ```
 
 ## Implementation Details
@@ -93,10 +94,11 @@ struct EnhancedDeposit {
 ```cpp
 namespace StagedUnlockConfig {
     static const uint32_t STAGE_INTERVAL_BLOCKS = 30 * 24 * 60; // 30 days
-    static const uint32_t TOTAL_STAGES = 3;
-    static const uint32_t STAGE_1_UNLOCK_PERCENT = 33; // 1/3
-    static const uint32_t STAGE_2_UNLOCK_PERCENT = 33; // 1/3  
-    static const uint32_t STAGE_3_UNLOCK_PERCENT = 34; // 2/3 (remaining)
+    static const uint32_t TOTAL_STAGES = 4;
+    static const uint32_t STAGE_1_UNLOCK_PERCENT = 25; // 1/4
+    static const uint32_t STAGE_2_UNLOCK_PERCENT = 25; // 1/4
+    static const uint32_t STAGE_3_UNLOCK_PERCENT = 25; // 1/4
+    static const uint32_t STAGE_4_UNLOCK_PERCENT = 25; // 1/4 (remaining)
     static const uint32_t STAGE_1_INTEREST_PERCENT = 100; // All interest
 }
 ```
@@ -223,8 +225,8 @@ The staged unlock system integrates with the existing wallet system:
 ### For Users
 
 - **Immediate Access to Interest** - Earned interest unlocks in stage 1
-- **Gradual Principal Access** - Reduces risk of large withdrawals
-- **Predictable Schedule** - Clear timeline for fund availability
+- **Gradual Principal Access** - Reduces risk of large withdrawals with 4 equal stages
+- **Predictable Schedule** - Clear timeline for fund availability over 120 days
 - **Flexibility** - Can spend unlocked amounts as they become available
 
 ### For Network

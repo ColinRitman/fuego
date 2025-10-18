@@ -27,10 +27,11 @@ namespace CryptoNote {
 // Staged unlock configuration
 namespace StagedUnlockConfig {
     static const uint32_t STAGE_INTERVAL_BLOCKS = 30 * 24 * 60; // 30 days in blocks (assuming 1 block per minute)
-    static const uint32_t TOTAL_STAGES = 3;
-    static const uint32_t STAGE_1_UNLOCK_PERCENT = 33; // 1/3
-    static const uint32_t STAGE_2_UNLOCK_PERCENT = 33; // 1/3  
-    static const uint32_t STAGE_3_UNLOCK_PERCENT = 34; // 2/3 (remaining principal)
+    static const uint32_t TOTAL_STAGES = 4;
+    static const uint32_t STAGE_1_UNLOCK_PERCENT = 25; // 1/4
+    static const uint32_t STAGE_2_UNLOCK_PERCENT = 25; // 1/4
+    static const uint32_t STAGE_3_UNLOCK_PERCENT = 25; // 1/4
+    static const uint32_t STAGE_4_UNLOCK_PERCENT = 25; // 1/4 (remaining principal)
     static const uint32_t STAGE_1_INTEREST_PERCENT = 100; // All interest unlocks in stage 1
 }
 
