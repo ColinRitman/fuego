@@ -47,26 +47,29 @@ void StagedDepositUnlock::calculateStages() {
         return;
     }
     
-    // Calculate principal amounts for each stage
+    // Calculate principal amounts for each stage (20% each)
     uint64_t stage1Principal = (m_totalAmount * StagedUnlockConfig::STAGE_1_UNLOCK_PERCENT) / 100;
     uint64_t stage2Principal = (m_totalAmount * StagedUnlockConfig::STAGE_2_UNLOCK_PERCENT) / 100;
     uint64_t stage3Principal = (m_totalAmount * StagedUnlockConfig::STAGE_3_UNLOCK_PERCENT) / 100;
-    uint64_t stage4Principal = m_totalAmount - stage1Principal - stage2Principal - stage3Principal; // Remaining principal
+    uint64_t stage4Principal = (m_totalAmount * StagedUnlockConfig::STAGE_4_UNLOCK_PERCENT) / 100;
+    uint64_t stage5Principal = m_totalAmount - stage1Principal - stage2Principal - stage3Principal - stage4Principal; // Remaining principal
     
     // No interest unlocks in any stage
     uint64_t stage1Interest = 0;
     
-    // Calculate unlock heights
+    // Calculate unlock heights (every 18 days)
     uint32_t stage1Height = m_depositHeight + StagedUnlockConfig::STAGE_INTERVAL_BLOCKS;
     uint32_t stage2Height = m_depositHeight + (2 * StagedUnlockConfig::STAGE_INTERVAL_BLOCKS);
     uint32_t stage3Height = m_depositHeight + (3 * StagedUnlockConfig::STAGE_INTERVAL_BLOCKS);
     uint32_t stage4Height = m_depositHeight + (4 * StagedUnlockConfig::STAGE_INTERVAL_BLOCKS);
+    uint32_t stage5Height = m_depositHeight + (5 * StagedUnlockConfig::STAGE_INTERVAL_BLOCKS);
     
     // Create stages
     m_stages.emplace_back(1, stage1Height, stage1Principal, stage1Interest);
     m_stages.emplace_back(2, stage2Height, stage2Principal, 0);
     m_stages.emplace_back(3, stage3Height, stage3Principal, 0);
     m_stages.emplace_back(4, stage4Height, stage4Principal, 0);
+    m_stages.emplace_back(5, stage5Height, stage5Principal, 0);
 }
 
 std::vector<UnlockStage> StagedDepositUnlock::checkUnlockStages(uint32_t currentHeight) {
