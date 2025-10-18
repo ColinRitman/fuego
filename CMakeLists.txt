@@ -68,6 +68,12 @@ endif()
 
 include (arm.cmake)
 
+# Low-end device build option
+option(BUILD_LOWEND_ARM64 "Build optimized for low-end ARM64 devices" OFF)
+if(BUILD_LOWEND_ARM64)
+  include(arm64-lowend.cmake)
+endif()
+
 # Check support for AES
 option(NO_AES "Explicitly disable AES support" ${NO_AES})
 
@@ -138,7 +144,7 @@ else()
   else()
     set(DEBUG_FLAGS "-g3 -O0")
   endif()
-  set(RELEASE_FLAGS "-g3 -O0")
+  set(RELEASE_FLAGS "-Os -DNDEBUG")
 
 endif()
 
