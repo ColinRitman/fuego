@@ -1792,8 +1792,8 @@ namespace PaymentService
           /* Burn deposits (FOREVER term) use lower minimum: 0.8 XFG */
           minAmount = CryptoNote::parameters::BURN_DEPOSIT_MIN_AMOUNT;
         } else {
-          /* Regular yield deposits use standard minimum: 8 XFG */
-          minAmount = CryptoNote::parameters::DEPOSIT_MIN_AMOUNT;
+          /* Yield deposits (0x07) use lower minimum: 8 XFG (no maximum) */
+          minAmount = CryptoNote::parameters::YIELD_DEPOSIT_MIN_AMOUNT;
         }
 
         /* Validate minimum deposit amount */
@@ -1888,8 +1888,8 @@ namespace PaymentService
           /* Burn deposits (FOREVER term) use lower minimum: 0.8 XFG */
           minAmount = CryptoNote::parameters::BURN_DEPOSIT_MIN_AMOUNT;
         } else {
-          /* Regular yield deposits use standard minimum: 8 XFG */
-          minAmount = CryptoNote::parameters::DEPOSIT_MIN_AMOUNT;
+          /* Yield deposits (0x07) use lower minimum: 8 XFG (no maximum) */
+          minAmount = CryptoNote::parameters::YIELD_DEPOSIT_MIN_AMOUNT;
         }
 
         /* Validate minimum deposit amount */
