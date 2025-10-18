@@ -292,7 +292,7 @@ std::error_code PaymentServiceJsonRpcServer::handleCreateDeposit(const CreateDep
   // Calculate transaction fees
   uint64_t baseFee = 800000; // 0.008 XFG base transaction fee
   response.transactionFee = baseFee;
-  response.totalFees = request.useStagedUnlock ? (baseFee * 4) : baseFee;
+  response.totalFees = request.useStagedUnlock ? (baseFee * 5) : baseFee; // 5 transactions for staged unlock
   
   return service.createDeposit(request.amount, request.term, request.sourceAddress, response.transactionHash, commitment, request.useStagedUnlock);
 }
