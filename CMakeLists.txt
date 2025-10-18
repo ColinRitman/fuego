@@ -63,6 +63,13 @@ else()
         set(ARCH_FLAG "-march=x86-64")
       endif()
     endif()
+    
+    # Enhanced ARM64 detection and optimization
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64" OR CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+      message(STATUS "Detected ARM64 architecture - enabling optimizations")
+      set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D__aarch64__")
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__aarch64__")
+    endif()
 	endif()
 endif()
 

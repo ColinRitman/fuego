@@ -131,12 +131,23 @@ extern int aesb_pseudo_round(const uint8_t *in, uint8_t *out, const uint8_t *exp
 #define VARIANT2_SHUFFLE_ADD_NEON(base_ptr, offset) \
   do if (variant >= 2) \
   { \
+        /* Prefetch next memory locations for better cache performance */ \
+        ARM64_PREFETCH_WT2((base_ptr) + ((offset) ^ 0x10)); \
+        ARM64_PREFETCH_WT2((base_ptr) + ((offset) ^ 0x20)); \
+        ARM64_PREFETCH_WT2((base_ptr) + ((offset) ^ 0x30)); \
+    \
     const uint64x2_t chunk1 = (light ? vld1q_u64(U64((base_ptr) + ((offset) ^ 0x30))) : vld1q_u64(U64((base_ptr) + ((offset) ^ 0x10)))); \
     const uint64x2_t chunk2 = vld1q_u64(U64((base_ptr) + ((offset) ^ 0x20))); \
     const uint64x2_t chunk3 = (light ? vld1q_u64(U64((base_ptr) + ((offset) ^ 0x10))) : vld1q_u64(U64((base_ptr) + ((offset) ^ 0x30)))); \
-    vst1q_u64(U64((base_ptr) + ((offset) ^ 0x10)), vaddq_u64(chunk3, vreinterpretq_u64_u8(_b1))); \
-    vst1q_u64(U64((base_ptr) + ((offset) ^ 0x20)), vaddq_u64(chunk1, vreinterpretq_u64_u8(_b))); \
-    vst1q_u64(U64((base_ptr) + ((offset) ^ 0x30)), vaddq_u64(chunk2, vreinterpretq_u64_u8(_a))); \
+    \
+    /* Use parallel NEON operations for better throughput */ \
+    const uint64x2_t sum1 = vaddq_u64(chunk3, vreinterpretq_u64_u8(_b1)); \
+    const uint64x2_t sum2 = vaddq_u64(chunk1, vreinterpretq_u64_u8(_b)); \
+    const uint64x2_t sum3 = vaddq_u64(chunk2, vreinterpretq_u64_u8(_a)); \
+    \
+    vst1q_u64(U64((base_ptr) + ((offset) ^ 0x10)), sum1); \
+    vst1q_u64(U64((base_ptr) + ((offset) ^ 0x20)), sum2); \
+    vst1q_u64(U64((base_ptr) + ((offset) ^ 0x30)), sum3); \
   } while (0)
 
 #define VARIANT2_PORTABLE_SHUFFLE_ADD(base_ptr, offset) \
@@ -883,6 +894,7 @@ union cn_slow_hash_state
  * and moving between vector and regular registers stalls the pipeline.
  */
 #include <arm_neon.h>
+#include "arm64_optimizations.h"
 
 #define TOTALBLOCKS (MEMORY / AES_BLOCK_SIZE)
 
@@ -981,31 +993,43 @@ STATIC INLINE void aes_pseudo_round(const uint8_t *in, uint8_t *out, const uint8
 	uint8x16_t tmp;
 	int i;
 
-	for (i=0; i<nblocks; i++)
+	/* Process blocks in batches of 4 for better NEON utilization */
+	for (i=0; i<nblocks; i+=4)
 	{
-		uint8x16_t tmp = vld1q_u8(in + i * AES_BLOCK_SIZE);
-		tmp = vaeseq_u8(tmp, zero);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[0]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[1]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[2]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[3]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[4]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[5]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[6]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[7]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[8]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = veorq_u8(tmp,  k[9]);
-		vst1q_u8(out + i * AES_BLOCK_SIZE, tmp);
+		int remaining = nblocks - i;
+		int batch_size = (remaining >= 4) ? 4 : remaining;
+		
+        /* Prefetch next batch for better cache performance */
+        if (i + 4 < nblocks) {
+            ARM64_PREFETCH_T0(in + (i + 4) * AES_BLOCK_SIZE);
+        }
+		
+		for (int j = 0; j < batch_size; j++)
+		{
+			uint8x16_t tmp = vld1q_u8(in + (i + j) * AES_BLOCK_SIZE);
+			tmp = vaeseq_u8(tmp, zero);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[0]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[1]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[2]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[3]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[4]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[5]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[6]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[7]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[8]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = veorq_u8(tmp,  k[9]);
+			vst1q_u8(out + (i + j) * AES_BLOCK_SIZE, tmp);
+		}
 	}
 }
 
@@ -1016,31 +1040,44 @@ STATIC INLINE void aes_pseudo_round_xor(const uint8_t *in, uint8_t *out, const u
 	uint8x16_t tmp;
 	int i;
 
-	for (i=0; i<nblocks; i++)
+	/* Process blocks in batches of 4 for better NEON utilization */
+	for (i=0; i<nblocks; i+=4)
 	{
-		uint8x16_t tmp = vld1q_u8(in + i * AES_BLOCK_SIZE);
-		tmp = vaeseq_u8(tmp, x[i]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[0]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[1]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[2]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[3]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[4]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[5]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[6]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[7]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = vaeseq_u8(tmp, k[8]);
-		tmp = vaesmcq_u8(tmp);
-		tmp = veorq_u8(tmp,  k[9]);
-		vst1q_u8(out + i * AES_BLOCK_SIZE, tmp);
+		int remaining = nblocks - i;
+		int batch_size = (remaining >= 4) ? 4 : remaining;
+		
+        /* Prefetch next batch for better cache performance */
+        if (i + 4 < nblocks) {
+            ARM64_PREFETCH_T0(in + (i + 4) * AES_BLOCK_SIZE);
+            ARM64_PREFETCH_T0(xor + (i + 4) * AES_BLOCK_SIZE);
+        }
+		
+		for (int j = 0; j < batch_size; j++)
+		{
+			uint8x16_t tmp = vld1q_u8(in + (i + j) * AES_BLOCK_SIZE);
+			tmp = vaeseq_u8(tmp, x[i + j]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[0]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[1]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[2]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[3]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[4]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[5]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[6]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[7]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = vaeseq_u8(tmp, k[8]);
+			tmp = vaesmcq_u8(tmp);
+			tmp = veorq_u8(tmp,  k[9]);
+			vst1q_u8(out + (i + j) * AES_BLOCK_SIZE, tmp);
+		}
 	}
 }
 
@@ -1111,8 +1148,13 @@ void cn_slow_hash(const void *data, size_t length, char *hash, int light, int va
     aes_expand_key(state.hs.b, expandedKey);
     for(i = 0; i < MEMORY / (light?16:1) / INIT_SIZE_BYTE; i++)
     {
+        /* Prefetch next iteration for better cache performance */
+        if (i + 1 < MEMORY / (light?16:1) / INIT_SIZE_BYTE) {
+            ARM64_PREFETCH_WT2(&hp_state[(i + 1) * INIT_SIZE_BYTE]);
+        }
+        
         aes_pseudo_round(text, text, expandedKey, INIT_SIZE_BLK);
-        memcpy(&hp_state[i * INIT_SIZE_BYTE], text, INIT_SIZE_BYTE);
+        arm64_memcpy_optimized(&hp_state[i * INIT_SIZE_BYTE], text, INIT_SIZE_BYTE);
     }
 
     U64(a)[0] = U64(&state.k[0])[0] ^ U64(&state.k[32])[0];
@@ -1130,6 +1172,11 @@ void cn_slow_hash(const void *data, size_t length, char *hash, int light, int va
 
     for(i = 0; i < ITER() / 2; i++)
     {
+        /* Prefetch next iteration data for better cache performance */
+        if (i + 1 < ITER() / 2) {
+            ARM64_PREFETCH_T0(&hp_state[state_index(a, (light?16:1))]);
+        }
+        
         pre_aes();
         _c = vaeseq_u8(_c, zero);
         _c = vaesmcq_u8(_c);
@@ -1146,6 +1193,11 @@ void cn_slow_hash(const void *data, size_t length, char *hash, int light, int va
     aes_expand_key(&state.hs.b[32], expandedKey);
     for(i = 0; i < MEMORY / (light?16:1) / INIT_SIZE_BYTE; i++)
     {
+        /* Prefetch next iteration for better cache performance */
+        if (i + 1 < MEMORY / (light?16:1) / INIT_SIZE_BYTE) {
+            ARM64_PREFETCH_T0(&hp_state[(i + 1) * INIT_SIZE_BYTE]);
+        }
+        
         // add the xor to the pseudo round
         aes_pseudo_round_xor(text, text, expandedKey, &hp_state[i * INIT_SIZE_BYTE], INIT_SIZE_BLK);
     }

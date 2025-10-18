@@ -9,6 +9,10 @@
 
 #include "crypto-ops.h"
 
+#if defined(__aarch64__)
+#include "arm64_optimizations.h"
+#endif
+
 /* Predeclarations */
 
 static void fe_mul(fe, const fe, const fe);

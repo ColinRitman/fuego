@@ -11,6 +11,10 @@
 #include "hash-ops.h"
 #include "keccak.h"
 
+#if defined(__aarch64__)
+#include "arm64_optimizations.h"
+#endif
+
 void hash_permutation(union hash_state *state) {
   keccakf((uint64_t*)state, 24);
 }
