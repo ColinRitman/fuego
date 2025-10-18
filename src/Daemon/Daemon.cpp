@@ -258,20 +258,9 @@ int main(int argc, char* argv[])
     netNodeConfig.init(vm);
     netNodeConfig.setTestnet(testnet_mode);
     
-    // Set testnet-specific P2P port if not explicitly configured
-    if (testnet_mode && netNodeConfig.getBindPort() == P2P_DEFAULT_PORT) {
-      netNodeConfig.setBindPort(P2P_DEFAULT_PORT_TESTNET);
-    }
-    
-    // Set testnet-specific default ports if not explicitly configured
-    if (testnet_mode) {
-      if (netNodeConfig.getBindPort() == 0) {
-        netNodeConfig.setBindPort(P2P_DEFAULT_PORT_TESTNET);
-      }
-    } else {
-      if (netNodeConfig.getBindPort() == 0) {
-        netNodeConfig.setBindPort(P2P_DEFAULT_PORT);
-      }
+    // Set mainnet default port if not explicitly configured
+    if (netNodeConfig.getBindPort() == 0) {
+      netNodeConfig.setBindPort(P2P_DEFAULT_PORT);
     }
     
     MinerConfig minerConfig;
@@ -279,10 +268,6 @@ int main(int argc, char* argv[])
     RpcServerConfig rpcConfig;
     rpcConfig.init(vm);
     
-    // Set testnet-specific RPC port if not explicitly configured
-    if (testnet_mode && rpcConfig.bindPort == RPC_DEFAULT_PORT) {
-      rpcConfig.bindPort = RPC_DEFAULT_PORT_TESTNET;
-    }
 
     if (!coreConfig.configFolderDefaulted) {
       if (!Tools::directoryExists(coreConfig.configFolder)) {
