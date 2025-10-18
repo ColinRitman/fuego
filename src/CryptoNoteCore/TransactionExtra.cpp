@@ -133,6 +133,39 @@ namespace CryptoNote
           }
           break;
         }
+
+        case TX_EXTRA_HEAT_COMMITMENT:
+        {
+          TransactionExtraHeatCommitment heatCommitment;
+          if (getHeatCommitmentFromExtra(transactionExtra, heatCommitment)) {
+            transactionExtraFields.push_back(heatCommitment);
+          } else {
+            return false;
+          }
+          break;
+        }
+
+        case TX_EXTRA_YIELD_COMMITMENT:
+        {
+          TransactionExtraYieldCommitment yieldCommitment;
+          if (getYieldCommitmentFromExtra(transactionExtra, yieldCommitment)) {
+            transactionExtraFields.push_back(yieldCommitment);
+          } else {
+            return false;
+          }
+          break;
+        }
+
+        case TX_EXTRA_CD_DEPOSIT_SECRET:
+        {
+          TransactionExtraCDDepositSecret cdDepositSecret;
+          if (getCDDepositSecretFromExtra(transactionExtra, cdDepositSecret)) {
+            transactionExtraFields.push_back(cdDepositSecret);
+          } else {
+            return false;
+          }
+          break;
+        }
         }
       }
     }
