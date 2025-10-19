@@ -74,6 +74,15 @@ if(BUILD_LOWEND_ARM64)
   include(arm64-lowend.cmake)
 endif()
 
+# Phase 2 optimizations build option
+option(BUILD_PHASE2_ARM64 "Build Phase 2 optimizations for ARM64 low-end devices" OFF)
+if(BUILD_PHASE2_ARM64)
+  include(arm64-lowend.cmake)
+  add_definitions(-DFUEGO_PHASE2_OPTIMIZATIONS)
+  add_definitions(-DFUEGO_ARM64_OPTIMIZED)
+  add_definitions(-DFUEGO_LOWEND_MODE)
+endif()
+
 
 # Check support for AES
 option(NO_AES "Explicitly disable AES support" ${NO_AES})
