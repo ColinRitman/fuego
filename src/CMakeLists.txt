@@ -1,6 +1,13 @@
 add_definitions(-DSTATICLIB)
 include_directories(${CMAKE_SOURCE_DIR}/external/parallel_hashmap)
 
+# Include low-end device configuration
+if(BUILD_LOWEND_ARM64)
+  include_directories(${CMAKE_SOURCE_DIR}/include)
+  add_definitions(-DFUEGO_LOWEND_DEVICE=1)
+  add_definitions(-DFUEGO_ARM64_OPTIMIZED=1)
+endif()
+
 file(GLOB_RECURSE BlockchainExplorer BlockchainExplorer/*)
 file(GLOB_RECURSE Common Common/*)
 file(GLOB_RECURSE Crypto crypto/*)
