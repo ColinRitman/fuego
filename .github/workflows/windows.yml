@@ -17,25 +17,32 @@ jobs:
           submodules: recursive
         
       - name: Add msbuild to PATH
-        uses: microsoft/setup-msbuild@v1.1
+        uses: microsoft/setup-msbuild@v1.3
         
       - name: Download and Install Boost 1.83
         run: |
           $Url = "https://sourceforge.net/projects/boost/files/boost-binaries/1.83.0/boost_1_83_0-msvc-14.3-64.exe"
           $OutputPath = "C:\\Users\\runneradmin\\AppData\\Local\\Temp\\boost-installer.exe"
           curl -L $Url -o $OutputPath
+          if (-not (Test-Path $OutputPath)) {
+            throw "Failed to download Boost installer"
+          }
           Start-Process -Wait -FilePath $OutputPath "/SILENT","/SP-","/SUPPRESSMSGBOXES","/DIR=C:\\thirdparties\\boost-1.83.0"
+          if (-not (Test-Path "C:\\thirdparties\\boost-1.83.0")) {
+            throw "Boost installation failed"
+          }
 
       - name: Build
         shell: powershell
         id: build
         run: |
+          $ErrorActionPreference = "Stop"
           $build_folder = "build"
           $sha = "${{ github.sha }}"
           $xfg_ver = $sha.SubString(0,7)
           $release_name = "fuego-cli-win64-v$xfg_ver"
           
-          mkdir "$build_folder"
+          mkdir "$build_folder" -Force
           cd "$build_folder"
           
           # Configure with proper Windows settings
@@ -43,10 +50,15 @@ jobs:
             -DBOOST_ROOT="$env:BOOST_ROOT" `
             -DBOOST_INCLUDE_DIRS="$env:BOOST_ROOT/include" `
             -DCMAKE_BUILD_TYPE=Release `
+            -DCMAKE_CXX_STANDARD=17 `
             ..
+          
+          if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
           
           # Build with MSBuild
           msbuild fuegoX.sln /p:Configuration=Release /m /v:minimal
+          
+          if ($LASTEXITCODE -ne 0) { throw "Build failed" }
           
           # Package executables
           cd src\Release

@@ -16,6 +16,8 @@ jobs:
       BOOST_ROOT: C:\thirdparties\boost-1.83.0
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Prepare version
         shell: powershell
@@ -37,13 +39,13 @@ jobs:
           key: boost_1_83_0-msvc-14.3-64
 
       - name: Download and Install Boost 1.83
+        if: steps.restore-boost.outputs.cache-hit != 'true'
         run: |
-          $Url = "https://github.com/boostorg/boost/releases/download/boost-1.83.0/boost-1.83.0.zip"
-          $OutputPath = "C:\Users\runneradmin\AppData\Local\Temp\boost-1.83.0.zip"
+          $Url = "https://sourceforge.net/projects/boost/files/boost-binaries/1.83.0/boost_1_83_0-msvc-14.3-64.exe"
+          $OutputPath = "C:\Users\runneradmin\AppData\Local\Temp\boost-installer.exe"
           $ExtractPath = "C:\thirdparties\boost-1.83.0"
           curl -L $Url -o $OutputPath
-          Expand-Archive -Path $OutputPath -DestinationPath $ExtractPath -Force
-          Start-Process -Wait -FilePath $OutputPath "/SILENT","/SP-","/SUPPRESSMSGBOXES","/DIR=C:\\thirdparties\\boost-1.83.0"
+          Start-Process -Wait -FilePath $OutputPath "/SILENT","/SP-","/SUPPRESSMSGBOXES","/DIR=C:\thirdparties\boost-1.83.0"
 
       - name: Build
         shell: powershell
@@ -56,7 +58,7 @@ jobs:
           $release_name = "fuego-cli-win64-v$xfg_ver"
           mkdir "$build_folder" -Force
           cd "$build_folder"
-          cmake -G "Visual Studio 17 2022" -A x64 -DBOOST_ROOT="$env:BOOST_ROOT" -DBOOST_INCLUDE_DIRS="$env:BOOST_ROOT/include" ..
+          cmake -G "Visual Studio 17 2022" -A x64 -DBOOST_ROOT="$env:BOOST_ROOT" -DBOOST_INCLUDE_DIRS="$env:BOOST_ROOT/include" -DCMAKE_BUILD_TYPE=Release ..
           if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
           msbuild fuegoX.sln /p:Configuration=Release /m /v:minimal
           if ($LASTEXITCODE -ne 0) { throw "Build failed" }
@@ -69,7 +71,7 @@ jobs:
           echo "sha256=${sha256}" >> $env:GITHUB_OUTPUT
           echo "release_name=${release_name}.zip" >> $env:GITHUB_OUTPUT
           echo "asset_path=${asset_path}" >> $env:GITHUB_OUTPUT
-          echo "xfg_version=${xfg_version}" >> $env:GITHUB_OUTPUT
+          echo "xfg_version=${xfg_ver}" >> $env:GITHUB_OUTPUT
           echo "artifact_path=$build_folder/src/Release/$release_name" >> $env:GITHUB_OUTPUT
 
       - name: Upload To GH Artifacts
@@ -86,6 +88,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Build
         id: build
@@ -99,7 +103,7 @@ jobs:
           release_name=fuego-cli-ubuntu-2404-dev"$xfg_ver"
           mkdir -p "$build_folder"
           cd "$build_folder"
-          cmake ../.. -DCMAKE_BUILD_TYPE=Debug
+          cmake ../.. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=17
           make -j$(nproc)
           mkdir -p "$release_name"
           exeFiles=()
@@ -123,6 +127,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Build
         id: build
@@ -136,7 +142,7 @@ jobs:
           release_name=fuego-cli-ubuntu-2204-dev"$xfg_ver"
           mkdir -p "$build_folder"
           cd "$build_folder"
-          cmake ../.. -DCMAKE_BUILD_TYPE=Debug
+          cmake ../.. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_STANDARD=17
           make -j$(nproc)
           mkdir -p "$release_name"
           exeFiles=()
@@ -168,6 +174,8 @@ jobs:
             arch_flag: arm64
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Build
         id: build
@@ -180,7 +188,7 @@ jobs:
           brew install gcc boost cmake
           mkdir "$build_folder"
           cd "$build_folder"
-          cmake -DCMAKE_C_FLAGS="-mmacosx-version-min=10.12" -DCMAKE_CXX_FLAGS="-mmacosx-version-min=10.12" -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch_flag }} ..
+          cmake -DCMAKE_C_FLAGS="-mmacosx-version-min=13.0" -DCMAKE_CXX_FLAGS="-mmacosx-version-min=13.0" -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch_flag }} -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DCMAKE_BUILD_TYPE=Release ..
           make -j$(sysctl -n hw.ncpu)
           mkdir "$release_name"
           exeFiles=()

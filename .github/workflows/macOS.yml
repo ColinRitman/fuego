@@ -20,10 +20,13 @@ jobs:
             arch_flag: arm64
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Build
         id: build
         run: |
+          set -e
           build_folder="build/"
           xfg_ver=$(echo ${{ github.ref }} | sed 's|refs/tags/||')
           release_name="fuego-cli-macOS-${{ matrix.arch }}-v$xfg_ver"
@@ -46,6 +49,7 @@ jobs:
             -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch_flag }} \
             -DCMAKE_OSX_DEPLOYMENT_TARGET="13.0" \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_STANDARD=17 \
             ..
           
           # Build with proper parallelization

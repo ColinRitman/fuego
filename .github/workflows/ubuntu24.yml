@@ -11,10 +11,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Build
         id: build
         run: |
+          set -e
           # Create swap file for memory-intensive builds
           sudo fallocate -l 6G /swapfile
           sudo chmod 600 /swapfile
@@ -43,7 +46,7 @@ jobs:
           cmake \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=17 \
-            ../..
+            ..
           
           # Build with all available cores
           make -j$(nproc)
