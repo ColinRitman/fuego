@@ -3,7 +3,9 @@
 // Distributed under the MIT/X11 software license, see the accompanying
 // file COPYING or http://www.opensource.org/licenses/mit-license.php.
 
+#define _XOPEN_SOURCE 700
 #include <string.h>
+#include <ucontext.h>
 #include "Context.h"
 
 void
