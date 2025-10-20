@@ -29,13 +29,6 @@ extern "C" {
 /* Use system ucontext on all architectures for modern macOS */
 typedef ucontext_t uctx;
 typedef mcontext_t mctx;
-
-extern	int		swapcontext(uctx*, const uctx*);
-extern	void		makecontext(uctx*, void(*)(void), int, intptr_t);
-extern	int		getmcontext(mctx*);
-extern	void		setmcontext(const mctx*);
-
-/* Use system ucontext structures - no custom definitions needed */
   
 #ifdef __cplusplus
 }
