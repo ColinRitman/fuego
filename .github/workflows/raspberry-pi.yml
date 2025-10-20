@@ -11,6 +11,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Install ARM64 Cross-Compilation Tools
         run: |
@@ -36,6 +38,7 @@ jobs:
 
       - name: Download and Build Boost for ARM64
         run: |
+          set -e
           BOOST_VERSION=1.83.0
           BOOST_VERSION_UNDERSCORE=${BOOST_VERSION//./_}
           BOOST_URL="https://sourceforge.net/projects/boost/files/boost/${BOOST_VERSION}/boost_${BOOST_VERSION_UNDERSCORE}.tar.bz2/download"
@@ -63,6 +66,7 @@ jobs:
       - name: Build
         id: build
         run: |
+          set -e
           build_folder="build/"
           xfg_ver=$(echo ${{ github.ref }} | sed 's|refs/tags/||')
           release_name="fuego-cli-raspberry-pi-arm64-v$xfg_ver"
@@ -70,7 +74,8 @@ jobs:
           cd "$build_folder"
           cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/arm64-toolchain.cmake \
                 -DBOOST_ROOT=/tmp/boost-arm64 \
-                -DCMAKE_BUILD_TYPE=Release ..
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CXX_STANDARD=17 ..
           make -j$(nproc)
           mkdir "$release_name"
           exeFiles=()

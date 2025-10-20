@@ -18,6 +18,8 @@ jobs:
             api: 16
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
@@ -31,6 +33,7 @@ jobs:
 
       - name: Download and Build Boost for Android
         run: |
+          set -e
           wget -O boost_1_83_0.tar.gz https://sourceforge.net/projects/boost/files/boost/1.83.0/boost_1_83_0.tar.gz
           echo "c2fe8e80e82d8c90ddf016edd51f0579b0ccfee7b6e28b4b4a6ca0d8ce744dc2  boost_1_83_0.tar.gz" | sha256sum -c -
           tar -xjf boost_1_83_0.tar.gz
@@ -69,6 +72,7 @@ jobs:
       - name: Build
         id: build
         run: |
+          set -e
           build_folder="build-android-${{ matrix.arch }}/"
           xfg_ver=$(echo ${{ github.ref }} | sed 's|refs/tags/||')
           release_name="fuego-cli-android-${{ matrix.arch }}-v$xfg_ver"
@@ -78,6 +82,7 @@ jobs:
           cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/android-${{ matrix.arch }}-toolchain.cmake \
                 -DBOOST_ROOT=/tmp/boost-android-${{ matrix.arch }} \
                 -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_CXX_STANDARD=17 \
                 -DANDROID_ABI=${{ matrix.arch == 'aarch64' && 'arm64-v8a' || 'armeabi-v7a' }} \
                 -DANDROID_PLATFORM=android-${{ matrix.api }} ..
           make -j$(nproc)
