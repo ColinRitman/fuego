@@ -29,6 +29,10 @@ extern "C" {
 /* Use system ucontext on all architectures for modern macOS */
 typedef ucontext_t uctx;
 typedef mcontext_t mctx;
+
+/* Compatibility function declarations */
+int getmcontext(mctx *mcp);
+int setmcontext(const mctx *mcp);
   
 #ifdef __cplusplus
 }
