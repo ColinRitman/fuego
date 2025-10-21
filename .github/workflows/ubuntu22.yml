@@ -10,7 +10,7 @@ jobs:
     name: Ubuntu 22.04
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@master
+      - uses: actions/checkout@v4
 
       - name: Build
         id: build
@@ -23,7 +23,7 @@ jobs:
           
           # Update package lists and install dependencies
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake libstdc++-11-dev
+          sudo apt-get install -y build-essential cmake libstdc++-11-dev libssl-dev libgtest-dev
           
           # Install Boost 1.83.0 from PPA for consistency with Windows builds
           sudo apt-get install -y software-properties-common
@@ -43,6 +43,7 @@ jobs:
           cmake \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_CXX_STANDARD=17 \
+            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
             ..
           
           # Build with all available cores

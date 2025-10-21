@@ -27,7 +27,7 @@ jobs:
       - name: Install Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential wget
+          sudo apt-get install -y cmake build-essential wget libssl-dev
 
       - name: Download and Build Boost for Android
         run: |
@@ -78,6 +78,7 @@ jobs:
           cmake -DCMAKE_TOOLCHAIN_FILE=../cmake/android-${{ matrix.arch }}-toolchain.cmake \
                 -DBOOST_ROOT=/tmp/boost-android-${{ matrix.arch }} \
                 -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
                 -DANDROID_ABI=${{ matrix.arch == 'aarch64' && 'arm64-v8a' || 'armeabi-v7a' }} \
                 -DANDROID_PLATFORM=android-${{ matrix.api }} ..
           make -j$(nproc)

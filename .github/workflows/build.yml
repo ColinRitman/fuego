@@ -15,18 +15,18 @@ jobs:
     - name: Install dependencies
       run: |
         # Install Boost and other dependencies
-        # Handle CMake conflict by uninstalling existing version first
-        brew uninstall cmake || true
         brew install boost cmake
         
     - name: Configure CMake
       run: |
-        mkdir build
+        set -e
+        mkdir -p build
         cd build
         cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DCMAKE_POLICY_DEFAULT_CMP0167=OLD ..
         
     - name: Build
       run: |
+        set -e
         cd build
         make -j$(sysctl -n hw.ncpu)
         
@@ -38,17 +38,20 @@ jobs:
     
     - name: Install dependencies
       run: |
+        set -e
         sudo apt-get update
         sudo apt-get install -y build-essential cmake libboost-all-dev libssl-dev libgtest-dev
         
     - name: Configure CMake
       run: |
-        mkdir build
+        set -e
+        mkdir -p build
         cd build
         cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DCMAKE_POLICY_DEFAULT_CMP0167=OLD ..
         
     - name: Build
       run: |
+        set -e
         cd build
         make -j$(nproc)
         
@@ -60,43 +63,54 @@ jobs:
     
     - name: Install dependencies
       run: |
+        set -e
         sudo apt-get update
         sudo apt-get install -y build-essential cmake libboost-all-dev libssl-dev libgtest-dev
         
     - name: Configure CMake
       run: |
-        mkdir build
+        set -e
+        mkdir -p build
         cd build
         cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DCMAKE_POLICY_DEFAULT_CMP0167=OLD ..
         
     - name: Build
       run: |
+        set -e
         cd build
         make -j$(nproc)
 
   build-windows:
-    runs-on: windows-latest
+    runs-on: windows-2022
+    env:
+      BOOST_ROOT: C:\thirdparties\boost-1.83.0
     steps:
     - uses: actions/checkout@v4
     
-    - name: Install dependencies
+    - name: Add msbuild to PATH
+      uses: microsoft/setup-msbuild@v1.3
+        
+    - name: Download and Install Boost 1.83
       run: |
-        # Install Visual Studio Build Tools
-        choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Workload.VCTools" -y
-        choco install cmake -y
-        # Install boost via Chocolatey (try different package name)
-        choco install boost-msvc-14.3 -y || choco install boost -y
-        # Refresh environment variables using PowerShell
-        Import-Module "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
+        $ErrorActionPreference = "Stop"
+        $Url = "https://github.com/boostorg/boost/releases/download/boost-1.83.0/boost-1.83.0.zip"
+        $OutputPath = "C:\Users\runneradmin\AppData\Local\Temp\boost-1.83.0.zip"
+        $ExtractPath = "C:\thirdparties\boost-1.83.0"
+        curl -L $Url -o $OutputPath
+        Expand-Archive -Path $OutputPath -DestinationPath $ExtractPath -Force
         
     - name: Configure CMake
       run: |
+        $ErrorActionPreference = "Stop"
         mkdir build
         cd build
-        cmake -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DCMAKE_POLICY_DEFAULT_CMP0167=OLD ..
+        cmake -G "Visual Studio 17 2022" -A x64 -DBOOST_ROOT="$env:BOOST_ROOT" -DBOOST_INCLUDE_DIRS="$env:BOOST_ROOT/include" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF -DCMAKE_POLICY_DEFAULT_CMP0167=OLD ..
+        if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
         
     - name: Build
       run: |
+        $ErrorActionPreference = "Stop"
         cd build
         cmake --build . --config Release --parallel
+        if ($LASTEXITCODE -ne 0) { throw "Build failed" }
         
