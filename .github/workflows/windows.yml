@@ -9,8 +9,6 @@ jobs:
   build-windows:
     name: Windows
     runs-on: windows-2022
-    env:
-      BOOST_ROOT: C:\thirdparties\boost-1.83.0
     steps:
       - uses: actions/checkout@v4
         with:
@@ -19,15 +17,56 @@ jobs:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v1.1
         
-      - name: Download and Install Boost 1.83
+      - name: Download and Install Boost
         run: |
           $ErrorActionPreference = "Stop"
-          # Download pre-compiled Boost binaries for Windows
+          
+          # Create directory
+          $BoostDir = "C:\thirdparties\boost-1.83.0"
+          New-Item -ItemType Directory -Force -Path $BoostDir
+          
+          # Download pre-compiled Boost binaries
           $Url = "https://sourceforge.net/projects/boost/files/boost-binaries/1.83.0/boost_1_83_0-msvc-14.3-64.exe"
-          $OutputPath = "C:\Users\runneradmin\AppData\Local\Temp\boost-installer.exe"
-          curl -L $Url -o $OutputPath
+          $InstallerPath = "C:\Users\runneradmin\AppData\Local\Temp\boost-installer.exe"
+          Write-Host "Downloading Boost installer from $Url"
+          curl -L $Url -o $InstallerPath
+          
           # Install Boost silently
-          Start-Process -Wait -FilePath $OutputPath -ArgumentList "/SILENT", "/SP-", "/SUPPRESSMSGBOXES", "/DIR=C:\thirdparties\boost-1.83.0"
+          Write-Host "Installing Boost to $BoostDir"
+          Start-Process -Wait -FilePath $InstallerPath -ArgumentList "/SILENT", "/SP-", "/SUPPRESSMSGBOXES", "/DIR=$BoostDir"
+          
+          # Set environment variables
+          $env:BOOST_ROOT = $BoostDir
+          $env:BOOST_INCLUDE_DIR = "$BoostDir\include"
+          
+          # Find the correct library directory
+          if (Test-Path "$BoostDir\lib64-msvc-14.3") {
+            $env:BOOST_LIBRARY_DIR = "$BoostDir\lib64-msvc-14.3"
+          } elseif (Test-Path "$BoostDir\lib") {
+            $env:BOOST_LIBRARY_DIR = "$BoostDir\lib"
+          } else {
+            $env:BOOST_LIBRARY_DIR = "$BoostDir\stage\lib"
+          }
+          
+          # Verify installation
+          Write-Host "Checking Boost installation..."
+          Write-Host "BOOST_ROOT: $env:BOOST_ROOT"
+          Write-Host "BOOST_INCLUDE_DIR: $env:BOOST_INCLUDE_DIR"
+          Write-Host "BOOST_LIBRARY_DIR: $env:BOOST_LIBRARY_DIR"
+          
+          if (Test-Path "$env:BOOST_ROOT\include") {
+            Write-Host "Boost include directory found"
+            Get-ChildItem "$env:BOOST_ROOT\include" | Select-Object -First 3
+          } else {
+            Write-Host "Boost include directory NOT found"
+          }
+          
+          if (Test-Path "$env:BOOST_LIBRARY_DIR") {
+            Write-Host "Boost library directory found"
+            Get-ChildItem "$env:BOOST_LIBRARY_DIR" | Select-Object -First 3
+          } else {
+            Write-Host "Boost library directory NOT found"
+          }
 
       - name: Build
         shell: powershell
@@ -41,11 +80,16 @@ jobs:
           mkdir "$build_folder"
           cd "$build_folder"
           
-          # Configure with proper Windows settings
+          # Configure with Boost paths
+          Write-Host "Configuring CMake with Boost paths:"
+          Write-Host "BOOST_ROOT: $env:BOOST_ROOT"
+          Write-Host "BOOST_INCLUDE_DIR: $env:BOOST_INCLUDE_DIR"
+          Write-Host "BOOST_LIBRARY_DIR: $env:BOOST_LIBRARY_DIR"
+          
           cmake -G "Visual Studio 17 2022" -A x64 `
             -DBOOST_ROOT="$env:BOOST_ROOT" `
-            -DBOOST_INCLUDE_DIR="$env:BOOST_ROOT/include" `
-            -DBOOST_LIBRARY_DIR="$env:BOOST_ROOT/lib64-msvc-14.3" `
+            -DBOOST_INCLUDE_DIR="$env:BOOST_INCLUDE_DIR" `
+            -DBOOST_LIBRARY_DIR="$env:BOOST_LIBRARY_DIR" `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_POLICY_DEFAULT_CMP0167=OLD `
             ..
