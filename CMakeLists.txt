@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.10)
 
 include(CheckCXXCompilerFlag)
 set(VERSION "0.2")
@@ -194,8 +194,15 @@ if(WIN32)
     # Fallback to common Boost installation paths
     set(BOOST_ROOT "C:/thirdparties/boost-1.83.0")
     set(Boost_ROOT "C:/thirdparties/boost-1.83.0")
-    set(Boost_INCLUDE_DIR "C:/thirdparties/boost-1.83.0/boost")
-    set(Boost_LIBRARY_DIR "C:/thirdparties/boost-1.83.0/stage/lib")
+    set(Boost_INCLUDE_DIR "C:/thirdparties/boost-1.83.0/include")
+    # Try multiple possible library directories
+    if(EXISTS "C:/thirdparties/boost-1.83.0/lib64-msvc-14.3")
+      set(Boost_LIBRARY_DIR "C:/thirdparties/boost-1.83.0/lib64-msvc-14.3")
+    elseif(EXISTS "C:/thirdparties/boost-1.83.0/stage/lib")
+      set(Boost_LIBRARY_DIR "C:/thirdparties/boost-1.83.0/stage/lib")
+    else()
+      set(Boost_LIBRARY_DIR "C:/thirdparties/boost-1.83.0/lib")
+    endif()
   endif()
 
   # Additional Windows-specific Boost configuration
