@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <ucontext.h>
 #include <atomic>
 #include <cstddef>
 #include <functional>
@@ -28,7 +29,7 @@ namespace System {
 struct NativeContextGroup;
 
 struct NativeContext {
-  void* uctx;
+  ucontext_t* uctx;
   void* stackPtr;
   bool interrupted;
   bool inExecutionQueue;

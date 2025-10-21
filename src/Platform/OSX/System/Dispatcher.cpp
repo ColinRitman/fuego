@@ -26,6 +26,7 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <ucontext.h>
 #include "Context.h"
 #include "ErrorMessage.h"
 
@@ -34,7 +35,7 @@ namespace System {
 namespace{
 
 struct ContextMakingData {
-  void* uctx;
+  ucontext_t* uctx;
   Dispatcher* dispatcher;
 };
 
@@ -67,15 +68,10 @@ Dispatcher::Dispatcher() : lastCreatedTimer(0) {
   if (kqueue == -1) {
     message = "kqueue failed, " + lastErrorMessage();
   } else {
-    mainContext.uctx = new uctx;
-    memset(mainContext.uctx, 0, sizeof(uctx));
-#if defined(__aarch64__) || defined(__arm64__)
-    if (getcontext(static_cast<uctx*>(mainContext.uctx)) == -1) {
+    mainContext.uctx = new ucontext_t;
+    memset(mainContext.uctx, 0, sizeof(ucontext_t));
+    if (getcontext(mainContext.uctx) == -1) {
       message = "getcontext failed, " + lastErrorMessage();
-#else
-    if (getcontext(static_cast<uctx*>(mainContext.uctx)) == -1) {
-      message = "getcontext failed, " + lastErrorMessage();
-#endif
     } else {
       struct kevent event;
       EV_SET(&event, 0, EVFILT_USER, EV_ADD, NOTE_FFNOP, 0, NULL);
@@ -123,7 +119,7 @@ Dispatcher::~Dispatcher() {
   assert(firstResumingContext == nullptr);
   assert(runningContextCount == 0);
   while (firstReusableContext != nullptr) {
-    auto ucontext = static_cast<uctx*>(firstReusableContext->uctx);
+    auto ucontext = firstReusableContext->uctx;
     auto stackPtr = static_cast<uint8_t *>(firstReusableContext->stackPtr);
     firstReusableContext = firstReusableContext->next;
     delete[] stackPtr;
@@ -138,7 +134,7 @@ Dispatcher::~Dispatcher() {
 
 void Dispatcher::clear() {
   while (firstReusableContext != nullptr) {
-    auto ucontext = static_cast<uctx*>(firstReusableContext->uctx);
+    auto ucontext = firstReusableContext->uctx;
     auto stackPtr = static_cast<uint8_t *>(firstReusableContext->stackPtr);
     firstReusableContext = firstReusableContext->next;
     delete[] stackPtr;
@@ -206,9 +202,9 @@ void Dispatcher::dispatch() {
   }
 
   if (context != currentContext) {
-    uctx* oldContext = static_cast<uctx*>(currentContext->uctx);
+    ucontext_t* oldContext = currentContext->uctx;
     currentContext = context;
-    if (swapcontext(oldContext,static_cast<uctx*>(currentContext->uctx)) == -1) {
+    if (swapcontext(oldContext, static_cast<ucontext_t*>(currentContext->uctx)) == -1) {
       throw std::runtime_error("Dispatcher::dispatch, swapcontext failed, " + lastErrorMessage());
     }
   }
@@ -348,37 +344,26 @@ int Dispatcher::getKqueue() const {
 
 NativeContext& Dispatcher::getReusableContext() {
   if(firstReusableContext == nullptr) {
-  uctx* newlyCreatedContext = new uctx;
+  ucontext_t* newlyCreatedContext = new ucontext_t;
   uint8_t* stackPointer = new uint8_t[STACK_SIZE];
   
   // Initialize the context structure
-  memset(newlyCreatedContext, 0, sizeof(uctx));
-  static_cast<uctx*>(newlyCreatedContext)->uc_stack.ss_sp = stackPointer;
-  static_cast<uctx*>(newlyCreatedContext)->uc_stack.ss_size = STACK_SIZE;
-  static_cast<uctx*>(newlyCreatedContext)->uc_link = nullptr;
+  memset(newlyCreatedContext, 0, sizeof(ucontext_t));
+  newlyCreatedContext->uc_stack.ss_sp = stackPointer;
+  newlyCreatedContext->uc_stack.ss_size = STACK_SIZE;
+  newlyCreatedContext->uc_link = nullptr;
 
   ContextMakingData makingData{ newlyCreatedContext, this};
   
-#if defined(__aarch64__) || defined(__arm64__)
-  // Use system makecontext on ARM64
+  // Use system makecontext on all platforms
   if (getcontext(newlyCreatedContext) == -1) {
     delete[] stackPointer;
     delete newlyCreatedContext;
     throw std::runtime_error("Dispatcher::getReusableContext, getcontext failed, " + lastErrorMessage());
   }
   makecontext(newlyCreatedContext, reinterpret_cast<void(*)()>(contextProcedureStatic), 1, reinterpret_cast<int*>(&makingData));
-#else
-  // Use custom makecontext on x86_64
-  try {
-    makecontext(static_cast<uctx*>(newlyCreatedContext), reinterpret_cast<void(*)()>(contextProcedureStatic), 1, reinterpret_cast<intptr_t>(&makingData));
-  } catch (...) {
-    delete[] stackPointer;
-    delete newlyCreatedContext;
-    throw std::runtime_error("Dispatcher::getReusableContext, makecontext failed");
-  }
-#endif
 
-  uctx* oldContext = static_cast<uctx*>(currentContext->uctx);
+  ucontext_t* oldContext = currentContext->uctx;
   if (swapcontext(oldContext, newlyCreatedContext) == -1) {
     delete[] stackPointer;
     delete newlyCreatedContext;
@@ -425,8 +410,8 @@ void Dispatcher::contextProcedure(void* ucontext) {
   context.next = nullptr;
   context.inExecutionQueue = false;
   firstReusableContext = &context;
-  uctx* oldContext = static_cast<uctx*>(context.uctx);
-  if (swapcontext(oldContext, static_cast<uctx*>(currentContext->uctx)) == -1) {
+  ucontext_t* oldContext = context.uctx;
+  if (swapcontext(oldContext, static_cast<ucontext_t*>(currentContext->uctx)) == -1) {
     throw std::runtime_error("Dispatcher::contextProcedure, swapcontext failed, " + lastErrorMessage());
   }
 
