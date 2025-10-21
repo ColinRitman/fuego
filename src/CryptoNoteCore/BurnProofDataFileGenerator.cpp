@@ -19,9 +19,13 @@
 #include "crypto/keccak.h"
 #include "Common/StringTools.h"
 #include "Common/JsonValue.h"
+#include "TransactionExtra.h"
+#include "CryptoNoteSerialization.h"
+#include "CryptoNoteTools.h"
 #include <fstream>
 #include <sstream>
 #include <chrono>
+#include <cstring>
 
 namespace CryptoNote {
 
@@ -108,10 +112,81 @@ std::error_code BurnProofDataFileGenerator::extractSecretFromTransaction(
     Crypto::SecretKey& secret,
     uint64_t& amount) {
     
-    // TODO: Implement transaction parsing to extract secret and amount
-    // This would parse the transaction extra field to get the secret
-    // For now, return error (placeholder implementation)
-    return std::make_error_code(std::errc::not_supported);
+    try {
+        // Convert hex string to binary array
+        BinaryArray txBlob;
+        if (!Common::fromHex(txHash, txBlob)) {
+            return std::make_error_code(std::errc::invalid_argument);
+        }
+        
+        // Parse transaction from binary data
+        Transaction tx;
+        if (!fromBinaryArray(tx, txBlob)) {
+            return std::make_error_code(std::errc::invalid_argument);
+        }
+        
+        // Parse transaction extra field
+        std::vector<TransactionExtraField> extraFields;
+        if (!parseTransactionExtra(tx.extra, extraFields)) {
+            return std::make_error_code(std::errc::invalid_argument);
+        }
+        
+        // Look for HEAT commitment in extra fields (contains secret and amount)
+        TransactionExtraHeatCommitment heatCommitment;
+        if (findTransactionExtraFieldByType(extraFields, heatCommitment)) {
+            // Extract secret from commitment metadata
+            if (heatCommitment.metadata.size() >= sizeof(Crypto::SecretKey)) {
+                std::memcpy(secret.data, heatCommitment.metadata.data(), sizeof(Crypto::SecretKey));
+                amount = heatCommitment.amount;
+                return std::error_code();
+            }
+        }
+        
+        // Look for YIELD commitment in extra fields
+        TransactionExtraYieldCommitment yieldCommitment;
+        if (findTransactionExtraFieldByType(extraFields, yieldCommitment)) {
+            // Extract secret from commitment metadata
+            if (yieldCommitment.metadata.size() >= sizeof(Crypto::SecretKey)) {
+                std::memcpy(secret.data, yieldCommitment.metadata.data(), sizeof(Crypto::SecretKey));
+                amount = yieldCommitment.amount;
+                return std::error_code();
+            }
+        }
+        
+        // Look for secret in message extra field
+        tx_extra_message message;
+        if (findTransactionExtraFieldByType(extraFields, message)) {
+            // Try to extract secret from message data
+            if (message.data.size() >= sizeof(Crypto::SecretKey)) {
+                std::memcpy(secret.data, message.data.data(), sizeof(Crypto::SecretKey));
+                // Calculate amount from transaction outputs
+                amount = 0;
+                for (const auto& output : tx.outputs) {
+                    amount += output.amount;
+                }
+                return std::error_code();
+            }
+        }
+        
+        // Look for secret in nonce extra field
+        TransactionExtraNonce nonce;
+        if (findTransactionExtraFieldByType(extraFields, nonce)) {
+            if (nonce.nonce.size() >= sizeof(Crypto::SecretKey)) {
+                std::memcpy(secret.data, nonce.nonce.data(), sizeof(Crypto::SecretKey));
+                // Calculate amount from transaction outputs
+                amount = 0;
+                for (const auto& output : tx.outputs) {
+                    amount += output.amount;
+                }
+                return std::error_code();
+            }
+        }
+        
+        return std::make_error_code(std::errc::no_such_file_or_directory);
+        
+    } catch (const std::exception& e) {
+        return std::make_error_code(std::errc::invalid_argument);
+    }
 }
 
 bool BurnProofDataFileGenerator::validateBPDF(const std::string& filePath) {
