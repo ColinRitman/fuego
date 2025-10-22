@@ -951,4 +951,129 @@ namespace CryptoNote
     return false;
   }
 
+  // Fable/Able Deposit helper functions
+  bool createTxExtraWithFableAbleDeposit(const Crypto::Hash& depositId, uint8_t depositType, uint8_t stabilityMechanism, uint64_t depositAmount, uint64_t collateralAmount, uint64_t stabilityTarget, uint64_t minCollateralRatio, uint64_t maxCollateralRatio, uint64_t liquidationThreshold, uint64_t maturityTimestamp, const std::string& depositorAddress, const std::string& collateralAsset, const std::string& stabilityTargetAsset, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra) {
+    TransactionExtraFableAbleDeposit deposit;
+    deposit.depositId = depositId;
+    deposit.depositType = depositType;
+    deposit.stabilityMechanism = stabilityMechanism;
+    deposit.depositAmount = depositAmount;
+    deposit.collateralAmount = collateralAmount;
+    deposit.stabilityTarget = stabilityTarget;
+    deposit.minCollateralRatio = minCollateralRatio;
+    deposit.maxCollateralRatio = maxCollateralRatio;
+    deposit.liquidationThreshold = liquidationThreshold;
+    deposit.maturityTimestamp = maturityTimestamp;
+    deposit.depositorAddress = depositorAddress;
+    deposit.collateralAsset = collateralAsset;
+    deposit.stabilityTargetAsset = stabilityTargetAsset;
+    deposit.metadata = metadata;
+    
+    return addFableAbleDepositToExtra(extra, deposit);
+  }
+
+  bool addFableAbleDepositToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraFableAbleDeposit& deposit) {
+    try {
+      BinaryArray ba;
+      BinaryOutputStreamSerializer serializer(ba);
+      serializer(deposit, "fable_able_deposit");
+      
+      tx_extra.push_back(TX_EXTRA_FABLE_ABLE_DEPOSIT);
+      tx_extra.push_back(static_cast<uint8_t>(ba.size()));
+      tx_extra.insert(tx_extra.end(), ba.begin(), ba.end());
+      
+      return true;
+    } catch (const std::exception& e) {
+      return false;
+    }
+  }
+
+  bool getFableAbleDepositFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraFableAbleDeposit& deposit) {
+    std::vector<TransactionExtraField> tx_extra_fields;
+    if (!parseTransactionExtra(tx_extra, tx_extra_fields)) {
+      return false;
+    }
+    
+    return findTransactionExtraFieldByType(tx_extra_fields, deposit);
+  }
+
+  // Stability Pool Deposit helper functions
+  bool createTxExtraWithStabilityPoolDeposit(const Crypto::Hash& poolId, const std::string& poolName, uint8_t poolType, uint64_t depositAmount, uint64_t collateralAmount, const std::string& depositorAddress, uint64_t depositTimestamp, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra) {
+    TransactionExtraStabilityPoolDeposit deposit;
+    deposit.poolId = poolId;
+    deposit.poolName = poolName;
+    deposit.poolType = poolType;
+    deposit.depositAmount = depositAmount;
+    deposit.collateralAmount = collateralAmount;
+    deposit.depositorAddress = depositorAddress;
+    deposit.depositTimestamp = depositTimestamp;
+    deposit.metadata = metadata;
+    
+    return addStabilityPoolDepositToExtra(extra, deposit);
+  }
+
+  bool addStabilityPoolDepositToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraStabilityPoolDeposit& deposit) {
+    try {
+      BinaryArray ba;
+      BinaryOutputStreamSerializer serializer(ba);
+      serializer(deposit, "stability_pool_deposit");
+      
+      tx_extra.push_back(TX_EXTRA_STABILITY_POOL_DEPOSIT);
+      tx_extra.push_back(static_cast<uint8_t>(ba.size()));
+      tx_extra.insert(tx_extra.end(), ba.begin(), ba.end());
+      
+      return true;
+    } catch (const std::exception& e) {
+      return false;
+    }
+  }
+
+  bool getStabilityPoolDepositFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraStabilityPoolDeposit& deposit) {
+    std::vector<TransactionExtraField> tx_extra_fields;
+    if (!parseTransactionExtra(tx_extra, tx_extra_fields)) {
+      return false;
+    }
+    
+    return findTransactionExtraFieldByType(tx_extra_fields, deposit);
+  }
+
+  // Liquidation Event helper functions
+  bool createTxExtraWithLiquidationEvent(const Crypto::Hash& eventId, const Crypto::Hash& depositId, uint64_t liquidatedAmount, uint64_t collateralRecovered, const std::string& liquidatorAddress, const std::string& reason, const std::vector<uint8_t>& evidence, std::vector<uint8_t>& extra) {
+    TransactionExtraLiquidationEvent event;
+    event.eventId = eventId;
+    event.depositId = depositId;
+    event.liquidatedAmount = liquidatedAmount;
+    event.collateralRecovered = collateralRecovered;
+    event.liquidatorAddress = liquidatorAddress;
+    event.reason = reason;
+    event.evidence = evidence;
+    
+    return addLiquidationEventToExtra(extra, event);
+  }
+
+  bool addLiquidationEventToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraLiquidationEvent& event) {
+    try {
+      BinaryArray ba;
+      BinaryOutputStreamSerializer serializer(ba);
+      serializer(event, "liquidation_event");
+      
+      tx_extra.push_back(TX_EXTRA_LIQUIDATION_EVENT);
+      tx_extra.push_back(static_cast<uint8_t>(ba.size()));
+      tx_extra.insert(tx_extra.end(), ba.begin(), ba.end());
+      
+      return true;
+    } catch (const std::exception& e) {
+      return false;
+    }
+  }
+
+  bool getLiquidationEventFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraLiquidationEvent& event) {
+    std::vector<TransactionExtraField> tx_extra_fields;
+    if (!parseTransactionExtra(tx_extra, tx_extra_fields)) {
+      return false;
+    }
+    
+    return findTransactionExtraFieldByType(tx_extra_fields, event);
+  }
+
 } // namespace CryptoNote
