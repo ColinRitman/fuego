@@ -12,23 +12,23 @@
 # You should have received a copy of the GNU General Public License
 # along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
-set(FABLE_ABLE_DEPOSIT_SYSTEM_SOURCES
-  FableAbleDepositManager.cpp
-  FableAbleStabilityValidator.cpp
+set(FABLE_DEPOSIT_SYSTEM_SOURCES
+  FableDepositManager.cpp
+  FableDepositValidator.cpp
 )
 
-set(FABLE_ABLE_DEPOSIT_SYSTEM_HEADERS
-  ../include/FableAbleDepositSystem.h
+set(FABLE_DEPOSIT_SYSTEM_HEADERS
+  ../include/FableDepositSystem.h
 )
 
-# Create the FableAbleDepositSystem library
-add_library(FableAbleDepositSystem STATIC
-  ${FABLE_ABLE_DEPOSIT_SYSTEM_SOURCES}
-  ${FABLE_ABLE_DEPOSIT_SYSTEM_HEADERS}
+# Create the FableDepositSystem library
+add_library(FableDepositSystem STATIC
+  ${FABLE_DEPOSIT_SYSTEM_SOURCES}
+  ${FABLE_DEPOSIT_SYSTEM_HEADERS}
 )
 
 # Link with required libraries
-target_link_libraries(FableAbleDepositSystem
+target_link_libraries(FableDepositSystem
   PRIVATE
     Common
     Crypto
@@ -37,39 +37,39 @@ target_link_libraries(FableAbleDepositSystem
 )
 
 # Include directories
-target_include_directories(FableAbleDepositSystem
+target_include_directories(FableDepositSystem
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../include
     ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 # Compiler definitions
-target_compile_definitions(FableAbleDepositSystem
+target_compile_definitions(FableDepositSystem
   PRIVATE
-    FABLE_ABLE_DEPOSIT_SYSTEM_VERSION="1.0.0"
+    FABLE_DEPOSIT_SYSTEM_VERSION="1.0.0"
 )
 
 # Compiler flags
 if(MSVC)
-  target_compile_options(FableAbleDepositSystem PRIVATE /W4)
+  target_compile_options(FableDepositSystem PRIVATE /W4)
 else()
-  target_compile_options(FableAbleDepositSystem PRIVATE -Wall -Wextra -Wpedantic)
+  target_compile_options(FableDepositSystem PRIVATE -Wall -Wextra -Wpedantic)
 endif()
 
 # Set C++ standard
-set_target_properties(FableAbleDepositSystem PROPERTIES
+set_target_properties(FableDepositSystem PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED ON
 )
 
 # Install the library
-install(TARGETS FableAbleDepositSystem
+install(TARGETS FableDepositSystem
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin
 )
 
 # Install headers
-install(FILES ${FABLE_ABLE_DEPOSIT_SYSTEM_HEADERS}
+install(FILES ${FABLE_DEPOSIT_SYSTEM_HEADERS}
   DESTINATION include
 )

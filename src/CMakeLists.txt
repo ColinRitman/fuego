@@ -26,7 +26,7 @@ file(GLOB_RECURSE PaymentGateService PaymentGateService/*)
 # Add Eldernode services
 add_subdirectory(EldernodeIndexManager)
 add_subdirectory(BurnDepositValidationService)
-add_subdirectory(FableAbleDepositSystem)
+add_subdirectory(FableDepositSystem)
 
 if(WIN32)
   file(GLOB_RECURSE System System/* Platform/Windows/System/*)
