@@ -37,6 +37,9 @@
 #define TX_EXTRA_YIELD_COMMITMENT           0x07
 #define TX_EXTRA_HEAT_COMMITMENT            0x08
 #define TX_EXTRA_CD_DEPOSIT_SECRET          0x09
+#define TX_EXTRA_FABLE_ABLE_DEPOSIT         0x0A
+#define TX_EXTRA_STABILITY_POOL_DEPOSIT     0x0B
+#define TX_EXTRA_LIQUIDATION_EVENT          0x0C
 
 #define TX_EXTRA_NONCE_PAYMENT_ID           0x00
 
@@ -115,6 +118,58 @@ struct TransactionExtraCDDepositSecret {
   std::vector<uint8_t> metadata;    // Additional metadata
   
   bool serialize(ISerializer& serializer);
+};
+
+struct TransactionExtraFableAbleDeposit {
+  Crypto::Hash depositId;           // Unique deposit identifier
+  uint8_t depositType;              // FableAbleDepositType
+  uint8_t stabilityMechanism;       // StabilityMechanism
+  uint64_t depositAmount;           // XFG deposit amount
+  uint64_t collateralAmount;        // Collateral amount
+  uint64_t stabilityTarget;         // Target stability value
+  uint64_t minCollateralRatio;      // Minimum collateral ratio (basis points)
+  uint64_t maxCollateralRatio;      // Maximum collateral ratio (basis points)
+  uint64_t liquidationThreshold;    // Liquidation threshold (basis points)
+  uint64_t maturityTimestamp;       // Deposit maturity timestamp
+  std::string depositorAddress;     // Depositor address
+  std::string collateralAsset;      // Collateral asset identifier
+  std::string stabilityTargetAsset; // Asset to stabilize
+  std::vector<uint8_t> metadata;    // Additional metadata
+  std::vector<uint8_t> signature;   // Deposit signature
+  
+  bool serialize(ISerializer& serializer);
+  bool isValid() const;
+  std::string toString() const;
+};
+
+struct TransactionExtraStabilityPoolDeposit {
+  Crypto::Hash poolId;              // Stability pool identifier
+  std::string poolName;             // Pool name
+  uint8_t poolType;                 // FableAbleDepositType
+  uint64_t depositAmount;           // Deposit amount
+  uint64_t collateralAmount;        // Collateral amount
+  std::string depositorAddress;     // Depositor address
+  std::vector<uint8_t> metadata;    // Additional metadata
+  std::vector<uint8_t> signature;   // Deposit signature
+  
+  bool serialize(ISerializer& serializer);
+  bool isValid() const;
+  std::string toString() const;
+};
+
+struct TransactionExtraLiquidationEvent {
+  Crypto::Hash eventId;             // Liquidation event identifier
+  Crypto::Hash depositId;           // Liquidated deposit identifier
+  uint64_t liquidatedAmount;        // Liquidated amount
+  uint64_t collateralRecovered;     // Collateral recovered
+  std::string liquidatorAddress;    // Liquidator address
+  std::string reason;               // Liquidation reason
+  std::vector<uint8_t> evidence;    // Liquidation evidence
+  std::vector<uint8_t> signature;   // Event signature
+  
+  bool serialize(ISerializer& serializer);
+  bool isValid() const;
+  std::string toString() const;
 };
 
 // Removed duplicate TransactionExtraElderfierDeposit struct
