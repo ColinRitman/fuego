@@ -207,6 +207,11 @@ namespace CryptoNote
       return addCDDepositSecretToExtra(extra, t);
     }
 
+    bool operator()(const TransactionExtraFableCommitment &t)
+    {
+      return addFableCommitmentToExtra(extra, t);
+    }
+
   };
 
   bool writeTransactionExtra(std::vector<uint8_t> &tx_extra, const std::vector<TransactionExtraField> &tx_extra_fields)
@@ -534,6 +539,24 @@ namespace CryptoNote
         << ", address=" << elderfierAddress
         << ", securityWindow=" << securityWindow
         << ", slashable=" << (isSlashable ? "true" : "false") << "}";
+    return oss.str();
+  }
+
+  bool TransactionExtraFableCommitment::serialize(ISerializer& serializer) {
+    serializer(commitment, "commitment");
+    serializer(amount, "amount");
+    serializer(metadata, "metadata");
+    return true;
+  }
+
+  bool TransactionExtraFableCommitment::isValid() const {
+    return commitment != NULL_HASH && amount > 0;
+  }
+
+  std::string TransactionExtraFableCommitment::toString() const {
+    std::ostringstream oss;
+    oss << "FableCommitment{hash=" << Common::podToHex(commitment)
+        << ", amount=" << amount << "}";
     return oss.str();
   }
 
@@ -947,6 +970,46 @@ namespace CryptoNote
   bool getCDDepositSecretFromExtra(const std::vector<uint8_t> &tx_extra, TransactionExtraCDDepositSecret &deposit_secret)
   {
     // Implementation would parse the extra field to extract CD deposit secret
+    // This is a placeholder - full implementation would need proper parsing logic
+    return false;
+  }
+
+  // Fable commitment helper functions
+  bool createTxExtraWithFableCommitment(const Crypto::Hash& commitment, uint64_t amount, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra) {
+    TransactionExtraFableCommitment fableCommitment;
+    fableCommitment.commitment = commitment;
+    fableCommitment.amount = amount;
+    fableCommitment.metadata = metadata;
+    
+    return addFableCommitmentToExtra(extra, fableCommitment);
+  }
+
+  bool addFableCommitmentToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraFableCommitment& commitment) {
+    tx_extra.push_back(TX_EXTRA_FABLE_COMMITMENT);
+    
+    // Serialize commitment hash (32 bytes)
+    tx_extra.insert(tx_extra.end(), commitment.commitment.data, commitment.commitment.data + sizeof(commitment.commitment.data));
+    
+    // Serialize amount (8 bytes, little-endian)
+    uint64_t amount = commitment.amount;
+    for (int i = 0; i < 8; ++i) {
+      tx_extra.push_back(static_cast<uint8_t>(amount & 0xFF));
+      amount >>= 8;
+    }
+    
+    // Serialize metadata size and data
+    uint8_t metadataSize = static_cast<uint8_t>(commitment.metadata.size());
+    tx_extra.push_back(metadataSize);
+    
+    if (metadataSize > 0) {
+      tx_extra.insert(tx_extra.end(), commitment.metadata.begin(), commitment.metadata.end());
+    }
+    
+    return true;
+  }
+
+  bool getFableCommitmentFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraFableCommitment& commitment) {
+    // Implementation would parse the extra field to extract Fable commitment
     // This is a placeholder - full implementation would need proper parsing logic
     return false;
   }
