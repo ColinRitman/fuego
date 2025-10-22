@@ -230,7 +230,7 @@ struct TransactionExtraLiquidationEvent {
 //   varint tag;
 //   varint size;
 //   varint data[];
-typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraCDDepositSecret> TransactionExtraField;
+typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraCDDepositSecret, CryptoNote::TransactionExtraFableAbleDeposit, CryptoNote::TransactionExtraStabilityPoolDeposit, CryptoNote::TransactionExtraLiquidationEvent> TransactionExtraField;
 
 
 
@@ -284,6 +284,21 @@ bool getElderfierDepositFromExtra(const std::vector<uint8_t>& tx_extra, Transact
 bool createTxExtraWithCDDepositSecret(const std::vector<uint8_t>& secret_key, uint64_t xfg_amount, uint32_t apr_basis_points, uint8_t term_code, uint8_t chain_code, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
 bool addCDDepositSecretToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraCDDepositSecret& deposit_secret);
 bool getCDDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraCDDepositSecret& deposit_secret);
+
+// Fable/Able Deposit helper functions
+bool createTxExtraWithFableAbleDeposit(const Crypto::Hash& depositId, uint8_t depositType, uint8_t stabilityMechanism, uint64_t depositAmount, uint64_t collateralAmount, uint64_t stabilityTarget, uint64_t minCollateralRatio, uint64_t maxCollateralRatio, uint64_t liquidationThreshold, uint64_t maturityTimestamp, const std::string& depositorAddress, const std::string& collateralAsset, const std::string& stabilityTargetAsset, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
+bool addFableAbleDepositToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraFableAbleDeposit& deposit);
+bool getFableAbleDepositFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraFableAbleDeposit& deposit);
+
+// Stability Pool Deposit helper functions
+bool createTxExtraWithStabilityPoolDeposit(const Crypto::Hash& poolId, const std::string& poolName, uint8_t poolType, uint64_t depositAmount, uint64_t collateralAmount, const std::string& depositorAddress, uint64_t depositTimestamp, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
+bool addStabilityPoolDepositToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraStabilityPoolDeposit& deposit);
+bool getStabilityPoolDepositFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraStabilityPoolDeposit& deposit);
+
+// Liquidation Event helper functions
+bool createTxExtraWithLiquidationEvent(const Crypto::Hash& eventId, const Crypto::Hash& depositId, uint64_t liquidatedAmount, uint64_t collateralRecovered, const std::string& liquidatorAddress, const std::string& reason, const std::vector<uint8_t>& evidence, std::vector<uint8_t>& extra);
+bool addLiquidationEventToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraLiquidationEvent& event);
+bool getLiquidationEventFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraLiquidationEvent& event);
 
 // Helper APIs for wallet integration
 // Computes Keccak256(address || "recipient") into out_hash
