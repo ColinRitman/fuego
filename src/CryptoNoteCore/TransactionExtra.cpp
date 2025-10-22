@@ -537,6 +537,104 @@ namespace CryptoNote
     return oss.str();
   }
 
+  bool TransactionExtraFableAbleDeposit::serialize(ISerializer& serializer) {
+    serializer(depositId, "depositId");
+    serializer(depositType, "depositType");
+    serializer(stabilityMechanism, "stabilityMechanism");
+    serializer(depositAmount, "depositAmount");
+    serializer(collateralAmount, "collateralAmount");
+    serializer(stabilityTarget, "stabilityTarget");
+    serializer(minCollateralRatio, "minCollateralRatio");
+    serializer(maxCollateralRatio, "maxCollateralRatio");
+    serializer(liquidationThreshold, "liquidationThreshold");
+    serializer(maturityTimestamp, "maturityTimestamp");
+    serializer(depositorAddress, "depositorAddress");
+    serializer(collateralAsset, "collateralAsset");
+    serializer(stabilityTargetAsset, "stabilityTargetAsset");
+    serializer(metadata, "metadata");
+    serializer(signature, "signature");
+    return true;
+  }
+
+  bool TransactionExtraFableAbleDeposit::isValid() const {
+    return depositId != NULL_HASH &&
+           depositAmount > 0 &&
+           !depositorAddress.empty() &&
+           !collateralAsset.empty() &&
+           !stabilityTargetAsset.empty() &&
+           maturityTimestamp > 0 &&
+           minCollateralRatio <= maxCollateralRatio &&
+           liquidationThreshold > 0 &&
+           liquidationThreshold < minCollateralRatio;
+  }
+
+  std::string TransactionExtraFableAbleDeposit::toString() const {
+    std::ostringstream oss;
+    oss << "FableAbleDeposit{id=" << Common::podToHex(depositId) 
+        << ", type=" << static_cast<int>(depositType)
+        << ", amount=" << depositAmount
+        << ", collateral=" << collateralAmount << "}";
+    return oss.str();
+  }
+
+  bool TransactionExtraStabilityPoolDeposit::serialize(ISerializer& serializer) {
+    serializer(poolId, "poolId");
+    serializer(poolName, "poolName");
+    serializer(poolType, "poolType");
+    serializer(depositAmount, "depositAmount");
+    serializer(collateralAmount, "collateralAmount");
+    serializer(depositorAddress, "depositorAddress");
+    serializer(depositTimestamp, "depositTimestamp");
+    serializer(metadata, "metadata");
+    serializer(signature, "signature");
+    return true;
+  }
+
+  bool TransactionExtraStabilityPoolDeposit::isValid() const {
+    return poolId != NULL_HASH &&
+           !poolName.empty() &&
+           depositAmount > 0 &&
+           !depositorAddress.empty() &&
+           depositTimestamp > 0;
+  }
+
+  std::string TransactionExtraStabilityPoolDeposit::toString() const {
+    std::ostringstream oss;
+    oss << "StabilityPoolDeposit{poolId=" << Common::podToHex(poolId)
+        << ", name=" << poolName
+        << ", amount=" << depositAmount << "}";
+    return oss.str();
+  }
+
+  bool TransactionExtraLiquidationEvent::serialize(ISerializer& serializer) {
+    serializer(eventId, "eventId");
+    serializer(depositId, "depositId");
+    serializer(liquidatedAmount, "liquidatedAmount");
+    serializer(collateralRecovered, "collateralRecovered");
+    serializer(liquidatorAddress, "liquidatorAddress");
+    serializer(reason, "reason");
+    serializer(evidence, "evidence");
+    serializer(signature, "signature");
+    return true;
+  }
+
+  bool TransactionExtraLiquidationEvent::isValid() const {
+    return eventId != NULL_HASH &&
+           depositId != NULL_HASH &&
+           liquidatedAmount > 0 &&
+           !liquidatorAddress.empty() &&
+           !reason.empty() &&
+           !evidence.empty();
+  }
+
+  std::string TransactionExtraLiquidationEvent::toString() const {
+    std::ostringstream oss;
+    oss << "LiquidationEvent{eventId=" << Common::podToHex(eventId)
+        << ", depositId=" << Common::podToHex(depositId)
+        << ", amount=" << liquidatedAmount << "}";
+    return oss.str();
+  }
+
   bool createTxExtraWithElderfierDeposit(const Crypto::Hash& depositHash, uint64_t depositAmount, const std::string& elderfierAddress, uint32_t securityWindow, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra)
   {
     TransactionExtraElderfierDeposit deposit;
