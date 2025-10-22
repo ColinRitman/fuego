@@ -18,6 +18,7 @@
 #include "crypto/randomize.h"
 #include <algorithm>
 #include <chrono>
+#include <sstream>
 
 namespace CryptoNote {
 
