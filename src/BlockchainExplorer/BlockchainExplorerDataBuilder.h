@@ -47,6 +47,6 @@ private:
   size_t median(std::vector<size_t>& v);
 
   CryptoNote::ICore& core;
-  CryptoNote::ICryptoNoteProtocolQuery& protocol;
+  // CryptoNote::ICryptoNoteProtocolQuery& protocol; // Unused field
 };
 }

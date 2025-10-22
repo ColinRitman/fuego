@@ -236,10 +236,10 @@ namespace CryptoNote
 
     // early deposit multiplier 
     uint64_t interestHi;
-    uint64_t interestLo;
     if (height <= CryptoNote::parameters::END_MULTIPLIER_BLOCK)
     {
-      interestLo = mul128(cLo, CryptoNote::parameters::MULTIPLIER_FACTOR, &interestHi);
+      uint64_t interestLo = mul128(cLo, CryptoNote::parameters::MULTIPLIER_FACTOR, &interestHi);
+      (void)interestLo; // Suppress unused variable warning
       assert(interestHi == 0);
     }
     else

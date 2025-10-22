@@ -43,7 +43,7 @@ jobs:
           $ExtractPath = "C:\thirdparties\boost-1.83.0"
           curl -L $Url -o $OutputPath
           Expand-Archive -Path $OutputPath -DestinationPath $ExtractPath -Force
-          Start-Process -Wait -FilePath $OutputPath "/SILENT","/SP-","/SUPPRESSMSGBOXES","/DIR=C:\\thirdparties\\boost-1.83.0"
+          # The boost source is now extracted, no need to run the zip file as an executable
 
       - name: Build
         shell: powershell

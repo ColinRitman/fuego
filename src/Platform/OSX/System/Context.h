@@ -24,9 +24,11 @@ extern "C" {
 
 #if defined(__aarch64__) || defined(__arm64__)
 /* Use system ucontext on ARM64 */
+#define _XOPEN_SOURCE 600
 #include <ucontext.h>
+#include <signal.h>
 typedef ucontext_t uctx;
-#else
+typedef mcontext_t mctx;
 /* Use custom ucontext on x86_64 */
 #define	setcontext(u)	setmcontext(&(u)->uc_mcontext)
 #define	getcontext(u)	getmcontext(&(u)->uc_mcontext)

@@ -26,6 +26,10 @@
 #include "CryptoNoteSerialization.h"
 #include "Serialization/SerializationOverloads.h"
 
+// Suppress unused function warning - these are used in assert statements
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+
 namespace CryptoNote {
 
 DepositIndex::DepositIndex() : blockCount(0), m_totalBurnedXfg(0) {
@@ -233,5 +237,7 @@ void DepositIndex::BurnedXfgEntry::serialize(ISerializer& s) {
   s(amount, "amount");
   s(cumulative_burned, "cumulative_burned");
 }
+
+#pragma GCC diagnostic pop
 
 }

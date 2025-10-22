@@ -284,6 +284,7 @@ bool core::check_tx_mixin(const Transaction& tx) {
   size_t inputIndex = 0;
   for (const auto& txin : tx.inputs) {
     assert(inputIndex < tx.signatures.size());
+    inputIndex++;
     if (txin.type() == typeid(KeyInput)) {
       uint64_t txMixin = boost::get<KeyInput>(txin).outputIndexes.size();
             if (txMixin > m_currency.maxMixin()) {

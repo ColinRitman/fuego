@@ -2705,6 +2705,7 @@ bool Blockchain::validateInput(const MultisignatureInput& input, const Crypto::H
   m_blockIndex.pop();
 
   assert(m_blockIndex.size() == m_blocks.size());
+  return true;
 }
 
 bool Blockchain::checkUpgradeHeight(const UpgradeDetector& upgradeDetector) {

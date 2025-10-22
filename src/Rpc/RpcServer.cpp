@@ -325,7 +325,7 @@ bool RpcServer::k_on_check_tx_proof(const K_COMMAND_RPC_CHECK_TX_PROOF::request&
     }
 
     // get tx pub key
-		Crypto::PublicKey txPubKey = getTransactionPublicKeyFromExtra(transaction.extra);
+		// Crypto::PublicKey txPubKey = getTransactionPublicKeyFromExtra(transaction.extra);
 
 		// look for outputs
 		uint64_t received(0);
@@ -982,7 +982,7 @@ bool RpcServer::f_on_block_json(const F_COMMAND_RPC_GET_BLOCK_DETAILS::request& 
   bool penalizeFee = blk.majorVersion >= 2;
   size_t blockGrantedFullRewardZone = penalizeFee ?
   m_core.currency().blockGrantedFullRewardZone() :
-  //m_core.currency().blockGrantedFullRewardZoneV1();
+  m_core.currency().blockGrantedFullRewardZone(); // Use same value for both cases
   res.block.effectiveSizeMedian = std::max(res.block.sizeMedian, blockGrantedFullRewardZone);
 
   // virtual bool getBlockReward(size_t medianSize, size_t currentBlockSize, uint64_t alreadyGeneratedCoins, uint64_t fee, uint32_t height,
@@ -1143,7 +1143,7 @@ bool RpcServer::f_getMixin(const Transaction& transaction, uint64_t& mixin) {
 
 bool RpcServer::f_on_transactions_pool_json(const F_COMMAND_RPC_GET_POOL::request& req, F_COMMAND_RPC_GET_POOL::response& res) {
     auto pool = m_core.getPoolTransactions();
-    for (const Transaction tx : pool) {
+    for (const Transaction& tx : pool) {
         f_transaction_short_response transaction_short;
         uint64_t amount_in = getInputAmount(tx);
         uint64_t amount_out = getOutputAmount(tx);
@@ -1400,7 +1400,7 @@ bool RpcServer::on_get_block_header_by_height(const COMMAND_RPC_GET_BLOCK_HEADER
   }
 
   Crypto::Hash tmp_hash = m_core.getBlockIdByHeight(req.height);
-  bool is_orphaned = block_hash != tmp_hash;
+  // bool is_orphaned = block_hash != tmp_hash; // Unused variable
   fill_block_header_response(blk, false, req.height, block_hash, res.block_header);
   res.status = CORE_RPC_STATUS_OK;
   return true;
