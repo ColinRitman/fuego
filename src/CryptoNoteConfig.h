@@ -260,8 +260,8 @@ namespace CryptoNote
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
  	const uint32_t TESTNET_DEPOSIT_MIN_TERM_v1 = 5480;  //blocks
  	const uint32_t TESTNET_DEPOSIT_MAX_TERM_v1 = 5480; 
- 	const uint32_t TESTNET_DEPOSIT_MIN_TERM = 8;  //blocks		 /* one month=5480
- 	const uint32_t TESTNET_DEPOSIT_MAX_TERM = 8;  		
+ 	const uint32_t TESTNET_DEPOSIT_MIN_TERM = 2;  //blocks		 /* one month=5480
+ 	const uint32_t TESTNET_DEPOSIT_MAX_TERM = 2;  		
     const uint32_t TESTNET_DEPOSIT_TERM_YIELD = TESTNET_DEPOSIT_MIN_TERM;     // 16440 blocks (3 months) for yield deposits
 //__________________________________________________________________________________________________________________________
                                      	// TESTNET DMWDA parameters
@@ -290,7 +290,7 @@ namespace CryptoNote
  	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
 	const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 10.0; // Hash rate change threshold for anomaly detection
 
- 	// -------------------------------------- TESTNET CONFIGS ------------------------------------------------------------
+ 	// -------------------------------------- TESTNET CONFIGS ---------------------------------------------------------
 	
 	struct CheckpointData
 	{
