@@ -1,5 +1,5 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2012-2018 The CryptoNote developers
-// Copyright (c) 2017-2022 Fuego Developers
 //
 // This file is part of Fuego.
 //
@@ -186,7 +186,7 @@ public:
   virtual ~IWallet() {}
 
   virtual void initialize(const std::string& path, const std::string& password) = 0;
-  virtual void createDeposit(uint64_t amount, uint64_t term, std::string sourceAddress, std::string destinationAddress, std::string &transactionHash, const DepositCommitment& commitment = DepositCommitment()/*, bool useStagedUnlock = false*/) override;
+  virtual void createDeposit(uint64_t amount, uint64_t term, std::string sourceAddress, std::string destinationAddress, std::string &transactionHash, const DepositCommitment& commitment = DepositCommitment());
   virtual void withdrawDeposit(DepositId depositId, std::string &transactionHash) = 0;
   virtual Deposit getDeposit(size_t bankingIndex) const = 0;
   virtual void initializeWithViewKey(const std::string& path, const std::string& password, const Crypto::SecretKey& viewSecretKey) = 0;
