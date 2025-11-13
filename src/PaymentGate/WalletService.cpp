@@ -1750,7 +1750,7 @@ namespace PaymentService
           minAmount = CryptoNote::parameters::BURN_DEPOSIT_MIN_AMOUNT;
         } else {
           /* Yield deposits (0x07) use lower minimum: 8 XFG (no maximum) */
-          minAmount = CryptoNote::parameters::YIELD_DEPOSIT_MIN_AMOUNT;
+          minAmount = CryptoNote::parameters::DEPOSIT_MIN_AMOUNT;
         }
 
         /* Validate minimum deposit amount */
@@ -2440,6 +2440,6 @@ namespace PaymentService
     std::stringstream ss;
     ss << std::fixed << std::setprecision(8) << xfgAmount << " XFG";
     return ss.str();
-  }
-
-  } //namespace PaymentService
+   }
+ }
+} //namespace PaymentService
