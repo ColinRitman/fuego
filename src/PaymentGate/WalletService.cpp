@@ -1794,7 +1794,7 @@ namespace PaymentService
       return std::error_code();
     }
 
-    /* Create and send a deposit to another wallet address, the deposit then will appear in their
+    /* Create and send (gift) a deposit to another wallet address, the deposit then will appear in their
    wallet upon confirmation. */
     std::error_code WalletService::sendDeposit(
         uint64_t amount,
@@ -2441,5 +2441,5 @@ namespace PaymentService
     ss << std::fixed << std::setprecision(8) << xfgAmount << " XFG";
     return ss.str();
   }
-
+}
   } //namespace PaymentService
