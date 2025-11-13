@@ -112,7 +112,7 @@ namespace CryptoNote
     const uint32_t DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
     const uint32_t DEPOSIT_TERM_YIELD = DEPOSIT_MIN_TERM;     // 16440 blocks (3 months) for yield deposits
     const uint32_t DEPOSIT_TERM_BURN = DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
-		
+		const uint32_t YIELD_DEPOSIT_MIN_AMOUNT= 80000000;
     static_assert(DEPOSIT_MIN_TERM > 0, "Bad DEPOSIT_MIN_TERM");
 		static_assert(DEPOSIT_MIN_TERM <= DEPOSIT_MAX_TERM, "Bad DEPOSIT_MAX_TERM");
 		
