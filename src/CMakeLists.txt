@@ -104,7 +104,7 @@ add_executable(PaymentGateService ${PaymentGateService})
 add_executable(Optimizer ${Optimizer})
 
 add_executable(testnet-wallet-cli TestnetWallet/TestnetWallet.cpp)
-target_link_libraries(testnet-wallet-cli 
+target_link_libraries(testnet-wallet-cli PRIVATE
     Wallet
     SimpleWalletLib
     NodeRpcProxy
@@ -124,11 +124,35 @@ if (MSVC)
   target_link_libraries(System PRIVATE ws2_32)
 endif ()
 
-target_link_libraries(Daemon CryptoNoteCore P2P Rpc System Http Logging Common Crypto upnpc-static BlockchainExplorer ${Boost_LIBRARIES} Serialization)
-target_link_libraries(TestnetDaemon CryptoNoteCore P2P Rpc System Http Logging Common Crypto upnpc-static BlockchainExplorer ${Boost_LIBRARIES} Serialization)
-target_link_libraries(SimpleWallet Wallet NodeRpcProxy Transfers Rpc Http CryptoNoteCore System Logging Common Crypto ${Boost_LIBRARIES} Serialization)
-target_link_libraries(PaymentGateService PaymentGate JsonRpcServer Wallet NodeRpcProxy Transfers CryptoNoteCore Crypto P2P Rpc Http System Logging Common InProcessNode upnpc-static BlockchainExplorer ${Boost_LIBRARIES} Serialization)
-target_link_libraries(Optimizer PaymentGate Rpc Http CryptoNoteCore Logging Serialization Crypto System Common ${Boost_LIBRARIES})
+target_link_libraries(Daemon PRIVATE 
+	CryptoNoteCore 
+	P2P 
+	Rpc 
+	System 
+	Http 
+	Logging 
+	Common 
+	Crypto 
+	upnpc-static 
+	BlockchainExplorer 
+	${Boost_LIBRARIES} 
+	Serialization
+)
+
+target_link_libraries(TestnetDaemon PRIVATE 
+	CryptoNoteCore
+	P2P
+	Rpc
+	System
+	Http
+	Logging
+	Common
+	Crypto
+	upnpc-static
+	BlockchainExplorer
+	${Boost_LIBRARIES}
+	Serialization
+)
 
 target_link_libraries(SimpleWallet PRIVATE
     Wallet
