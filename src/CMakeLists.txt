@@ -24,6 +24,11 @@ file(GLOB_RECURSE JsonRpcServer JsonRpcServer/*)
 file(GLOB_RECURSE PaymentGate PaymentGate/*)
 file(GLOB_RECURSE PaymentGateService PaymentGateService/*)
 
+# Add missing globs for SimpleWalletLib, SimpleWallet and Optimizer
+file(GLOB_RECURSE SimpleWalletLib SimpleWalletLib/*)
+file(GLOB_RECURSE SimpleWallet SimpleWallet/*)
+file(GLOB_RECURSE Optimizer Optimizer/*)
+
 # Eldernode services
 add_subdirectory(EldernodeIndexManager)
 add_subdirectory(BurnDepositValidationService)
@@ -31,13 +36,14 @@ add_subdirectory(BurnDepositValidationService)
 # System files
 if(WIN32)
   file(GLOB_RECURSE System System/* Platform/Windows/System/*)
-elseif(APPLE)
+elleif(APPLE)
   file(GLOB_RECURSE System System/* Platform/OSX/System/*)
 else()
   file(GLOB_RECURSE System System/* Platform/Linux/System/*)
 endif()
 
-source_group("" FILES ${Common} ${Crypto} ${CryptoNoteCore} ${CryptoNoteProtocol} ${Daemon} ${JsonRpcServer} ${Http} ${Logging} ${NodeRpcProxy} ${P2p} ${Rpc} ${Serialization} ${SimpleWallet} ${System} ${Transfers} ${Wallet} ${WalletLegacy})
+source_group("
+" FILES ${Common} ${Crypto} ${CryptoNoteCore} ${CryptoNoteProtocol} ${Daemon} ${JsonRpcServer} ${Http} ${Logging} ${NodeRpcProxy} ${P2p} ${Rpc} ${Serialization} ${SimpleWallet} ${System} ${BlockchainExplorer} ${InProcessNode} ${Transfers} ${Wallet} ${WalletLegacy} ${PaymentGate} ${PaymentGateService} ${SimpleWalletLib} ${Optimizer})
 
 # --------------------------
 # Libraries
