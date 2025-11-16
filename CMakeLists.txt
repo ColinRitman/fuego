@@ -347,7 +347,4 @@ if(APPLE AND ICU_FOUND)
         endif()
     endforeach()
 endif()
-
-# --------------------------
-# Tests (handled above)
-# --------------------------
+endif()
