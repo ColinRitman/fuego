@@ -67,6 +67,7 @@ add_library(Serialization STATIC ${Serialization})
 target_link_libraries(Serialization PUBLIC Common)
 add_library(System STATIC ${System})
 add_library(Transfers STATIC ${Transfers})
+add_library(SimpleWalletLib STATIC ${SimpleWalletLib})
 add_library(Wallet STATIC ${Wallet} ${WalletLegacy})
 add_library(PaymentGate STATIC ${PaymentGate})
 add_library(JsonRpcServer STATIC ${JsonRpcServer})
@@ -94,49 +95,40 @@ endif()
 # --------------------------
 # Executables
 # --------------------------
-# Work around CMake 4.1.1 bug by specifying all sources in add_executable
-add_executable(Daemon
-    "${CMAKE_CURRENT_SOURCE_DIR}/Daemon/Daemon.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/Daemon/DaemonCommandsHandler.cpp"
-)
+# Modern style: use variables when possible for sources, add all needed executables
 
-add_executable(SimpleWallet
-    "${CMAKE_CURRENT_SOURCE_DIR}/SimpleWallet/SimpleWallet.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/SimpleWallet/PasswordContainer.cpp"
-)
+add_executable(Daemon ${Daemon})
+add_executable(TestnetDaemon Daemon/DaemonCommandsHandler.cpp Daemon/DaemonCommandsHandler.h TestnetDaemon/TestnetDaemon.cpp)
+add_executable(SimpleWallet ${SimpleWallet})
+add_executable(PaymentGateService ${PaymentGateService})
+add_executable(Optimizer ${Optimizer})
 
-add_executable(PaymentGateService
-    "${CMAKE_CURRENT_SOURCE_DIR}/PaymentGateService/main.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/PaymentGateService/PaymentGateService.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/PaymentGateService/ConfigurationManager.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/PaymentGateService/PaymentServiceConfiguration.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/PaymentGateService/RpcNodeConfiguration.cpp"
+add_executable(testnet-wallet-cli TestnetWallet/TestnetWallet.cpp)
+target_link_libraries(testnet-wallet-cli 
+    Wallet
+    SimpleWalletLib
+    NodeRpcProxy
+    Transfers
+    Rpc
+    Http
+    CryptoNoteCore
+    System
+    Logging
+    Common
+    Crypto
+    ${Boost_LIBRARIES}
+    Serialization
 )
-add_executable(Optimizer "${CMAKE_CURRENT_SOURCE_DIR}/Optimizer/Optimizer.cpp")
-
-# --------------------------
-# System library for Windows
-# --------------------------
+set_target_properties(testnet-wallet-cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/src")
 if (MSVC)
   target_link_libraries(System PRIVATE ws2_32)
 endif ()
 
-# --------------------------
-# Link libraries (keyword form)
-# --------------------------
-target_link_libraries(Daemon PRIVATE
-    CryptoNoteCore
-    P2P
-    Rpc
-    System
-    Http
-    Logging
-    Common
-    Crypto
-    BlockchainExplorer
-    ${Boost_LIBRARIES}
-    Serialization
-)
+target_link_libraries(Daemon CryptoNoteCore P2P Rpc System Http Logging Common Crypto upnpc-static BlockchainExplorer ${Boost_LIBRARIES} Serialization)
+target_link_libraries(TestnetDaemon CryptoNoteCore P2P Rpc System Http Logging Common Crypto upnpc-static BlockchainExplorer ${Boost_LIBRARIES} Serialization)
+target_link_libraries(SimpleWallet Wallet NodeRpcProxy Transfers Rpc Http CryptoNoteCore System Logging Common Crypto ${Boost_LIBRARIES} Serialization)
+target_link_libraries(PaymentGateService PaymentGate JsonRpcServer Wallet NodeRpcProxy Transfers CryptoNoteCore Crypto P2P Rpc Http System Logging Common InProcessNode upnpc-static BlockchainExplorer ${Boost_LIBRARIES} Serialization)
+target_link_libraries(Optimizer PaymentGate Rpc Http CryptoNoteCore Logging Serialization Crypto System Common ${Boost_LIBRARIES})
 
 target_link_libraries(SimpleWallet PRIVATE
     Wallet
@@ -194,10 +186,11 @@ target_link_libraries(Optimizer PRIVATE
 # Additional Linux linking
 # --------------------------
 if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR APPLE AND NOT ANDROID)
-  target_link_libraries(SimpleWallet PRIVATE -lresolv)
-  target_link_libraries(Daemon PRIVATE -lresolv)
-  target_link_libraries(PaymentGateService PRIVATE -lresolv)
-  target_link_libraries(Optimizer PRIVATE -lresolv)
+  target_link_libraries(SimpleWallet -lresolv)
+  target_link_libraries(testnet-wallet-cli -lresolv)
+  target_link_libraries(Daemon -lresolv)
+  target_link_libraries(TestnetDaemon -lresolv)
+  target_link_libraries(PaymentGateService -lresolv)
 endif ()
 
 # --------------------------
@@ -205,6 +198,7 @@ endif ()
 # --------------------------
 add_dependencies(Rpc version)
 add_dependencies(Daemon version)
+add_dependencies(TestnetDaemon version)
 add_dependencies(SimpleWallet version)
 add_dependencies(PaymentGateService version)
 add_dependencies(Optimizer version)
@@ -216,4 +210,5 @@ add_dependencies(P2P version)
 set_property(TARGET SimpleWallet PROPERTY OUTPUT_NAME "fuego-wallet-cli")
 set_property(TARGET PaymentGateService PROPERTY OUTPUT_NAME "walletd")
 set_property(TARGET Daemon PROPERTY OUTPUT_NAME "fuegod")
-set_property(TARGET Optimizer PROPERTY OUTPUT_NAME "fuego-optimizer")
+set_property(TARGET TestnetDaemon PROPERTY OUTPUT_NAME "testnetd")
+set_property(TARGET Optimizer PROPERTY OUTPUT_NAME "optimizer")

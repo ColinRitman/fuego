@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2020-2025 Elderfire Privacy Group
 // Copyright (c) 2014-2025 The Monero project
 //
@@ -43,7 +43,7 @@ size_t DynamicRingSizeCalculator::calculateOptimalRingSize(
   // Get target ring sizes in order of preference
   std::vector<size_t> targetRingSizes = getTargetRingSizes();
 
-  // Find the largest achievable ring size from approved sizes only
+  // Find the largest achievable ring size from approved sizes
   for (size_t targetSize : targetRingSizes) {
     if (targetSize >= minRingSize && targetSize <= maxRingSize) {
       if (isRingSizeAchievable(targetSize, availableOutputs)) {
@@ -73,7 +73,6 @@ bool DynamicRingSizeCalculator::isRingSizeAchievable(
       return true;
     }
   }
-
   // Check if we can combine outputs from different amounts
   size_t totalAvailable = 0;
   for (const auto& output : availableOutputs) {

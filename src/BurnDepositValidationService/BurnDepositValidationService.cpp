@@ -46,7 +46,7 @@ BurnDepositConfig BurnDepositConfig::getDefault() {
     config.treasuryAddress = "";
     config.fastPassConsensusThreshold = 2;  // 2/2 fastpass Eldernodes
     config.fallbackConsensusThreshold = 4;  // 4/5 fallback Eldernodes
-    config.totalEldernodes = 5;     // Total Eldernodes in network
+    config.totalEldernodes = 5;     // Total Eldernodes in consensus
     config.enableDualValidation = true;  // Both commitment and burn amount validation
     config.enableFastPass = true;   // Enable 2/2 fast pass consensus
     return config;

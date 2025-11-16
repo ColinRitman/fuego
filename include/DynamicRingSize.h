@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2024 Elderfire Privacy Group
 // Copyright (c) 2024 Monero Developers
 //
@@ -83,7 +83,7 @@ enum class PrivacyLevel {
   MINIMUM = 8,      //   Fuego Standard (minimum of 8)
   SOLID = 10,      //   Solid privacy (10)
   BETTER = 12,    //   Better privacy (12)
-  STRONG = 15,    //  Monero's Ring Size (15)
+  STRONG = 15,    //  Monero Ring Size (15) 
   MAXIMUM = 18    // Fuego-MAX-Privacy (18)
 };
 

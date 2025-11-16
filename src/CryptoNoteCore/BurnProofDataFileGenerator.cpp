@@ -1,4 +1,5 @@
-// Copyright (c) 2017-2025 Elderfire Privacy Council
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2024-2025 Elderfire Privacy Council
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2014-2017 The XDN developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -46,7 +47,7 @@ std::error_code BurnProofDataFileGenerator::generateBPDF(
     Crypto::Hash nullifier = calculateNullifier(secret);
     Crypto::Hash commitment = calculateCommitment(secret, amount);
     Crypto::Hash recipientHash = calculateRecipientHash(recipientAddress);
-    // Crypto::Hash txExtraHash = calculateTxExtraHash(secret); // TODO: Use in future implementation
+    // Crypto::Hash txExtraHash = calculateTxExtraHash(secret); // TODO: for use in future implementation
     
     // Calculate network validation hash
     std::string genesisTx = "013c01ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101bd4e0bf284c04d004fd016a21405046e8267ef81328cabf3017c4c24b273b25a";
