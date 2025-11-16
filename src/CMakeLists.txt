@@ -25,7 +25,7 @@ file(GLOB_RECURSE PaymentGate PaymentGate/*)
 file(GLOB_RECURSE PaymentGateService PaymentGateService/*)
 
 # Add missing globs for SimpleWalletLib, SimpleWallet and Optimizer
-file(GLOB_RECURSE SimpleWalletLib SimpleWalletLib/*)
+file(GLOB_RECURSE SimpleWalletLib SimpleWallet/*)
 file(GLOB_RECURSE SimpleWallet SimpleWallet/*)
 file(GLOB_RECURSE Optimizer Optimizer/*)
 
