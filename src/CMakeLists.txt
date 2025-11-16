@@ -118,6 +118,7 @@ target_link_libraries(testnet-wallet-cli PRIVATE
     Crypto
     ${Boost_LIBRARIES}
     Serialization
+    resolv
 )
 set_target_properties(testnet-wallet-cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/src")
 if (MSVC)
@@ -137,6 +138,7 @@ target_link_libraries(Daemon PRIVATE
 	BlockchainExplorer 
 	${Boost_LIBRARIES} 
 	Serialization
+	resolv
 )
 
 target_link_libraries(TestnetDaemon PRIVATE 
@@ -152,6 +154,7 @@ target_link_libraries(TestnetDaemon PRIVATE
 	BlockchainExplorer
 	${Boost_LIBRARIES}
 	Serialization
+        resolv
 )
 
 target_link_libraries(SimpleWallet PRIVATE
@@ -168,6 +171,7 @@ target_link_libraries(SimpleWallet PRIVATE
     BlockchainExplorer
     ${Boost_LIBRARIES}
     Serialization
+    resolv
 )
 
 target_link_libraries(PaymentGateService PRIVATE
@@ -188,6 +192,7 @@ target_link_libraries(PaymentGateService PRIVATE
     BlockchainExplorer
     ${Boost_LIBRARIES}
     Serialization
+    resolv
 )
 
 target_link_libraries(Optimizer PRIVATE
@@ -200,22 +205,9 @@ target_link_libraries(Optimizer PRIVATE
     Crypto
     ${Boost_LIBRARIES}
     Serialization
+    resolv
 )
 
-# --------------------------
-# ICU linking is handled in root CMakeLists.txt
-# --------------------------
-
-# --------------------------
-# Additional Linux linking
-# --------------------------
-if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR APPLE AND NOT ANDROID)
-  target_link_libraries(SimpleWallet -lresolv)
-  target_link_libraries(testnet-wallet-cli -lresolv)
-  target_link_libraries(Daemon -lresolv)
-  target_link_libraries(TestnetDaemon -lresolv)
-  target_link_libraries(PaymentGateService -lresolv)
-endif ()
 
 # --------------------------
 # Dependencies
