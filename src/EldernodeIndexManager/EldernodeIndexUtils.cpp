@@ -1,3 +1,18 @@
+// Copyright (c) 2017-2026 Fuego Developers
+//
+// This file is part of Fuego.
+//
+// Fuego is free & open source software distributed in the hope that
+// it will be useful, but WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+// PURPOSE. You may redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
+
+
 #include "EldernodeIndexTypes.h"
 #include "Common/StringTools.h"
 #include "crypto/crypto.h"
@@ -14,11 +29,11 @@ bool ElderfierServiceId::isValid() const {
     if (identifier.empty()) {
         return false;
     }
-    
+
     switch (type) {
         case ServiceIdType::STANDARD_ADDRESS:
             return identifier.length() >= 10 && identifier.length() <= 100;
-            
+
         case ServiceIdType::CUSTOM_NAME:
             // Must be exactly 8 letters, all caps
             if (identifier.length() != 8) {
@@ -32,13 +47,13 @@ bool ElderfierServiceId::isValid() const {
             }
             // Must have linked address and hashed address for custom names
             return !linkedAddress.empty() && !hashedAddress.empty();
-            
+
         case ServiceIdType::HASHED_ADDRESS:
             return identifier.length() == 64 && // SHA256 hash length
-                   std::all_of(identifier.begin(), identifier.end(), 
+                   std::all_of(identifier.begin(), identifier.end(),
                               [](char c) { return std::isxdigit(c); }) &&
                    !linkedAddress.empty() && !hashedAddress.empty();
-            
+
         default:
             return false;
     }
@@ -48,7 +63,7 @@ std::string ElderfierServiceId::toString() const {
     std::ostringstream oss;
     oss << "ElderfierServiceId{"
         << "type=";
-    
+
     switch (type) {
         case ServiceIdType::STANDARD_ADDRESS:
             oss << "STANDARD_ADDRESS";
@@ -60,7 +75,7 @@ std::string ElderfierServiceId::toString() const {
             oss << "HASHED_ADDRESS";
             break;
     }
-    
+
     oss << ", identifier=\"" << identifier << "\""
         << ", displayName=\"" << displayName << "\""
         << ", linkedAddress=\"" << linkedAddress << "\""
@@ -74,61 +89,61 @@ ElderfierServiceId ElderfierServiceId::createStandardAddress(const std::string& 
     serviceId.identifier = address;
     serviceId.displayName = address;
     serviceId.linkedAddress = address; // Same as identifier for standard addresses
-    
+
     // Generate hashed address for all Elderfier nodes
     Crypto::Hash hash;
     Crypto::cn_fast_hash(address.data(), address.size(), hash);
     serviceId.hashedAddress = Common::podToHex(hash);
-    
+
     return serviceId;
 }
 
 ElderfierServiceId ElderfierServiceId::createCustomName(const std::string& name, const std::string& walletAddress) {
     ElderfierServiceId serviceId;
     serviceId.type = ServiceIdType::CUSTOM_NAME;
-    
+
     // Convert to uppercase and ensure exactly 8 letters
     std::string upperName = name;
     std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
-    
+
     // Pad or truncate to exactly 8 characters
     if (upperName.length() < 8) {
         upperName.resize(8, 'X'); // Pad with X
     } else if (upperName.length() > 8) {
         upperName = upperName.substr(0, 8); // Truncate to 8
     }
-    
+
     serviceId.identifier = upperName;
     serviceId.displayName = upperName;
     serviceId.linkedAddress = walletAddress; // Link to actual wallet address
-    
+
     // Generate hashed address for all Elderfier nodes
     Crypto::Hash hash;
     Crypto::cn_fast_hash(walletAddress.data(), walletAddress.size(), hash);
     serviceId.hashedAddress = Common::podToHex(hash);
-    
+
     return serviceId;
 }
 
 ElderfierServiceId ElderfierServiceId::createHashedAddress(const std::string& address) {
     ElderfierServiceId serviceId;
     serviceId.type = ServiceIdType::HASHED_ADDRESS;
-    
+
     // Hash the address using SHA256
     Crypto::Hash hash;
     Crypto::cn_fast_hash(address.data(), address.size(), hash);
     serviceId.identifier = Common::podToHex(hash);
-    
+
     // Create a masked display name for privacy
     if (address.length() >= 8) {
         serviceId.displayName = address.substr(0, 4) + "..." + address.substr(address.length() - 4);
     } else {
         serviceId.displayName = "***" + address.substr(address.length() - 2);
     }
-    
+
     serviceId.linkedAddress = address; // Link to actual wallet address
     serviceId.hashedAddress = serviceId.identifier; // Same as identifier for hashed type
-    
+
     return serviceId;
 }
 
@@ -136,7 +151,7 @@ ElderfierServiceId ElderfierServiceId::createHashedAddress(const std::string& ad
 /*
 // EldernodeStakeProof implementations
 bool EldernodeStakeProof::isValid() const {
-    return !feeAddress.empty() && 
+    return !feeAddress.empty() &&
            !proofSignature.empty() &&
            timestamp > 0 &&
            (tier == EldernodeTier::ELDERFIER || serviceId.isValid());
@@ -150,10 +165,10 @@ bool EldernodeStakeProof::isConstantProofExpired() const {
     if (!isConstantProof() || constantProofExpiry == 0) {
         return false; // No expiry for non-constant proofs or never-expiring proofs
     }
-    
+
     uint64_t currentTime = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    
+
     return currentTime > constantProofExpiry;
 }
 
@@ -167,18 +182,18 @@ std::string EldernodeStakeProof::toString() const {
         << "feeAddress=" << feeAddress << ", "
         << "tier=" << (tier == EldernodeTier::ELDERFIER ? "BASIC" : "ELDERFIER") << ", "
         << "signatureSize=" << proofSignature.size();
-    
+
     if (tier == EldernodeTier::ELDERFIER) {
         oss << ", serviceId=" << serviceId.toString();
     }
-    
+
     if (isConstantProof()) {
         oss << ", constantProofType=" << static_cast<int>(constantProofType)
             << ", crossChainAddress=" << crossChainAddress
             << ", constantStakeAmount=" << constantStakeAmount
             << ", constantProofExpiry=" << constantProofExpiry;
     }
-    
+
     oss << "}";
     return oss.str();
 }
@@ -186,8 +201,8 @@ std::string EldernodeStakeProof::toString() const {
 
 // EldernodeConsensusParticipant implementations
 bool EldernodeConsensusParticipant::operator==(const EldernodeConsensusParticipant& other) const {
-    return publicKey == other.publicKey && 
-           address == other.address && 
+    return publicKey == other.publicKey &&
+           address == other.address &&
            stakeAmount == other.stakeAmount &&
            isActive == other.isActive &&
            tier == other.tier &&
@@ -199,7 +214,7 @@ bool EldernodeConsensusParticipant::operator<(const EldernodeConsensusParticipan
     if (tier != other.tier) {
         return tier > other.tier; // ELDERFIER > BASIC
     }
-    
+
     if (stakeAmount != other.stakeAmount) {
         return stakeAmount > other.stakeAmount; // Higher stake first
     }
@@ -208,7 +223,7 @@ bool EldernodeConsensusParticipant::operator<(const EldernodeConsensusParticipan
 
 // EldernodeConsensusResult implementations
 bool EldernodeConsensusResult::isValid() const {
-    return consensusTimestamp > 0 && 
+    return consensusTimestamp > 0 &&
            (consensusReached ? actualVotes >= requiredThreshold : true);
 }
 
@@ -225,8 +240,8 @@ std::string EldernodeConsensusResult::toString() const {
 
 // ENindexEntry implementations
 bool ENindexEntry::operator==(const ENindexEntry& other) const {
-    return eldernodePublicKey == other.eldernodePublicKey && 
-           feeAddress == other.feeAddress && 
+    return eldernodePublicKey == other.eldernodePublicKey &&
+           feeAddress == other.feeAddress &&
            stakeAmount == other.stakeAmount &&
            registrationTimestamp == other.registrationTimestamp &&
            isActive == other.isActive &&
@@ -242,7 +257,7 @@ bool ENindexEntry::operator<(const ENindexEntry& other) const {
     if (tier != other.tier) {
         return tier > other.tier; // ELDERFIER > BASIC
     }
-    
+
     if (stakeAmount != other.stakeAmount) {
         return stakeAmount > other.stakeAmount; // Higher stake first
     }
@@ -263,8 +278,8 @@ ConsensusThresholds ConsensusThresholds::getDefault() {
 }
 
 bool ConsensusThresholds::isValid() const {
-    return minimumEldernodes > 0 && 
-           requiredAgreement > 0 && 
+    return minimumEldernodes > 0 &&
+           requiredAgreement > 0 &&
            requiredAgreement <= minimumEldernodes &&
            timeoutSeconds > 0;
 }
@@ -349,7 +364,7 @@ ElderfierServiceConfig ElderfierServiceConfig::getDefault() {
 }
 
 bool ElderfierServiceConfig::isValid() const {
-    return minimumStakeAmount > 0 && 
+    return minimumStakeAmount > 0 &&
            customNameLength == 8 && // Must be exactly 8
            slashingConfig.isValid();
            // Note: constantProofConfig removed - now using 0x06 tag deposits for Elderfiers
@@ -358,7 +373,7 @@ bool ElderfierServiceConfig::isValid() const {
 bool ElderfierServiceConfig::isCustomNameReserved(const std::string& name) const {
     std::string upperName = name;
     std::transform(upperName.begin(), upperName.end(), upperName.begin(), ::toupper);
-    
+
     return std::find(reservedNames.begin(), reservedNames.end(), upperName) != reservedNames.end();
 }
 
@@ -367,20 +382,20 @@ bool ElderfierServiceConfig::isValidCustomName(const std::string& name) const {
     if (name.length() != 8) {
         return false;
     }
-    
+
     if (!std::all_of(name.begin(), name.end(), ::isupper)) {
         return false;
     }
-    
+
     if (!std::all_of(name.begin(), name.end(), ::isalpha)) {
         return false;
     }
-    
+
     // Must not be reserved
     if (isCustomNameReserved(name)) {
         return false;
     }
-    
+
     return true;
 }
 

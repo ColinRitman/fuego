@@ -159,6 +159,10 @@ void serialize(WalletDepositDtoV2& value, CryptoNote::ISerializer& serializer) {
   serializer(value.unlockHeight, "unlockHeight");
   serializer(value.locked, "locked");
   serializer(value.address, "address");
+  serializer(value.hasSecret, "hasSecret");
+  if (value.hasSecret) {
+    serializer(value.secret, "secret");
+  }
 }
 
 }
@@ -181,7 +185,8 @@ WalletSerializerV2::WalletSerializerV2(
   WalletDeposits& deposits,
   UncommitedTransactions& uncommitedTransactions,
   std::string& extra,
-  uint32_t transactionSoftLockTime
+  uint32_t transactionSoftLockTime,
+  std::map<std::string, std::vector<uint8_t>>& depositSecrets
 ) :
   m_transfersObserver(transfersObserver),
   m_actualBalance(actualBalance),
@@ -196,7 +201,8 @@ WalletSerializerV2::WalletSerializerV2(
   m_deposits(deposits),
   m_uncommitedTransactions(uncommitedTransactions),
   m_extra(extra),
-  m_transactionSoftLockTime(transactionSoftLockTime)
+  m_transactionSoftLockTime(transactionSoftLockTime),
+  m_depositSecrets(depositSecrets)
 {
 }
 
@@ -213,15 +219,30 @@ void WalletSerializerV2::load(Common::IInputStream& source, uint8_t version) {
     loadTransactions(s);
     loadTransfers(s);
     loadDeposits(s);
-  }
+      }
 
-  if (saveLevel == WalletSaveLevel::SAVE_ALL) {
-    loadTransfersSynchronizer(s);
-    loadUnlockTransactionsJobs(s);
-    s(m_uncommitedTransactions, "uncommitedTransactions");
-  }
+      if (saveLevel == WalletSaveLevel::SAVE_ALL) {
+        loadTransfersSynchronizer(s);
+        loadUnlockTransactionsJobs(s);
+        s(m_uncommitedTransactions, "uncommitedTransactions");
+      }
+  
+      // Load deposit secrets
+      uint64_t secretCount = 0;
+      s(secretCount, "depositSecretCount");
+  
+      m_depositSecrets.clear();
+      for (uint64_t i = 0; i < secretCount; ++i) {
+        std::string txHash;
+        std::vector<uint8_t> secret;
+    
+        s(txHash, "txHash");
+        s(secret, "secret");
+    
+        m_depositSecrets[txHash] = secret;
+      }
 
-  s(m_extra, "extra");
+      s(m_extra, "extra");
 }
 
 void WalletSerializerV2::save(Common::IOutputStream& destination, WalletSaveLevel saveLevel) {
@@ -242,10 +263,19 @@ void WalletSerializerV2::save(Common::IOutputStream& destination, WalletSaveLeve
     saveTransfersSynchronizer(s);
     saveUnlockTransactionsJobs(s);
     s(m_uncommitedTransactions, "uncommitedTransactions");
-  }
+      }
+  
+      // Save deposit secrets
+      uint64_t secretCount = m_depositSecrets.size();
+      s(secretCount, "depositSecretCount");
+  
+      for (const auto& pair : m_depositSecrets) {
+        s(pair.first, "txHash");
+        s(pair.second, "secret");
+      }
 
-  s(m_extra, "extra");
-}
+      s(m_extra, "extra");
+    }
 
 std::unordered_set<Crypto::PublicKey>& WalletSerializerV2::addedKeys() {
   return m_addedKeys;

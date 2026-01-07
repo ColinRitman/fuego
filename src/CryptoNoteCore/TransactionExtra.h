@@ -78,17 +78,8 @@ struct TransactionExtraHeatCommitment {
   Crypto::Hash commitment;       // 🔒 SECURE: Only commitment hash on blockchain
   uint64_t amount;
   std::vector<uint8_t> metadata;
-  
-  bool serialize(ISerializer& serializer);
-};
+  uint8_t claimChainCode;        // Claim chain (1=ETH, 2=SOL, 3=C0DL)
 
-struct TransactionExtraYieldCommitment {
-  Crypto::Hash commitment;
-  uint64_t amount;
-  uint32_t term_months;
-  std::string yield_scheme;
-  std::vector<uint8_t> metadata;
-  
   bool serialize(ISerializer& serializer);
 };
 
@@ -100,28 +91,39 @@ struct TransactionExtraElderfierDeposit {
   std::vector<uint8_t> metadata;   // Additional metadata
   std::vector<uint8_t> signature;   // Deposit signature
   bool isSlashable;                // True - deposits can be slashed by Elder Council
-  
+
   bool serialize(ISerializer& serializer);
   bool isValid() const;
   std::string toString() const;
 };
 
-struct TransactionExtraCDDepositSecret {
-  std::vector<uint8_t> secret_key;  // 32-byte deposit secret key
-  uint64_t xfg_amount;              // XFG amount for CD conversion
-  uint32_t apr_basis_points;        // APR in basis points
-  uint8_t term_code;                // CD term code (1=30d, 2=90d, 3=180d)
-  uint8_t chain_code;               // Chain code (1=testnet, 2=mainnet)
-  std::vector<uint8_t> metadata;    // Additional metadata
-  
+struct TransactionExtraYieldCommitment {
+  Crypto::Hash commitment;       // 🔒 SECURE: Only commitment hash on blockchain
+  uint64_t amount;               // Principal amount in XFG
+  uint32_t term;                 // Deposit term in blocks
+  std::vector<uint8_t> metadata;
+  uint8_t claimChainCode;        // Claim chain (1=ETH, 2=SOL, 3=C0DL)
+  std::string CIAId;             // Crypto Interest Asset ID (hash of token/asset)
+  std::vector<uint8_t> gift_secret;        // Secret key encrypted with recipient's view key
+                                            // Only used for gifted deposits, otherwise dummy data with pattern
+
   bool serialize(ISerializer& serializer);
 };
 
-// Removed duplicate TransactionExtraElderfierDeposit struct
-// tx_extra_field format, except tx_extra_padding and tx_extra_pub_key:
-//   varint tag;
-//   varint size;
-//   varint data[];
+struct TransactionExtraCDDepositSecret {
+  Crypto::Hash commitment;       // 🔒 SECURE: Only commitment hash on blockchain
+  uint64_t amount;               // Principal amount in XFG
+  uint32_t term;                 // Deposit term in blocks
+  std::vector<uint8_t> metadata;
+  uint8_t claimChainCode;        // Claim chain (1=ETH, 2=SOL, 3=C0DL)
+  uint32_t apr_basis_points;     // APR in basis points for CD
+  std::vector<uint8_t> gift_secret;        // Secret key encrypted with recipient's view key
+                                            // Only used for gifted deposits, otherwise dummy data with pattern
+
+  bool serialize(ISerializer& serializer);
+};
+
+
 typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraCDDepositSecret> TransactionExtraField;
 
 
@@ -163,7 +165,7 @@ bool addHeatCommitmentToExtra(std::vector<uint8_t>& tx_extra, const TransactionE
 bool getHeatCommitmentFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraHeatCommitment& commitment);
 
 // Yield commitment helper functions
-bool createTxExtraWithYieldCommitment(const Crypto::Hash& commitment, uint64_t amount, uint32_t term_months, const std::string& yield_scheme, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
+bool createTxExtraWithYieldCommitment(const Crypto::Hash& commitment, uint64_t amount, uint32_t term, const std::string& CIAId, const std::vector<uint8_t>& metadata, uint8_t claimChainCode, const std::vector<uint8_t>& gift_secret, std::vector<uint8_t>& extra);
 bool addYieldCommitmentToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraYieldCommitment& commitment);
 bool getYieldCommitmentFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraYieldCommitment& commitment);
 
@@ -173,9 +175,17 @@ bool addElderfierDepositToExtra(std::vector<uint8_t>& tx_extra, const Transactio
 bool getElderfierDepositFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraElderfierDeposit& deposit);
 
 // CD Deposit Secret helper functions
-bool createTxExtraWithCDDepositSecret(const std::vector<uint8_t>& secret_key, uint64_t xfg_amount, uint32_t apr_basis_points, uint8_t term_code, uint8_t chain_code, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
+bool createTxExtraWithCDDepositSecret(const Crypto::Hash& commitment, uint64_t amount, uint32_t term, const std::vector<uint8_t>& metadata, uint8_t claimChainCode, uint32_t apr_basis_points, const std::vector<uint8_t>& gift_secret, std::vector<uint8_t>& extra);
 bool addCDDepositSecretToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraCDDepositSecret& deposit_secret);
 bool getCDDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraCDDepositSecret& deposit_secret);
+
+// Secret encryption helper functions
+bool encryptSecretWithViewKey(const std::vector<uint8_t>& secret, const Crypto::PublicKey& recipientViewKey, std::vector<uint8_t>& gift_secret);
+bool decryptSecretWithViewKey(const std::vector<uint8_t>& gift_secret, const Crypto::SecretKey& viewSecretKey, std::vector<uint8_t>& secret);
+
+// Helper functions for handling gift_secret field
+bool isDummyGiftSecret(const std::vector<uint8_t>& gift_secret);
+std::vector<uint8_t> createDummyGiftSecret();
 
 // Helper APIs for wallet integration
 // Computes Keccak256(address || "recipient") into out_hash

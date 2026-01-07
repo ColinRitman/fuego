@@ -69,6 +69,9 @@ public:
   bool hasBurnDepositSecret(const std::string& transactionHash);
   void markBurnDepositBPDFGenerated(const std::string& transactionHash);
   std::vector<BurnDepositInfo> getAllBurnDeposits();
+  
+  // Deposit secret handling for gifted deposits
+  bool getDepositSecret(const std::string& transactionHash, std::vector<uint8_t>& secret) const;
 
 private:
 
@@ -401,6 +404,7 @@ protected:
   void getViewKeyKnownBlocks(const Crypto::PublicKey &viewPublicKey);
   CryptoNote::AccountPublicAddress getChangeDestination(const std::string &changeDestinationAddress, const std::vector<std::string> &sourceAddresses) const;
   bool isMyAddress(const std::string &address) const;
+  void processGiftedDepositSecret(const std::vector<uint8_t>& encryptedSecret, const std::string& txHash);
 
   void deleteContainerFromUnlockTransactionJobs(const ITransfersContainer *container);
   std::vector<size_t> deleteTransfersForAddress(const std::string &address, std::vector<size_t> &deletedTransactions);
@@ -450,6 +454,9 @@ protected:
 
   // Burn deposit secrets storage (local, never on blockchain)
   std::map<std::string, BurnDepositInfo> m_burnDepositSecrets;
+  
+  // Deposit secrets storage for gifted deposits (local, never on blockchain)
+  std::map<std::string, std::vector<uint8_t>> m_depositSecrets;
 };
 
 } //namespace CryptoNote

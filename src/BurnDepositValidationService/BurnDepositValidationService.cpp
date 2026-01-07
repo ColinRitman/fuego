@@ -1,3 +1,17 @@
+// Copyright (c) 2017-2026 Fuego Developers
+//
+// This file is part of Fuego.
+//
+// Fuego is free & open source software distributed in the hope that
+// it will be useful, but WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+// PURPOSE. You may redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
+
 #include "BurnDepositValidationService.h"
 #include "CryptoNoteCore/Core.h"
 #include "CryptoNoteCore/Currency.h"
@@ -53,12 +67,12 @@ BurnDepositConfig BurnDepositConfig::getDefault() {
 }
 
 bool BurnDepositConfig::isValid() const {
-    return minimumBurnAmount > 0 && 
-           maximumBurnAmount > minimumBurnAmount && 
-           proofExpirationSeconds > 0 && 
-           fastPassConsensusThreshold > 0 && 
-           fallbackConsensusThreshold > 0 && 
-           totalEldernodes > 0 && 
+    return minimumBurnAmount > 0 &&
+           maximumBurnAmount > minimumBurnAmount &&
+           proofExpirationSeconds > 0 &&
+           fastPassConsensusThreshold > 0 &&
+           fallbackConsensusThreshold > 0 &&
+           totalEldernodes > 0 &&
            fastPassConsensusThreshold <= totalEldernodes &&
            fallbackConsensusThreshold <= totalEldernodes &&
            fastPassConsensusThreshold <= fallbackConsensusThreshold;
@@ -66,10 +80,10 @@ bool BurnDepositConfig::isValid() const {
 
 // BurnProofData implementation
 bool BurnProofData::isValid() const {
-    return burnAmount > 0 && 
-           timestamp > 0 && 
-           !depositorAddress.empty() && 
-           !commitment.empty() && 
+    return burnAmount > 0 &&
+           timestamp > 0 &&
+           !depositorAddress.empty() &&
+           !commitment.empty() &&
            !txHash.empty();
 }
 
@@ -87,13 +101,13 @@ std::string BurnProofData::toString() const {
 
 // EldernodeConsensus implementation
 bool EldernodeConsensus::isValid() const {
-    return !eldernodeIds.empty() && 
-           eldernodeIds.size() == signatures.size() && 
-           !messageHash.empty() && 
-           timestamp > 0 && 
-           fastPassConsensusThreshold > 0 && 
-           fallbackConsensusThreshold > 0 && 
-           totalEldernodes > 0 && 
+    return !eldernodeIds.empty() &&
+           eldernodeIds.size() == signatures.size() &&
+           !messageHash.empty() &&
+           timestamp > 0 &&
+           fastPassConsensusThreshold > 0 &&
+           fallbackConsensusThreshold > 0 &&
+           totalEldernodes > 0 &&
            verifiedInputs.isValid();
 }
 
@@ -115,8 +129,8 @@ std::string EldernodeConsensus::toString() const {
 
 // EldernodeVerificationInputs implementation
 bool EldernodeVerificationInputs::isValid() const {
-    return !txHash.empty() && 
-           !commitment.empty() && 
+    return !txHash.empty() &&
+           !commitment.empty() &&
            burnAmount > 0;
 }
 
@@ -180,8 +194,8 @@ BurnDepositValidationResult BurnDepositValidationService::validateBurnDeposit(co
     m_totalBurnedAmount += proof.burnAmount;
 
     return BurnDepositValidationResult::success(
-        proof.burnAmount, 
-        proof.burnHash, 
+        proof.burnAmount,
+        proof.burnHash,
         proof.timestamp,
         consensus->commitmentMatch,
         consensus->burnAmountMatch,
@@ -298,27 +312,27 @@ std::optional<EldernodeConsensus> BurnDepositValidationService::requestEldernode
     if (m_config.enableFastPass && participants.size() >= m_config.fastPassConsensusThreshold) {
         consensus.fastPassUsed = true;
         consensus.fallbackPathUsed = false;
-        
+
         // Simulate fast pass Eldernode responses
         for (size_t i = 0; i < participants.size() && i < m_config.fastPassConsensusThreshold; ++i) {
             consensus.eldernodeIds.push_back(participants[i].address);
             consensus.signatures.push_back("fast_pass_signature_" + std::to_string(i));  // Placeholder
         }
-        
+
         return consensus;
     }
-    
+
     // Fallback to robust consensus (4/5)
     if (participants.size() >= m_config.fallbackConsensusThreshold) {
         consensus.fastPassUsed = false;
         consensus.fallbackPathUsed = true;
-        
+
         // Simulate fallback Eldernode responses
         for (size_t i = 0; i < participants.size() && i < m_config.fallbackConsensusThreshold; ++i) {
             consensus.eldernodeIds.push_back(participants[i].address);
             consensus.signatures.push_back("fallback_signature_" + std::to_string(i));  // Placeholder
         }
-        
+
         return consensus;
     }
 

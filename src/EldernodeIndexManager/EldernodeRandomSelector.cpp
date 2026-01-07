@@ -1,3 +1,17 @@
+// Copyright (c) 2017-2026 Fuego Developers
+//
+// This file is part of Fuego.
+//
+// Fuego is free & open source software distributed in the hope that
+// it will be useful, but WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+// PURPOSE. You may redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
+
 #include "ElderfierDepositManager.h"
 #include "EldernodeIndexTypes.h"
 #include "CryptoTypes.h"
@@ -11,19 +25,19 @@ namespace CryptoNote {
 class EldernodeRandomSelector {
 public:
     EldernodeRandomSelector(Logging::ILogger& logger) : logger(logger, "EldernodeRandomSelector") {}
-    
+
     // Select exactly 2 Elderfiers for verification using provably fair random selection
     ElderfierSelectionResult selectElderfiersForVerification(
         const std::vector<EldernodeConsensusParticipant>& availableElderfiers,
         uint64_t blockHeight,
         const Crypto::Hash& blockHash) const {
-        
+
         logger(Logging::INFO) << "Selecting Elderfiers for verification at block " << blockHeight;
-        
+
         ElderfierSelectionResult result;
         result.blockHeight = blockHeight;
         result.selectionHash = blockHash;
-        
+
         // Filter only active Elderfiers
         std::vector<EldernodeConsensusParticipant> activeElderfiers;
         for (const auto& elderfier : availableElderfiers) {
@@ -31,19 +45,19 @@ public:
                 activeElderfiers.push_back(elderfier);
             }
         }
-        
+
         if (activeElderfiers.size() < 2) {
             logger(Logging::WARNING) << "Not enough active Elderfiers for selection: " << activeElderfiers.size();
             return result; // Return empty result
         }
-        
+
         // Calculate total weight (sum of all selection multipliers)
         result.totalWeight = 0;
         for (const auto& elderfier : activeElderfiers) {
             result.totalWeight += elderfier.selectionMultiplier;
             result.selectionWeights.push_back(elderfier.selectionMultiplier);
         }
-        
+
         // Create weighted selection pool
         std::vector<size_t> selectionPool;
         for (size_t i = 0; i < activeElderfiers.size(); ++i) {
@@ -51,32 +65,32 @@ public:
                 selectionPool.push_back(i);
             }
         }
-        
+
         // Use block hash as seed for provably fair randomness
         std::seed_seq seed_seq(blockHash.data, blockHash.data + sizeof(blockHash.data));
         std::mt19937 rng(seed_seq);
-        
+
         // Select first Elderfier
         std::uniform_int_distribution<size_t> dist1(0, selectionPool.size() - 1);
         size_t firstIndex = selectionPool[dist1(rng)];
         result.selectedElderfiers.push_back(activeElderfiers[firstIndex]);
-        
+
         // Remove selected Elderfier from pool to avoid duplicate selection
         selectionPool.erase(std::remove(selectionPool.begin(), selectionPool.end(), firstIndex), selectionPool.end());
-        
+
         // Select second Elderfier
         if (!selectionPool.empty()) {
             std::uniform_int_distribution<size_t> dist2(0, selectionPool.size() - 1);
             size_t secondIndex = selectionPool[dist2(rng)];
             result.selectedElderfiers.push_back(activeElderfiers[secondIndex]);
         }
-        
-        logger(Logging::INFO) << "Selected " << result.selectedElderfiers.size() 
+
+        logger(Logging::INFO) << "Selected " << result.selectedElderfiers.size()
                               << " Elderfiers with total weight " << result.totalWeight;
-        
+
         return result;
     }
-    
+
     // Calculate selection multiplier based on uptime duration
     uint32_t calculateSelectionMultiplier(uint64_t totalUptimeSeconds) const {
         if (totalUptimeSeconds < SelectionMultipliers::MONTH_1_SECONDS) {
@@ -93,32 +107,32 @@ public:
             return SelectionMultipliers::MAX_MULTIPLIER;             // Cap at 16x (2+ years)
         }
     }
-    
+
     // Validate selection result
     bool validateSelectionResult(const ElderfierSelectionResult& result) const {
         if (result.selectedElderfiers.size() != 2) {
-            logger(Logging::ERROR) << "Invalid selection: expected 2 Elderfiers, got " 
+            logger(Logging::ERROR) << "Invalid selection: expected 2 Elderfiers, got "
                                    << result.selectedElderfiers.size();
             return false;
         }
-        
+
         // Check for duplicates
         if (result.selectedElderfiers[0].publicKey == result.selectedElderfiers[1].publicKey) {
             logger(Logging::ERROR) << "Invalid selection: duplicate Elderfiers selected";
             return false;
         }
-        
+
         // Verify total weight calculation
         uint64_t calculatedWeight = 0;
         for (const auto& weight : result.selectionWeights) {
             calculatedWeight += weight;
         }
-        
+
         if (calculatedWeight != result.totalWeight) {
             logger(Logging::ERROR) << "Invalid selection: weight mismatch";
             return false;
         }
-        
+
         return true;
     }
 

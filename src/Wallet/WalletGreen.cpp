@@ -634,7 +634,38 @@ namespace CryptoNote
       
       /* Add YIELD commitment to transaction extra */
       std::vector<uint8_t> extra;
-      if (!CryptoNote::createTxExtraWithYieldCommitment(finalCommitment.commitment, amount, term, "standard", finalCommitment.metadata, extra))
+      
+      /* Check if this is a gifted deposit (destination different from source) */
+      bool isGiftedDeposit = (sourceAddress.empty() || destinationAddress != sourceAddress);
+      std::vector<uint8_t> giftSecret;
+      
+      if (isGiftedDeposit) {
+        /* For gifted deposits, encrypt the secret with recipient's view key */
+        try {
+          /* Get recipient's view public key */
+          CryptoNote::AccountPublicAddress recipientAddr = parseAddress(destinationAddress);
+          
+          /* Get the secret used in the commitment */
+          std::vector<uint8_t> secretKey(finalCommitment.commitment.data, finalCommitment.commitment.data + 32);
+          
+          /* Encrypt the secret with recipient's view key */
+          if (CryptoNote::encryptSecretWithViewKey(secretKey, recipientAddr.viewPublicKey, giftSecret)) {
+            m_logger(DEBUGGING, BRIGHT_GREEN) << "Secret encrypted for gifted deposit to: " << destinationAddress;
+          } else {
+            m_logger(WARNING, BRIGHT_YELLOW) << "Failed to encrypt secret for gifted deposit";
+          }
+        } catch (...) {
+          m_logger(WARNING, BRIGHT_YELLOW) << "Exception while encrypting secret for gifted deposit";
+        }
+      } else {
+        /* For non-gifted deposits, add dummy gift_secret to maintain consistent structure */
+        giftSecret = CryptoNote::createDummyGiftSecret();  // 32 bytes of 0xFF as pattern
+      }
+      
+      string CIAId = "d4e56740f876aef8c010b86a40d5f56745a118d0906a34e69aec8c0db1cb8fa3";  // ETH token hash (default)
+      uint8_t claimChainCode = 1;           // 1=ETH, 2=SOL, 3=C0DL
+      
+      if (!CryptoNote::createTxExtraWithYieldCommitment(finalCommitment.commitment, amount, term, CIAId, finalCommitment.metadata, claimChainCode, giftSecret, extra))
       {
         throw std::system_error(make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR), "Failed to create YIELD commitment in transaction extra");
       }
@@ -643,6 +674,11 @@ namespace CryptoNote
       transaction->appendExtra(extra);
       
       m_logger(DEBUGGING, BRIGHT_GREEN) << "YIELD commitment added to yield deposit transaction: " << amount << " XFG";
+      if (isGiftedDeposit) {
+        m_logger(DEBUGGING, BRIGHT_GREEN) << "Gifted deposit with encrypted gift_secret for recipient: " << destinationAddress;
+      } else {
+        m_logger(DEBUGGING) << "Self-deposit with dummy gift_secret field";
+      }
     }
 
     /* Add the transaction extra for messages (if any) */
@@ -898,7 +934,8 @@ namespace CryptoNote
         m_deposits,
         m_uncommitedTransactions,
         const_cast<std::string &>(extra),
-        m_transactionSoftLockTime);
+        m_transactionSoftLockTime,
+        m_depositSecrets);
     s.save(containerStream, saveLevel);
     encryptAndSaveContainerData(storage, key, containerData.data(), containerData.size());
     storage.flush();
@@ -3504,38 +3541,92 @@ namespace CryptoNote
     return insertDeposit(deposit, depositOutput.outputInTransaction, depositOutput.transactionHash);
   }
 
+  void WalletGreen::processGiftedDepositSecret(const std::vector<uint8_t>& giftSecret, const std::string& txHash)
+  {
+    /* Check if this is dummy data (all 0xFF for self-deposits) */
+    if (CryptoNote::isDummyGiftSecret(giftSecret)) {
+      m_logger(DEBUGGING) << "Skipping dummy gift_secret for self-deposit: " << txHash;
+      return;
+    }
+    
+    try {
+      /* Try to decrypt with each of our view keys */
+      for (size_t i = 0; i < m_walletsContainer.get<RandomAccessIndex>().size(); ++i) {
+        const auto& wallet = m_walletsContainer.get<RandomAccessIndex>()[i];
+        
+        std::vector<uint8_t> decryptedSecret;
+        if (CryptoNote::decryptSecretWithViewKey(giftSecret, wallet.viewSecretKey, decryptedSecret)) {
+          /* Store the decrypted secret for this transaction */
+          m_depositSecrets[txHash] = decryptedSecret;
+          
+          m_logger(DEBUGGING, BRIGHT_GREEN) << "Successfully decrypted secret for gifted deposit: " << txHash;
+          return;
+        }
+      }
+      
+      m_logger(DEBUGGING, BRIGHT_YELLOW) << "Could not decrypt secret for gifted deposit: " << txHash;
+    } catch (...) {
+      m_logger(WARNING, BRIGHT_RED) << "Exception while processing gifted deposit secret: " << txHash;
+    }
+  }
+
   DepositId WalletGreen::insertDeposit(
       const Deposit &deposit,
       size_t depositIndexInTransaction,
       const Hash &transactionHash)
   {
+      Deposit info = deposit;
 
-    Deposit info = deposit;
+      info.outputInTransaction = static_cast<uint32_t>(depositIndexInTransaction);
+      info.transactionHash = transactionHash;
 
-    info.outputInTransaction = static_cast<uint32_t>(depositIndexInTransaction);
-    info.transactionHash = transactionHash;
+      auto &hashIndex = m_transactions.get<TransactionIndex>();
+      auto it = hashIndex.find(transactionHash);
+      if (it == hashIndex.end())
+      {
+          throw std::system_error(make_error_code(error::OBJECT_NOT_FOUND), "Transaction not found");
+      }
 
-    auto &hashIndex = m_transactions.get<TransactionIndex>();
-    auto it = hashIndex.find(transactionHash);
-    if (it == hashIndex.end())
-    {
-      throw std::system_error(make_error_code(error::OBJECT_NOT_FOUND), "Transaction not found");
-    }
+      WalletTransactionWithTransfers walletTransaction;
+      walletTransaction.transaction = *it;
+      walletTransaction.transfers = getTransactionTransfers(*it);
 
-    WalletTransactionWithTransfers walletTransaction;
-    walletTransaction.transaction = *it;
-    walletTransaction.transfers = getTransactionTransfers(*it);
+      /* Check if this transaction has a YieldCommitment with encrypted secret */
+      std::vector<TransactionExtraField> extraFields;
+      parseTransactionExtra(walletTransaction.transaction.extra, extraFields);
+        
+      for (const auto& field : extraFields) {
+        if (field.type() == typeid(TransactionExtraYieldCommitment)) {
+          const auto& yc = boost::get<TransactionExtraYieldCommitment>(field);
+          if (!yc.gift_secret.empty()) {
+            /* Process the secret - will detect if it's dummy data for self-deposits */
+            std::string txHashStr = Common::podToHex(transactionHash);
+            processGiftedDepositSecret(yc.gift_secret, txHashStr);
+            break;
+          }
+        }
+      }
 
-    DepositId id = m_deposits.size();
-    m_deposits.push_back(std::move(info));
+      DepositId id = m_deposits.size();
+      m_deposits.push_back(std::move(info));
 
-    m_logger(DEBUGGING, BRIGHT_GREEN) << "New deposit created, id "
-                                      << id << ", locking "
-                                      << m_currency.formatAmount(deposit.amount) << " ,for a term of "
-                                      << deposit.term << " blocks, at block "
-                                      << deposit.height;
+      m_logger(DEBUGGING, BRIGHT_GREEN) << "New deposit created, id "
+                                        << id << ", locking "
+                                        << m_currency.formatAmount(deposit.amount) << " ,for a term of "
+                                        << deposit.term << " blocks, at block "
+                                        << deposit.height;
 
     return id;
+  }
+
+  bool WalletGreen::getDepositSecret(const std::string& transactionHash, std::vector<uint8_t>& secret) const
+  {
+    auto it = m_depositSecrets.find(transactionHash);
+    if (it != m_depositSecrets.end()) {
+      secret = it->second;
+      return true;
+    }
+    return false;
   }
 
   /* Process transactions, this covers both new transactions AND confirmed transactions */

@@ -88,7 +88,8 @@ private:
   WalletDeposits& m_deposits;
   UncommitedTransactions& m_uncommitedTransactions;
   std::string& m_extra;
-  uint32_t m_transactionSoftLockTime;
+  uint32_t& m_transactionSoftLockTime;
+  std::map<std::string, std::vector<uint8_t>>& m_depositSecrets;
 
   std::unordered_set<Crypto::PublicKey> m_addedKeys;
   std::unordered_set<Crypto::PublicKey> m_deletedKeys;
