@@ -184,16 +184,22 @@ BankingIndex::BurnedAmount BankingIndex::getBurnedXfgAtHeight(DepositHeight heig
 
 void BankingIndex::addForeverDeposit(BurnedAmount amount, DepositHeight height) {
   if (amount == 0) return;
-  
+
   // Add to regular deposit tracking (existing functionality)
   // Note: This would typically be called from the wallet when creating a FOREVER deposit
   // pushBlock(static_cast<DepositAmount>(amount), 0);
-  
+
   // Add to burned XFG tracking (new functionality)
+  // SECURITY: Check for overflow before adding to cumulative burned amount
+  const uint64_t MAX_BURNED = std::numeric_limits<uint64_t>::max();
+  assert(amount <= MAX_BURNED - m_ethernalXFG && "addForeverDeposit: Overflow in cumulative burned amount!");
+
   m_ethernalXFG += amount;
-  
+
   if (!m_burnedXfgEntries.empty() && m_burnedXfgEntries.back().height == height) {
     // Update existing entry
+    // SECURITY: Check for overflow in entry amount as well
+    assert(amount <= MAX_BURNED - m_burnedXfgEntries.back().amount && "addForeverDeposit: Overflow in entry amount!");
     m_burnedXfgEntries.back().amount += amount;
     m_burnedXfgEntries.back().cumulative_burned = m_ethernalXFG;
   } else {

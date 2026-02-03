@@ -17,6 +17,7 @@
 
 #include "TransactionExtra.h"
 #include "CryptoNoteTools.h"
+#include "CryptoNoteConfig.h"
 #include "crypto/hash.h"
 #include "crypto/chacha8.h"
 #include "Common/int-util.h"
@@ -171,9 +172,9 @@ namespace CryptoNote
 
         case TX_EXTRA_COLD_COMMITMENT:
         {
-          TransactionExtraCDDepositSecret cdDepositSecret;
-          if (getCDDepositSecretFromExtra(transactionExtra, cdDepositSecret)) {
-            transactionExtraFields.push_back(cdDepositSecret);
+          TransactionExtraColdCommitment coldCommitment;
+          if (getColdCommitmentFromExtra(transactionExtra, coldCommitment)) {
+            transactionExtraFields.push_back(coldCommitment);
           } else {
             return false;
           }
@@ -603,15 +604,14 @@ namespace CryptoNote
     return true;
   }
 
-  // CD Deposit Secret serialization
-  bool TransactionExtraCDDepositSecret::serialize(ISerializer& s)
+  // COLD Commitment serialization (unified format, no APR - derived from tier in smart contract)
+  bool TransactionExtraColdCommitment::serialize(ISerializer& s)
   {
     s(commitment, "commitment");
     s(amount, "amount");
     s(term, "term");
     s(metadata, "metadata");
     s(claimChainCode, "claimChainCode");
-    s(apr_basis_points, "apr_basis_points");
     s(gift_secret, "gift_secret");
     return true;
   }
@@ -1228,125 +1228,31 @@ namespace CryptoNote
     return true;
   }
 
-  bool getCDDepositSecretFromExtra(const std::vector<uint8_t> &tx_extra, TransactionExtraCDDepositSecret &deposit_secret)
+  // ---------------- UNIFIED COMMITMENT FORMAT ----------------
+  // PRIVACY MODEL: No recipient in commitment.
+  // Contract mints to msg.sender, nullifier prevents replay.
+  // Whoever has the secret owns the deposit.
+  //
+  // UNIFIED PREIMAGE (88 bytes):
+  //   keccak256(secret || le64(amount) || tx_prefix_hash || network_id || target_chain_id || version || le32(term))
+  //
+  // HEAT burns use: term = DEPOSIT_TERM_FOREVER (0xFFFFFFFF)
+  // COLD deposits use: actual term in blocks
+  //
+  // This unified format allows both HEAT and COLD to use the same verification logic,
+  // differing only in the term value.
+
+  Crypto::Hash computeCommitment(const std::array<uint8_t, 32> &secret,
+                                 uint64_t amount_atomic,
+                                 const Crypto::Hash &tx_prefix_hash,
+                                 uint32_t network_id,
+                                 uint32_t target_chain_id,
+                                 uint32_t commitment_version,
+                                 uint32_t term)
   {
-    if (tx_extra.empty() || tx_extra[0] != TX_EXTRA_COLD_COMMITMENT) {
-      return false;
-    }
-
-    size_t pos = 1;
-
-    // Deserialize commitment hash (32 bytes)
-    if (pos + 32 > tx_extra.size()) return false;
-    std::memcpy(deposit_secret.commitment.data, &tx_extra[pos], 32);
-    pos += 32;
-
-    // Deserialize amount (8 bytes, little-endian)
-    if (pos + 8 > tx_extra.size()) return false;
-    deposit_secret.amount = 0;
-    for (int i = 0; i < 8; ++i) {
-      deposit_secret.amount |= static_cast<uint64_t>(tx_extra[pos + i]) << (i * 8);
-    }
-    pos += 8;
-
-    // Deserialize term (4 bytes, little-endian)
-    if (pos + 4 > tx_extra.size()) return false;
-    deposit_secret.term = 0;
-    for (int i = 0; i < 4; ++i) {
-      deposit_secret.term |= static_cast<uint32_t>(tx_extra[pos + i]) << (i * 8);
-    }
-    pos += 4;
-
-    // Deserialize metadata size and data
-    if (pos >= tx_extra.size()) return false;
-    uint8_t metadataSize = tx_extra[pos];
-    pos += 1;
-
-    if (pos + metadataSize > tx_extra.size()) return false;
-    if (metadataSize > 0) {
-      deposit_secret.metadata.assign(&tx_extra[pos], &tx_extra[pos] + metadataSize);
-      pos += metadataSize;
-    } else {
-      deposit_secret.metadata.clear();
-    }
-
-    // Deserialize claimChainCode (1 byte)
-    if (pos >= tx_extra.size()) return false;
-    deposit_secret.claimChainCode = tx_extra[pos];
-    pos += 1;
-
-    // Deserialize APR basis points (4 bytes, little-endian)
-    if (pos + 4 > tx_extra.size()) return false;
-    deposit_secret.apr_basis_points = 0;
-    for (int i = 0; i < 4; ++i) {
-      deposit_secret.apr_basis_points |= static_cast<uint32_t>(tx_extra[pos + i]) << (i * 8);
-    }
-    pos += 4;
-
-    // Deserialize gift_secret size and data
-    if (pos >= tx_extra.size()) return false;
-    uint8_t giftSecretSize = tx_extra[pos];
-    pos += 1;
-
-    if (pos + giftSecretSize > tx_extra.size()) return false;
-    if (giftSecretSize > 0) {
-      deposit_secret.gift_secret.assign(&tx_extra[pos], &tx_extra[pos] + giftSecretSize);
-    } else {
-      deposit_secret.gift_secret.clear();
-    }
-
-    return true;
-  }
-
-  // ---------------- HEAT wallet helpers ----------------
-  // Computes Keccak256(address || "recipient") into out_hash
-  bool computeHeatRecipientHash(const std::string &eth_address, Crypto::Hash &out_hash)
-  {
-    // Normalize and decode 0x-prefixed hex address
-    std::string addr = eth_address;
-    if (addr.size() >= 2 && (addr[0] == '0') && (addr[1] == 'x' || addr[1] == 'X')) {
-      addr = addr.substr(2);
-    }
-    std::vector<uint8_t> addr_bytes;
-    try {
-      if (!Common::fromHex(addr, addr_bytes)) {
-        return false;
-      }
-    } catch (...) {
-      return false;
-    }
-    if (addr_bytes.size() != 20) {
-      return false;
-    }
-
-    // Compute Keccak256(address || "recipient")
-    uint8_t md[32];
     std::vector<uint8_t> preimage;
-    preimage.reserve(20 + 9);
-    preimage.insert(preimage.end(), addr_bytes.begin(), addr_bytes.end());
-    static const char tag[] = "recipient";
-    preimage.insert(preimage.end(), reinterpret_cast<const uint8_t*>(tag), reinterpret_cast<const uint8_t*>(tag) + sizeof(tag) - 1);
-    keccak(preimage.data(), static_cast<int>(preimage.size()), md, sizeof(md));
-    memcpy(&out_hash, md, sizeof(out_hash));
-    return true;
-  }
-
-  // Computes Keccak256(secret || le64(amount) || tx_prefix_hash || recipient_hash || network_id || target_chain_id || version)
-  Crypto::Hash computeHeatCommitment(const std::array<uint8_t, 32> &secret,
-                                     uint64_t amount_atomic,
-                                     const Crypto::Hash &tx_prefix_hash,
-                                     const std::string &eth_address,
-                                     uint32_t network_id,
-                                     uint32_t target_chain_id,
-                                     uint32_t commitment_version)
-  {
-    Crypto::Hash recipient_hash = {};
-    if (!computeHeatRecipientHash(eth_address, recipient_hash)) {
-      return Crypto::Hash{};
-    }
-
-    std::vector<uint8_t> preimage;
-    preimage.reserve(32 + 8 + 32 + 32 + 4 + 4 + 4); // secret + amount + tx_prefix_hash + recipient_hash + network_id + target_chain_id + version
+    // 32 (secret) + 8 (amount) + 32 (tx_hash) + 4 (network) + 4 (chain) + 4 (version) + 4 (term) = 88 bytes
+    preimage.reserve(88);
 
     // Secret (32 bytes)
     preimage.insert(preimage.end(), secret.begin(), secret.end());
@@ -1361,8 +1267,7 @@ namespace CryptoNote
     // Tx prefix hash (32 bytes)
     preimage.insert(preimage.end(), reinterpret_cast<const uint8_t*>(&tx_prefix_hash), reinterpret_cast<const uint8_t*>(&tx_prefix_hash) + sizeof(tx_prefix_hash));
 
-    // Recipient hash (32 bytes)
-    preimage.insert(preimage.end(), reinterpret_cast<const uint8_t*>(&recipient_hash), reinterpret_cast<const uint8_t*>(&recipient_hash) + sizeof(recipient_hash));
+    // NO recipient_hash - privacy preserving! Recipient binding at STARK proof time.
 
     // Network ID (4 bytes, LE)
     uint32_t net_id = network_id;
@@ -1385,6 +1290,15 @@ namespace CryptoNote
       version >>= 8;
     }
 
+    // Term (4 bytes, LE) - UNIFIED for HEAT and COLD
+    // HEAT: 0xFFFFFFFF (DEPOSIT_TERM_FOREVER)
+    // COLD: actual term in blocks
+    uint32_t t = term;
+    for (int i = 0; i < 4; ++i) {
+      preimage.push_back(static_cast<uint8_t>(t & 0xFF));
+      t >>= 8;
+    }
+
     uint8_t md[32];
     keccak(preimage.data(), static_cast<int>(preimage.size()), md, sizeof(md));
     Crypto::Hash out{};
@@ -1392,19 +1306,31 @@ namespace CryptoNote
     return out;
   }
 
+  // HEAT convenience wrapper - uses DEPOSIT_TERM_FOREVER for term
+  Crypto::Hash computeHeatCommitment(const std::array<uint8_t, 32> &secret,
+                                     uint64_t amount_atomic,
+                                     const Crypto::Hash &tx_prefix_hash,
+                                     uint32_t network_id,
+                                     uint32_t target_chain_id,
+                                     uint32_t commitment_version)
+  {
+    // Use DEPOSIT_TERM_FOREVER (0xFFFFFFFF) for HEAT burns
+    return computeCommitment(secret, amount_atomic, tx_prefix_hash, network_id, target_chain_id, commitment_version, parameters::DEPOSIT_TERM_FOREVER);
+  }
+
   // Builds tx.extra with TX_EXTRA_HEAT_COMMITMENT (0x08)
+  // PRIVACY MODEL: No ETH address - recipient binding at STARK proof time
   bool buildHeatExtra(const std::array<uint8_t, 32> &secret,
                       uint64_t amount_atomic,
                       const Crypto::Hash &tx_prefix_hash,
-                      const std::string &eth_address,
                       uint32_t network_id,
                       uint32_t target_chain_id,
                       uint32_t commitment_version,
                       const std::vector<uint8_t> &metadata,
                       std::vector<uint8_t> &extra)
   {
-    // Compute commitment with full domain separation
-    Crypto::Hash commitment = computeHeatCommitment(secret, amount_atomic, tx_prefix_hash, eth_address, network_id, target_chain_id, commitment_version);
+    // Compute commitment (no recipient - privacy preserving)
+    Crypto::Hash commitment = computeHeatCommitment(secret, amount_atomic, tx_prefix_hash, network_id, target_chain_id, commitment_version);
 
     // If commitment is zero (failed), bail
     const Crypto::Hash zero = {};
@@ -1415,80 +1341,184 @@ namespace CryptoNote
     return CryptoNote::createTxExtraWithHeatCommitment(commitment, amount_atomic, metadata, extra);
   }
 
-  // CD Deposit Secret helper functions
-  bool addCDDepositSecretToExtra(std::vector<uint8_t> &tx_extra, const CryptoNote::TransactionExtraCDDepositSecret &deposit_secret)
+  // COLD convenience wrapper - same as computeCommitment, named for clarity
+  Crypto::Hash computeColdCommitment(const std::array<uint8_t, 32> &secret,
+                                     uint64_t amount_atomic,
+                                     const Crypto::Hash &tx_prefix_hash,
+                                     uint32_t network_id,
+                                     uint32_t target_chain_id,
+                                     uint32_t commitment_version,
+                                     uint32_t term)
+  {
+    // Use the unified commitment format
+    return computeCommitment(secret, amount_atomic, tx_prefix_hash, network_id, target_chain_id, commitment_version, term);
+  }
+
+  // Builds tx.extra with TX_EXTRA_COLD_COMMITMENT (0xCD)
+  // PRIVACY MODEL: No ETH address parameter - recipient binding at STARK proof time
+  bool buildColdExtra(const std::array<uint8_t, 32> &secret,
+                      uint64_t amount_atomic,
+                      const Crypto::Hash &tx_prefix_hash,
+                      uint32_t network_id,
+                      uint32_t target_chain_id,
+                      uint32_t commitment_version,
+                      uint32_t term,
+                      uint8_t claimChainCode,
+                      const std::vector<uint8_t> &metadata,
+                      const std::vector<uint8_t> &gift_secret,
+                      std::vector<uint8_t> &extra)
+  {
+    // Compute commitment (no recipient - privacy preserving)
+    Crypto::Hash commitment = computeColdCommitment(secret, amount_atomic, tx_prefix_hash, network_id, target_chain_id, commitment_version, term);
+
+    // If commitment is zero (failed), bail
+    const Crypto::Hash zero = {};
+    if (!memcmp(&commitment, &zero, sizeof(zero))) {
+      return false;
+    }
+
+    return CryptoNote::createTxExtraWithColdCommitment(commitment, amount_atomic, term, claimChainCode, metadata, gift_secret, extra);
+  }
+
+  // COLD Commitment helper functions - unified format matching HEAT style
+  bool addColdCommitmentToExtra(std::vector<uint8_t> &tx_extra, const CryptoNote::TransactionExtraColdCommitment &commitment)
   {
     tx_extra.push_back(TX_EXTRA_COLD_COMMITMENT);
 
-    // Serialize secret key (32 bytes)
-    // Note: In the old implementation, the secret key was stored directly
-    // In the new struct, we'd need to derive it or store it separately
-    // For now, we'll serialize a dummy 32-byte value
-    for (int i = 0; i < 32; ++i) {
-      tx_extra.push_back(0);
-    }
+    // Commitment hash (32 bytes) - real keccak256 hash, not dummy zeros
+    tx_extra.insert(tx_extra.end(), commitment.commitment.data, commitment.commitment.data + 32);
 
-    // Serialize amount (8 bytes, little-endian)
-    uint64_t amount = deposit_secret.amount;
+    // Amount (8 bytes, little-endian)
+    uint64_t amount = commitment.amount;
     for (int i = 0; i < 8; ++i) {
       tx_extra.push_back(static_cast<uint8_t>(amount & 0xFF));
       amount >>= 8;
     }
 
-    // Serialize APR basis points (4 bytes, little-endian)
-    uint32_t apr_basis_points = deposit_secret.apr_basis_points;
+    // Term (4 bytes, little-endian) - in blocks
+    uint32_t term = commitment.term;
     for (int i = 0; i < 4; ++i) {
-      tx_extra.push_back(static_cast<uint8_t>(apr_basis_points & 0xFF));
-      apr_basis_points >>= 8;
+      tx_extra.push_back(static_cast<uint8_t>(term & 0xFF));
+      term >>= 8;
     }
 
-    // Serialize term code (1 byte)
-    tx_extra.push_back(static_cast<uint8_t>(deposit_secret.term)); // Using term field to store term_code
+    // Chain code (1 byte)
+    tx_extra.push_back(commitment.claimChainCode);
 
-    // Serialize chain code (1 byte)
-    tx_extra.push_back(deposit_secret.claimChainCode);
-
-    // Serialize metadata size and data
-    uint8_t metadataSize = static_cast<uint8_t>(deposit_secret.metadata.size());
+    // Metadata size and data
+    uint8_t metadataSize = static_cast<uint8_t>(commitment.metadata.size());
     tx_extra.push_back(metadataSize);
     if (metadataSize > 0) {
-      tx_extra.insert(tx_extra.end(), deposit_secret.metadata.begin(), deposit_secret.metadata.end());
+      tx_extra.insert(tx_extra.end(), commitment.metadata.begin(), commitment.metadata.end());
     }
 
-    // Serialize claimChainCode (1 byte) - this was duplicated, removing one instance
-    // tx_extra.push_back(deposit_secret.claimChainCode);
-
-    // Serialize gift_secret size and data
-    uint8_t giftSecretSize = static_cast<uint8_t>(deposit_secret.gift_secret.size());
+    // Gift secret size and data (0 if not gifting)
+    uint8_t giftSecretSize = static_cast<uint8_t>(commitment.gift_secret.size());
     tx_extra.push_back(giftSecretSize);
     if (giftSecretSize > 0) {
-      tx_extra.insert(tx_extra.end(), deposit_secret.gift_secret.begin(), deposit_secret.gift_secret.end());
+      tx_extra.insert(tx_extra.end(), commitment.gift_secret.begin(), commitment.gift_secret.end());
     }
 
     return true;
   }
 
-  bool createTxExtraWithCDDepositSecret(const std::vector<uint8_t> &secret_key, uint64_t amount, uint32_t apr_basis_points, uint8_t term_code, uint8_t chain_code, const std::vector<uint8_t> &metadata, std::vector<uint8_t> &extra)
+  bool createTxExtraWithColdCommitment(const Crypto::Hash &commitment, uint64_t amount, uint32_t term,
+                                        uint8_t claimChainCode, const std::vector<uint8_t> &metadata,
+                                        const std::vector<uint8_t> &gift_secret, std::vector<uint8_t> &extra)
   {
-    TransactionExtraCDDepositSecret depositSecret;
-    // Create a dummy commitment hash from the secret key
-    if (secret_key.size() >= sizeof(depositSecret.commitment.data)) {
-      memcpy(depositSecret.commitment.data, secret_key.data(), sizeof(depositSecret.commitment.data));
-    } else {
-      memset(depositSecret.commitment.data, 0, sizeof(depositSecret.commitment.data));
-      if (!secret_key.empty()) {
-        memcpy(depositSecret.commitment.data, secret_key.data(), secret_key.size());
-      }
-    }
-    depositSecret.amount = amount;
-    depositSecret.term = term_code; // Store term_code in term field
-    depositSecret.metadata = metadata;
-    depositSecret.claimChainCode = chain_code;
-    depositSecret.apr_basis_points = apr_basis_points;
-    // Create empty gift secret
-    depositSecret.gift_secret = std::vector<uint8_t>();
+    TransactionExtraColdCommitment coldCommitment;
+    coldCommitment.commitment = commitment;
+    coldCommitment.amount = amount;
+    coldCommitment.term = term;
+    coldCommitment.claimChainCode = claimChainCode;
+    coldCommitment.metadata = metadata;
+    coldCommitment.gift_secret = gift_secret;
 
-    return addCDDepositSecretToExtra(extra, depositSecret);
+    return addColdCommitmentToExtra(extra, coldCommitment);
+  }
+
+  bool getColdCommitmentFromExtra(const std::vector<uint8_t> &tx_extra, TransactionExtraColdCommitment &commitment)
+  {
+    // Find the 0xCD tag in tx_extra
+    size_t pos = 0;
+    bool found = false;
+
+    while (pos < tx_extra.size()) {
+      if (tx_extra[pos] == TX_EXTRA_COLD_COMMITMENT) {
+        found = true;
+        pos++; // Skip tag
+        break;
+      }
+      // Skip other tags (simplified - just look for 0xCD)
+      pos++;
+    }
+
+    if (!found || pos >= tx_extra.size()) {
+      return false;
+    }
+
+    // Parse COLD commitment data in new format:
+    // [commitment: 32 bytes]
+    // [amount: 8 bytes LE]
+    // [term: 4 bytes LE]
+    // [chain_code: 1 byte]
+    // [metadata_len: 1 byte]
+    // [metadata: variable]
+    // [gift_secret_len: 1 byte]
+    // [gift_secret: variable]
+
+    // Commitment hash (32 bytes)
+    if (pos + 32 > tx_extra.size()) return false;
+    std::memcpy(commitment.commitment.data, &tx_extra[pos], 32);
+    pos += 32;
+
+    // Amount (8 bytes, little-endian)
+    if (pos + 8 > tx_extra.size()) return false;
+    commitment.amount = 0;
+    for (int i = 0; i < 8; ++i) {
+      commitment.amount |= static_cast<uint64_t>(tx_extra[pos + i]) << (i * 8);
+    }
+    pos += 8;
+
+    // Term (4 bytes, little-endian)
+    if (pos + 4 > tx_extra.size()) return false;
+    commitment.term = 0;
+    for (int i = 0; i < 4; ++i) {
+      commitment.term |= static_cast<uint32_t>(tx_extra[pos + i]) << (i * 8);
+    }
+    pos += 4;
+
+    // Chain code (1 byte)
+    if (pos >= tx_extra.size()) return false;
+    commitment.claimChainCode = tx_extra[pos];
+    pos += 1;
+
+    // Metadata size and data
+    if (pos >= tx_extra.size()) return false;
+    uint8_t metadataSize = tx_extra[pos];
+    pos += 1;
+
+    if (pos + metadataSize > tx_extra.size()) return false;
+    if (metadataSize > 0) {
+      commitment.metadata.assign(&tx_extra[pos], &tx_extra[pos] + metadataSize);
+      pos += metadataSize;
+    } else {
+      commitment.metadata.clear();
+    }
+
+    // Gift secret size and data
+    if (pos >= tx_extra.size()) return false;
+    uint8_t giftSecretSize = tx_extra[pos];
+    pos += 1;
+
+    if (pos + giftSecretSize > tx_extra.size()) return false;
+    if (giftSecretSize > 0) {
+      commitment.gift_secret.assign(&tx_extra[pos], &tx_extra[pos] + giftSecretSize);
+    } else {
+      commitment.gift_secret.clear();
+    }
+
+    return true;
   }
 
 
@@ -1771,21 +1801,27 @@ namespace CryptoNote
     return addDepositReceiptToExtra(extra, depositReceipt);
   }
 
-  bool validateCDTermAndAPR(uint8_t term_code, uint32_t apr_basis_points) {
-    // Validate term code and APR combination according to predefined enum values
+  // COLD Deposit term utility functions
+  // Note: APR is now derived from tier in smart contract, not stored on-chain
+  uint64_t getColdTermBlocks(uint8_t term_code) {
     switch (term_code) {
-      case 1: // CD_TERM_3MO_8PCT
-        return apr_basis_points == 800;  // 8% APR
-      case 2: // CD_TERM_9MO_18PCT
-        return apr_basis_points == 1800; // 18% APR
-      case 3: // CD_TERM_1YR_21PCT
-        return apr_basis_points == 2100; // 21% APR
-      case 4: // CD_TERM_3YR_33PCT
-        return apr_basis_points == 3300; // 33% APR
-      case 5: // CD_TERM_5YR_80PCT
-        return apr_basis_points == 8000; // 80% APR
-      default:
-        return false; // Invalid term code
+      case 1: return 16440;   // 3 months (~5480 blocks/month)
+      case 2: return 49320;   // 9 months
+      case 3: return 65760;   // 1 year
+      case 4: return 197280;  // 3 years
+      case 5: return 328800;  // 5 years
+      default: return 0;
+    }
+  }
+
+  uint64_t getColdTermDays(uint8_t term_code) {
+    switch (term_code) {
+      case 1: return 90;    // 3 months
+      case 2: return 270;   // 9 months
+      case 3: return 365;   // 1 year
+      case 4: return 1095;  // 3 years
+      case 5: return 1825;  // 5 years
+      default: return 0;
     }
   }
 

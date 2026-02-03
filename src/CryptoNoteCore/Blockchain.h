@@ -28,6 +28,7 @@
 #include "CryptoNoteCore/Checkpoints.h"
 #include "CryptoNoteCore/Currency.h"
 #include "CryptoNoteCore/BankingIndex.h"
+#include "CryptoNoteCore/CommitmentIndex.h"
 #include "CryptoNoteCore/IBlockchainStorageObserver.h"
 #include "CryptoNoteCore/ITransactionValidator.h"
 #include "CryptoNoteCore/SwappedVector.h"
@@ -131,6 +132,17 @@ namespace CryptoNote {
     uint64_t difficultyAtHeight(uint64_t height);
     bool isInCheckpointZone(const uint32_t height);
 
+    // Commitment index accessors
+    std::optional<CommitmentEntry> getCommitmentByHash(const Crypto::Hash& commitment) const;
+    bool hasCommitment(const Crypto::Hash& commitment) const;
+    size_t getCommitmentCount() const;
+    size_t getHeatCommitmentCount() const;
+    size_t getColdCommitmentCount() const;
+    Crypto::Hash getCommitmentMerkleRoot() const;
+    std::vector<Crypto::Hash> getCommitmentMerkleProof(const Crypto::Hash& commitment) const;
+    int64_t getCommitmentLeafIndex(const Crypto::Hash& commitment) const;
+    CommitmentIndex::Height getCommitmentHighestBlock() const;
+
     template <class visitor_t>
     bool scanOutputKeysForIndexes(const KeyInput &tx_in_to_key, visitor_t &vis, uint32_t *pmax_related_block_height = NULL);
 
@@ -202,6 +214,27 @@ namespace CryptoNote {
 
     bool rollbackBlockchainTo(uint32_t height);
     bool have_tx_keyimg_as_spent(const Crypto::KeyImage &key_im);
+
+    // Elderfier consensus accessors
+    std::vector<uint8_t> getCommitmentSignedElderfierIds() const;
+    std::vector<uint8_t> getCommitmentPendingElderfierIds() const;
+    uint64_t getCommitmentConsensusPercentage() const;
+
+    // Elderfier fee tracking accessors
+    uint64_t getCurrentElderfierEpoch() const;
+    uint64_t getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const;
+    ElderfierEpochRewards getElderfierEpochRewards(uint64_t epochNumber) const;
+    std::vector<ElderfierEpochRewards> getElderfierEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const;
+    std::vector<uint8_t> getActiveElderfiers(uint64_t epochNumber) const;
+    uint64_t getTotalFeesInEscrow() const;
+    uint64_t getTotalFeesDistributedAllTime() const;
+
+    // Elderfier signature cache accessors
+    void addSignatureToCache(const CachedElderfierSignature& sig);
+    void updateCurrentMerkleRoot(const Crypto::Hash& root);
+    uint64_t getConsensusPercentageForCurrentRoot() const;
+    std::vector<uint8_t> getSignedElderfierIds() const;
+    std::vector<uint8_t> getPendingElderfierIds() const;
 
   private:
 
@@ -276,6 +309,7 @@ namespace CryptoNote {
     Blocks m_blocks;
     CryptoNote::BlockIndex m_blockIndex;
     CryptoNote::BankingIndex m_bankingIndex;
+    CryptoNote::CommitmentIndex m_commitmentIndex;
     TransactionMap m_transactionMap;
     MultisignatureOutputsContainer m_multisignatureOutputs;
     UpgradeDetector m_upgradeDetectorV2;
@@ -346,6 +380,9 @@ namespace CryptoNote {
     void saveTransactions(const std::vector<Transaction>& transactions, uint32_t height);
 
     void sendMessage(const BlockchainMessage& message);
+
+    // Elderfier consensus check (called after each block)
+    void checkElderfierConsensusThreshold();
 
     friend class LockedBlockchainStorage;
   };

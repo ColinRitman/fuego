@@ -19,8 +19,15 @@
 #include "Serialization/SerializationOverloads.h"
 #include "CryptoNoteCore/CryptoNoteSerialization.h"
 
+// For EMPTY_STRUCT definition (needed for P2P messages)
+#include "Rpc/CoreRpcServerCommandsDefinitions.h"
+
 namespace CryptoNote
 {
+  // EMPTY_STRUCT is defined in CoreRpcServerCommandsDefinitions.h
+  // Forward declare here to avoid circular includes
+  struct EMPTY_STRUCT;
+
   inline bool serialize(uuid& v, Common::StringView name, ISerializer& s) {
     return s.binary(&v, sizeof(v), name);
   }
@@ -289,5 +296,34 @@ namespace CryptoNote
 
 #endif
 
+  /************************************************************************/
+  /* ELDERFIER SIGNATURE GOSSIP - P2P Message for Merkle Root Signatures */
+  /************************************************************************/
+  struct COMMAND_ELDERFIER_SIGNATURE
+  {
+    enum { ID = P2P_COMMANDS_POOL_BASE + 10 };
+
+    struct request
+    {
+      Crypto::Hash merkle_root;              // Current merkle root hash
+      Crypto::Signature signature;           // ECDSA signature of merkle root
+      uint8_t elderfier_id;                  // Elderfier ID (0-255) - privacy preserving
+      uint64_t block_height;                // Block height when signed
+      uint64_t timestamp;                   // Signature generation timestamp
+      uint32_t version;                     // Message version (1)
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(merkle_root)
+        KV_MEMBER(signature)
+        KV_MEMBER(elderfier_id)
+        KV_MEMBER(block_height)
+        KV_MEMBER(timestamp)
+        KV_MEMBER(version)
+      }
+    };
+
+    // NOTIFY pattern - no response needed (async broadcast)
+    typedef EMPTY_STRUCT response;
+  };
 
 }

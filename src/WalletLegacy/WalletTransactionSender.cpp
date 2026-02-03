@@ -169,14 +169,14 @@ namespace
 
     return amount;
   }
-  
+
   void countDepositsTotalSumAndInterestSum(const std::vector<DepositId> &depositIds, WalletUserTransactionsCache &depositsCache,
 
                                            uint64_t &totalSum, uint64_t &interestsSum)
   {
     totalSum = 0;
     interestsSum = 0;
-   
+
 
     for (auto id : depositIds)
     {
@@ -185,10 +185,10 @@ namespace
       totalSum += deposit.amount + deposit.interest;
       interestsSum += deposit.interest;
 
-      
+
     }
   }
-  
+
 } //namespace
 
 namespace CryptoNote
@@ -258,16 +258,16 @@ namespace CryptoNote
       mixIn = CryptoNote::parameters::MIN_TX_MIXIN_SIZE_V10; // Start with minimum
       neededMoney = countNeededMoney(fee, transfers);
       context->foundMoney = selectTransfersToSend(neededMoney, false, context->dustPolicy.dustThreshold, context->selectedTransfers);
-      
+
       // Calculate optimal ring size based on available outputs
       uint64_t calculatedRingSize = calculateDynamicRingSize(context->selectedTransfers, mixIn);
-      
+
       // Check if ring size 8 is achievable (for BlockMajorVersion 10+)
       if (calculatedRingSize == 0) {
         // Insufficient outputs for minimum ring size 8
         throw std::system_error(make_error_code(error::INSUFFICIENT_OUTPUTS_FOR_RING_SIZE));
       }
-      
+
       mixIn = calculatedRingSize;
     }
     throwIf(context->foundMoney < neededMoney, error::WRONG_AMOUNT);
@@ -305,6 +305,18 @@ namespace CryptoNote
       uint64_t fee,
       uint64_t mixIn)
   {
+    return makeDepositRequest(transactionId, events, term, amount, fee, std::string(), mixIn);
+  }
+
+  std::unique_ptr<WalletRequest> WalletTransactionSender::makeDepositRequest(
+      TransactionId &transactionId,
+      std::deque<std::unique_ptr<WalletLegacyEvent>> &events,
+      uint64_t term,
+      uint64_t amount,
+      uint64_t fee,
+      const std::string& extra,
+      uint64_t mixIn)
+  {
 
     throwIf(term < m_currency.depositMinTerm(), error::DEPOSIT_TERM_TOO_SMALL);
     throwIf(term > m_currency.depositMaxTerm(), error::DEPOSIT_TERM_TOO_BIG);
@@ -322,6 +334,8 @@ namespace CryptoNote
     context->transactionId = transactionId;
     context->mixIn = mixIn;
     context->depositTerm = static_cast<uint32_t>(term);
+
+    context->extra = extra;
 
     if (context->mixIn != 0)
     {
@@ -531,6 +545,12 @@ namespace CryptoNote
 
       transaction->setUnlockTime(transactionInfo.unlockTime);
 
+      // Add extra data if provided (for deposit commitments)
+      if (!context->extra.empty()) {
+        CryptoNote::BinaryArray extraData(context->extra.begin(), context->extra.end());
+        transaction->appendExtra(extraData);
+      }
+
       std::vector<KeyPair> ephKeys;
       ephKeys.reserve(inputs.size());
 
@@ -559,21 +579,21 @@ namespace CryptoNote
 
       deposit.locked = true;
       DepositId depositId = m_transactionsCache.insertDeposit(deposit, bankingIndex, transaction->getTransactionHash());
-      
+
       // Handle burn deposits with HEAT commitment generation
       if (context->depositTerm == parameters::DEPOSIT_TERM_FOREVER) {
         try {
           // Generate HEAT commitment with secret for burn deposit
           auto [commitment, secret] = CryptoNote::DepositCommitmentGenerator::generateHeatCommitmentWithSecret(
             deposit.amount, std::vector<uint8_t>());
-          
+
           // Add HEAT commitment to transaction extra
           std::vector<uint8_t> extra;
           if (CryptoNote::createTxExtraWithHeatCommitment(commitment.commitment, deposit.amount, commitment.metadata, extra)) {
             transaction->appendExtra(extra);
           }
-          
-          // Store secret in wallet 
+
+          // Store secret in wallet
           std::string txHashStr = Common::podToHex(transactionInfo.hash);
           // Notify wallet to store the secret
           events.push_back(std::unique_ptr<WalletBurnDepositSecretCreatedEvent>(
@@ -697,8 +717,8 @@ namespace CryptoNote
 
     events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, ec));
     events.push_back(std::unique_ptr<WalletDepositsUpdatedEvent>(new WalletDepositsUpdatedEvent(std::move(deposits))));
-    
-    // 🔥 ADD: Handle burn deposit secrets
+
+    //  Handle burn deposit secrets
     if (context->depositTerm == parameters::DEPOSIT_TERM_FOREVER) {
       // This is a burn deposit - the secret should be handled by the wallet
       // In a more complete implementation, we would pass the secret back to the wallet
@@ -900,8 +920,8 @@ namespace CryptoNote
     return foundMoney;
   }
 
-  /** Select the transfers to send for either a transaction or a deposit. The output selection is 
-   * based on separating the available outputs into base10 buckets and then picking outputs from 
+  /** Select the transfers to send for either a transaction or a deposit. The output selection is
+   * based on separating the available outputs into base10 buckets and then picking outputs from
    * each bucket until have enough for the transfer. We only select outputs above the dust threshold
    * so if we want to include dust we need to set it accordingly. (Credit to TRTL)*/
   uint64_t WalletTransactionSender::selectTransfersToSend(
@@ -916,11 +936,11 @@ namespace CryptoNote
     std::vector<TransactionOutputInformation> outputs;
     m_transferDetails.getOutputs(outputs, ITransfersContainer::IncludeKeyUnlocked);
 
-    /** Before picking the input buckets, lets shuffle all 
+    /** Before picking the input buckets, lets shuffle all
      * the available outputs for privacy */
     std::shuffle(outputs.begin(), outputs.end(), std::random_device{});
 
-    /** Split the inputs into buckets based on what power of ten they are in 
+    /** Split the inputs into buckets based on what power of ten they are in
      * (For example, [1, 2, 5, 7], [20, 50, 80, 80], [100, 600, 700]), though
      * we will ignore dust for the time being. */
     std::unordered_map<uint64_t, std::vector<TransactionOutputInformation>> buckets;
@@ -930,7 +950,7 @@ namespace CryptoNote
       /** Use the number of digits to determine which buck they fit in */
       int numberOfDigits = floor(log10(walletAmount.amount)) + 1;
 
-      /** If the amount is larger than the current dust threshold 
+      /** If the amount is larger than the current dust threshold
        * insert the amount into the correct bucket */
       if (walletAmount.amount > dust)
       {
@@ -950,8 +970,8 @@ namespace CryptoNote
         }
         else
         {
-          /** Add the amount to the selected transfers so long as 
-           * foundMoney is still less than neededMoney. This prevents 
+          /** Add the amount to the selected transfers so long as
+           * foundMoney is still less than neededMoney. This prevents
            * larger outputs than we need when we already have enough funds */
           if (foundMoney < neededMoney)
           {
@@ -1010,7 +1030,7 @@ namespace CryptoNote
   {
     // Target ring sizes in order of preference (highest privacy first)
     std::vector<uint64_t> targetRingSizes = {18, 15, 12, 11, 10, 9, 8};
-    
+
     // For BlockMajorVersion 10+, never go below ring size 8
     // If we can't achieve ring size 8, direct user to run optimizer
     if (minRingSize >= CryptoNote::parameters::MIN_TX_MIXIN_SIZE_V10) {
@@ -1019,37 +1039,37 @@ namespace CryptoNote
       // 1. Query daemon for available outputs for each amount in selectedTransfers
       // 2. Check if any amount has >= 8 outputs available
       // 3. If not, return 0 to signal insufficient outputs
-      
+
       // For now, we'll use a basic heuristic:
       // If we have multiple different amounts, we're more likely to have enough outputs
       // This is a simplified approach - a full implementation would query the daemon
-      
+
       // Count unique amounts in selected transfers
       std::set<uint64_t> uniqueAmounts;
       for (const auto& transfer : selectedTransfers) {
         uniqueAmounts.insert(transfer.amount);
       }
-      
+
       // If we have very few unique amounts, we might not have enough outputs
       // This is a conservative check - in practice, we'd query the daemon
       if (uniqueAmounts.size() < 2) {
-        // Conservative check: if we only have one amount type, 
+        // Conservative check: if we only have one amount type,
         // we might not have enough outputs for ring size 8
         // Return 0 to signal that ring size 8 is not achievable
         return 0;
       }
-      
+
       // Start with the highest target and work down
       for (uint64_t targetSize : targetRingSizes) {
         if (targetSize >= minRingSize && targetSize <= m_currency.maxMixin()) {
           return targetSize;
         }
       }
-      
+
       // This should never happen since we start with minRingSize, but just in case
       return minRingSize;
     }
-    
+
     // For older block versions, use static ring size
     return minRingSize;
   }

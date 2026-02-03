@@ -236,10 +236,13 @@ bool BurnProofDataFileGenerator::isValidArbitrumAddress(const std::string& addre
 }
 
 bool BurnProofDataFileGenerator::isValidXfgAmount(uint64_t amount) {
-    // Validate XFG amount (supports both 0.8 XFG and 800 XFG)
+    // Validate XFG amount - supports all 4 tiers for both HEAT and COLD
+    // XFG has 7 decimal places, so 1 XFG = 10,000,000 atomic units
     switch (amount) {
-        case 8000000:        // 0.8 XFG
-        case 800000000000ULL: // 800 XFG
+        case 8000000ULL:      // 0.8 XFG  (Tier 0)
+        case 80000000ULL:     // 8 XFG    (Tier 1)
+        case 800000000ULL:    // 80 XFG   (Tier 2)
+        case 8000000000ULL:   // 800 XFG  (Tier 3)
             return true;
         default:
             return false;

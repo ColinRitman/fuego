@@ -25,7 +25,7 @@
 #include <boost/program_options/variables_map.hpp>
 
 #include "IWalletLegacy.h"
-#include "PasswordContainer.h"
+#include "SimpleWallet/PasswordContainer.h"
 
 #include "Common/ConsoleHandler.h"
 #include "CryptoNoteCore/CryptoNoteBasicImpl.h"
@@ -39,7 +39,6 @@
 #include <System/Dispatcher.h>
 #include <System/Ipv4Address.h>
 
-std::string remote_fee_address;
 namespace CryptoNote
 {
   /************************************************************************/
@@ -106,6 +105,12 @@ namespace CryptoNote
     bool reset(const std::vector<std::string> &args);
     bool set_log(const std::vector<std::string> &args);
     bool payment_id(const std::vector<std::string> &args);
+
+    // Deposit commands
+    bool deposit(const std::vector<std::string> &args);
+    bool withdraw_deposit(const std::vector<std::string> &args);
+    bool list_deposits(const std::vector<std::string> &args);
+    bool deposit_info(const std::vector<std::string> &args);
 
     bool ask_wallet_create_if_needed();
     std::string resolveAlias(const std::string& aliasUrl);

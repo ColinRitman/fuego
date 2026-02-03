@@ -198,9 +198,14 @@ struct ElderfierDepositData {
     uint64_t securityWindowEnd;      // When security window ends
     uint64_t securityWindowDuration; // Duration of security window
     bool isInSecurityWindow;         // Currently in security window
-    bool unlockRequested;            // Elderfier requested to unlock
-    uint64_t unlockRequestTimestamp; // When unlock was requested
-    
+
+    // User-Initiated Unstaking Model (Dynamigo Phase)
+    // DESIGN: Stakes held indefinitely until user explicitly requests unstaking
+    // Then 8-day (1440 blocks) countdown begins before claiming is allowed
+    bool unstakingRequested;         // true = user initiated unstaking, false = still staking
+    uint64_t unstakingRequestBlock;  // Block height when user called initiate-unstake (0 if not requested)
+    uint64_t unstakeClaimableBlock;  // Block height = unstakingRequestBlock + 1440 when claim becomes possible (8 days)
+
     // Methods
     bool isValid() const;
     bool isOnline() const;
@@ -212,7 +217,20 @@ struct ElderfierDepositData {
     void markOffline(uint64_t currentTimestamp);
     void markSpent();                // Mark deposit as spent (invalidates Elderfier status)
     void updateLastSignature(uint64_t timestamp); // Update last signature timestamp
-    void requestUnlock(uint64_t timestamp);       // Request to unlock deposit
+
+    // PHASE 5: User-Initiated Unstaking Implementation
+    // User requests to unstake: sets flag and records block height
+    void initiateUnstake(uint64_t blockHeight) {
+      unstakingRequested = true;
+      unstakingRequestBlock = blockHeight;
+      unstakeClaimableBlock = blockHeight + 1440;  // 8 days (180 blocks/day * 8 = 1440 blocks at 8 min/block)
+    }
+
+    // Check if unstaking window has passed and funds can be claimed
+    bool canClaimUnstakedFunds(uint64_t currentBlock) const {
+      return unstakingRequested && currentBlock >= unstakeClaimableBlock;
+    }
+
     std::string toString() const;
 };
 

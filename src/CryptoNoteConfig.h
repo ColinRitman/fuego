@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2014-2018 The Monero project
 // Copyright (c) 2014-2018 The Forknote developers
 // Copyright (c) 2016-2019 The Karbowanec developers
@@ -41,22 +41,26 @@ namespace CryptoNote
 		const uint64_t CRYPTONOTE_BLOCK_FUTURE_TIME_LIMIT  = 60 * 60 * 2;
 		const uint64_t CRYPTONOTE_BLOCK_FUTURE_TIME_LIMIT_V1 = DIFFICULTY_TARGET_DRGL * 6;
 		const uint64_t CRYPTONOTE_BLOCK_FUTURE_TIME_LIMIT_V2 = DIFFICULTY_TARGET * 2;
-		const uint64_t CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 10;
+		const uint64_t CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 8;
 		const size_t BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW = 60;
 		const size_t BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW_V1 = 11; /* LWMA3 */
 
 		const uint64_t MONEY_SUPPLY = UINT64_C(80000088000008); /* max supply: 8M8 */
 		const uint64_t COIN = UINT64_C(10000000);
 		const uint64_t MINIMUM_FEE_V1 = UINT64_C(800000);
-		const uint64_t MINIMUM_FEE_V2 = UINT64_C(80000);	/* 0.008 XFG */
-		const uint64_t MINIMUM_FEE_8KH = UINT64_C(8000);	/* 0.0008 XFG (8 KiloHEAT) from BMv10 - FLAT RATE */
+		const uint64_t MINIMUM_FEE_V2 = UINT64_C(80000);	/* 0.008 XFG  (80Kħ) */
+		const uint64_t MINIMUM_FEE_8KH = UINT64_C(8000);	/* 0.0008 XFG (8Kħ)  BMv10+ Flat Fee */
 		const uint64_t MINIMUM_FEE = MINIMUM_FEE_8KH;
 		const uint64_t MINIMUM_FEE_BANKING_PERCENT = UINT64_C(125000); // 0.125% fee for COLD/YIELD deposits
 		const uint64_t MINIMUM_FEE_BANKING = MINIMUM_FEE_BANKING_PERCENT;
 
-		const uint64_t MINIMUM_FEE_BURN_SMALL = UINT64_C(80000);  /* 0.008 XFG for 0.8 XFG burns */
-		const uint64_t MINIMUM_FEE_BURN_LARGE = UINT64_C(800000000);  /* 0.8 XFG for 800 XFG burns */
-		const uint64_t DEFAULT_DUST_THRESHOLD = UINT64_C(10000); /* < 0.001 XFG */
+		const uint64_t BURN_FEE_TIER_0 = UINT64_C(8000);  /* 0.0008 XFG / (8 Kiloħeat) for 0.8 XFG burns */
+		const uint64_t BURN_FEE_TIER_1 = UINT64_C(80000);  /* 0.008 XFG / (80Kħ) for 8 XFG burns */
+		const uint64_t BURN_FEE_TIER_2 = UINT64_C(800000);  /* 0.08 XFG / (800Kħ) for 80 XFG burns */
+		const uint64_t BURN_FEE_TIER_3 = UINT64_C(8000000);  /* 0.8 XFG / (8 Milliħeat) for 800 XFG burns */
+
+		const uint64_t DEFAULT_DUST_THRESHOLD = UINT64_C(10000); /* < 0.001 XFG ( under 1Kħ is dust) */
+		const uint64_t DEFAULT_DUST_THRESHOLD_1KH = UINT64_C(1000); /* < 0.0001 XFG ( under 1Kħ is dust) */
 
 		const size_t   CRYPTONOTE_COIN_VERSION                       = 1;
 		const size_t   CRYPTONOTE_DISPLAY_DECIMAL_POINT 	         = 7;
@@ -105,22 +109,41 @@ namespace CryptoNote
 		const uint64_t MAX_TX_MIXIN_SIZE                             = 18;
 		static_assert(2 * DIFFICULTY_CUT <= DIFFICULTY_WINDOW - 2, "Bad DIFFICULTY_WINDOW or DIFFICULTY_CUT");
 
-		// MAINNET DEPOSITS
-		const uint64_t DEPOSIT_MIN_AMOUNT = 8000000000;   // 800 XFG for CD rewards
+		// MAINNET BURN/COLD/LP TIERS
+  const uint64_t AMOUNT_TIER_0 =     8000000;  // 0.8 XFG (8,000,000 atomic heat) 8M HEAT
+  const uint64_t AMOUNT_TIER_1 =    80000000;  // 8 XFG (80,000,000 atomic heat) 80M HEAT
+  const uint64_t AMOUNT_TIER_2 =   800000000;  // 80 XFG (800,000,000 atomic heat) 800M HEAT
+  const uint64_t AMOUNT_TIER_3 =  8000000000;  // 800 XFG (8,000,000,000 atomic heat) 8B HEAT
+
+
+  // MAINNET DEPOSITS
+	const uint64_t DEPOSIT_MIN_AMOUNT = 8000000;   // 0.8 XFG
       const uint64_t BURN_DEPOSIT_MIN_AMOUNT = 8000000;  // 0.8 XFG (8,000,000 atomic units) 8M
      const uint64_t YIELD_DEPOSIT_MIN_AMOUNT = 80000000;  // 8 XFG (80,000,000 atomic units) 80M
-	  const uint64_t BURN_DEPOSIT_STANDARD_AMOUNT = 8000000;  // Standard burn: 0.8 XFG (8,000,000 [8M]HEAT)
+     const uint64_t BURN_DEPOSIT_STANDARD_AMOUNT = 8000000;  // Standard burn: 0.8 XFG (8,000,000 [8M]HEAT)
 		const uint64_t BURN_DEPOSIT_LARGE_AMOUNT = 8000000000;  // 800 XFG (8,000,000,000 [8B]HEAT)
-		 const uint32_t DEPOSIT_MIN_TERM_v1 = 5480;  //blocks
-         const uint32_t DEPOSIT_MAX_TERM_v1 = 5480;
-       const uint32_t DEPOSIT_MIN_TERM = 16440;  //blocks		 /* one month=5480 ( 3 months (16440) for release ) OverviewFrame::depositParamsChanged */
-      const uint32_t DEPOSIT_MAX_TERM = 16440;  		 /* 3 month standard */
+		const uint64_t CD_AMOUNT_08      =      8000000; // 0.8 XFG
+          const uint64_t CD_AMOUNT_8     =     80000000; // 8 XFG
+          const uint64_t CD_AMOUNT_80    =    800000000; // 80 XFG
+          const uint64_t CD_AMOUNT_800   =   8000000000; // 800 XFG
+		const uint64_t CD_MIN_AMOUNT = 8000000000;   // 800 XFG for CD rewards
+
+
+	      const uint32_t DEPOSIT_MIN_TERM_v1 = 5480;  // blocks
+         const uint32_t DEPOSIT_MAX_TERM_v1 = 5480;  // one month=5480
+         const uint32_t DEPOSIT_MIN_TERM = 16440;  // blocks	 ( 3 months (16440) for release )
+        const uint32_t DEPOSIT_MAX_TERM = 16440;
+        const uint32_t COLD_MIN_TERM = 16000;  // (v10+) <3mo in Fuego blocks (180 blocks/day x 88.888888 days)  check OverviewFrame::depositParamsChanged in fuego-desktop QT*/
+       const uint32_t COLD_MAX_TERM = 65000;  //  (v10+) ~1yr in Fuego blocks (180 blocks/day x 361 days)
+
+       const uint32_t TESTNET_COLD_MIN_TERM = 16;  //  (v10+) <3mo in Fuego blocks (180 blocks/day x 88.888888 days)
+const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180 blocks/day x 361 days)
+
       const uint32_t DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
-       const uint32_t DEPOSIT_TERM_YIELD = DEPOSIT_MIN_TERM;     // 16440 blocks (3 months) for yield deposits
+       const uint32_t DEPOSIT_TERM_YIELD = COLD_MIN_TERM;     // 16k blocks (3 mo) for Fuego Untraceable Custom Interest Assets (FuCIA) deposits
         const uint32_t DEPOSIT_TERM_BURN = DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
 
         const uint32_t DEPOSIT_TERM_MIN = 16000;  // New 3-month term, slightly <90 days of Fuego blocks (180 blks per day)
-        const uint32_t DEPOSIT_TERM_MEDIUM = 33000;   // slightly > 6 months by Fuego block time (~183 days)
         const uint32_t DEPOSIT_TERM_MAX   = 65000;   // ~1-year using 360(+1)days/yr (65k blocks)
 
         static_assert(DEPOSIT_MIN_TERM > 0, "Bad DEPOSIT_MIN_TERM");
@@ -263,18 +286,30 @@ namespace CryptoNote
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */
  	// TESTNET DEPOSIT PARAMS
-    const uint64_t TESTNET_DEPOSIT_MIN_AMOUNT = 80000000; // 8 TESTNET coins
-    const uint64_t TESTNET_BURN_DEPOSIT_MIN_AMOUNT = 8000000;  // 0.8 TEST (8,000,000 atomic units)
+    const uint64_t TESTNET_DEPOSIT_MIN_AMOUNT =       8000000; // 0.8 TESTNET coins
+    const uint64_t TESTNET_DEPOSIT_CD_AMOUNT_08 =     8000000; // 0.8 TESTNET coins
+    const uint64_t TESTNET_DEPOSIT_CD_AMOUNT_8 =     80000000; // 8 TESTNET coins
+    const uint64_t TESTNET_DEPOSIT_CD_AMOUNT_80 =   800000000; // 80 TESTNET coins
+    const uint64_t TESTNET_DEPOSIT_CD_AMOUNT_800 = 8000000000; // 800 TESTNET coins
+
+    const uint64_t TESTNET_BURN_DEPOSIT_MIN_AMOUNT =      8000000;  // 0.8 TEST (8,000,000 atomic units)
 	const uint64_t TESTNET_BURN_DEPOSIT_STANDARD_AMOUNT = 8000000;  // Standard burn: 0.8 TEST (8,000,000 atomic units)
+	const uint64_t TESTNET_BURN_DEPOSIT_MEDIUM_AMOUNT =  80000000;  // Standard burn: 0.8 TEST (8,000,000 atomic units)
 	const uint64_t TESTNET_BURN_DEPOSIT_LARGE_AMOUNT = 8000000000;  // 800 TEST (8,000,000,000 atomic units)
-    const uint32_t TESTNET_DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
+
+	const uint64_t TESTNET_BURN_AMOUNT_08  =      8000000;  //  0.8 TEST (8,000,000 atomic units)
+	const uint64_t TESTNET_BURN_AMOUNT_8   =     80000000;  //  8 TEST (8,000,000 atomic units)
+	const uint64_t TESTNET_BURN_AMOUNT_80  =    800000000;  //  80 TEST (8,000,000 atomic units)
+	const uint64_t TESTNET_BURN_AMOUNT_800 =   8000000000;  //  800 TEST (8,000,000 atomic units)
+
+
+	const uint32_t TESTNET_DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
  	const uint32_t TESTNET_DEPOSIT_MIN_TERM_v1 = 5480;  //blocks
  	const uint32_t TESTNET_DEPOSIT_MAX_TERM_v1 = 5480;
  	const uint32_t TESTNET_DEPOSIT_MIN_TERM = 2;  //blocks		 /* one month=5480
- 	const uint32_t TESTNET_DEPOSIT_MAX_TERM = 2;
+ 	const uint32_t TESTNET_DEPOSIT_MAX_TERM = 5;
     const uint32_t TESTNET_DEPOSIT_TERM_MIN = 2;  // New 3-month term, slightly <90 days / Fuego blocks (180 blks per day)
-    const uint32_t TESTNET_DEPOSIT_TERM_MEDIUM = 33;   // ~6 months by Fuego blocks (33k blocks)
     const uint32_t TESTNET_DEPOSIT_TERM_MAX = 69;   // ~1-year using 360(+1)days/yr (65k blocks)
 
     const uint32_t TESTNET_DEPOSIT_TERM_YIELD = TESTNET_DEPOSIT_MIN_TERM;     // 16440 blocks (3 months) for yield deposits

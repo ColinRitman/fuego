@@ -72,6 +72,10 @@ namespace po = boost::program_options;
 #define EXTENDED_LOGS_FILE "wallet_details.log"
 #undef ERROR
 
+namespace CryptoNote {
+  std::string remote_fee_address;
+}
+
 namespace {
 
 const command_line::arg_descriptor<std::string> arg_wallet_file = { "wallet-file", "Use testnet wallet <arg>", "" };
@@ -634,6 +638,12 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("payment_id", boost::bind(&simple_wallet::payment_id, this, _1), "Generate random Payment ID");
   m_consoleHandler.setHandler("start_mining", boost::bind(&simple_wallet::start_mining, this, boost::arg<1>()), "start_mining [<threads>] - Start mining to your wallet");
   m_consoleHandler.setHandler("stop_mining", boost::bind(&simple_wallet::stop_mining, this, boost::arg<1>()), "stop_mining - Stop mining");
+
+  // Deposit commands
+  m_consoleHandler.setHandler("deposit", boost::bind(&simple_wallet::deposit, this, boost::arg<1>()), "deposit <amount> <term_code> - Create a deposit (0.8, 8, 80, 800 XFG with terms 0=HEAT, 3=3mo, 12=1yr)");
+  m_consoleHandler.setHandler("withdraw_deposit", boost::bind(&simple_wallet::withdraw_deposit, this, boost::arg<1>()), "withdraw_deposit <id> - Withdraw a deposit");
+  m_consoleHandler.setHandler("list_deposits", boost::bind(&simple_wallet::list_deposits, this, boost::arg<1>()), "list_deposits - List all deposits");
+  m_consoleHandler.setHandler("deposit_info", boost::bind(&simple_wallet::deposit_info, this, boost::arg<1>()), "deposit_info <id> - Get detailed info for deposit");
 
   // Initialize argument tracking flags
   m_wallet_file_arg_provided = false;
@@ -2241,4 +2251,318 @@ int main(int argc, char* argv[]) {
   }
   return 1;
   //CATCH_ENTRY_L0("main", 1);
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::deposit(const std::vector<std::string> &args)
+{
+  if (args.size() != 2)
+  {
+    fail_msg_writer() << "Usage: deposit <amount> <term_code>";
+    fail_msg_writer() << "Amount tiers: 0.8, 8, 80, 800 XFG";
+    fail_msg_writer() << "Term codes: 0 (HEAT burn), 3 (3 months), 12 (1 year)";
+    return true;
+  }
+
+  try
+  {
+    // Parse and validate amount
+    uint64_t deposit_amount = 0;
+    bool ok = m_currency.parseAmount(args[0], deposit_amount);
+
+    if (!ok || 0 == deposit_amount)
+    {
+      fail_msg_writer() << "Invalid amount format: " << args[0];
+      return true;
+    }
+
+    // Validate amount is one of the allowed tiers
+    std::vector<uint64_t> valid_amounts = {
+      CryptoNote::parameters::AMOUNT_TIER_0,                       // 0.8 XFG (HEAT burn)
+      CryptoNote::parameters::AMOUNT_TIER_1,                       // 8 XFG (COLD tier 1)
+      CryptoNote::parameters::AMOUNT_TIER_2,                       // 80 XFG (COLD tier 2)
+      CryptoNote::parameters::AMOUNT_TIER_3                        // 800 XFG (COLD tier 3)
+    };
+
+    std::vector<std::string> amount_labels = {
+      "0.8 XFG (HEAT burn)",
+      "8 XFG (COLD tier 1)",
+      "80 XFG (COLD tier 2)",
+      "800 XFG (COLD tier 3)"
+    };
+
+    auto it = std::find(valid_amounts.begin(), valid_amounts.end(), deposit_amount);
+    if (it == valid_amounts.end()) {
+      fail_msg_writer() << "Invalid amount. Valid tiers:";
+      for (const auto& label : amount_labels) {
+        fail_msg_writer() << "  " << label;
+      }
+      return true;
+    }
+
+    size_t amount_index = std::distance(valid_amounts.begin(), it);
+    std::string amount_label = amount_labels[amount_index];
+
+    // Parse and validate term code
+    uint32_t term_code = boost::lexical_cast<uint32_t>(args[1]);
+    uint32_t deposit_term = 0;
+    std::string term_label = "";
+
+    // HEAT burn deposit (any amount tier with forever term)
+    if (term_code == 0) {
+      deposit_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
+      term_label = "HEAT burn (forever)";
+    }
+    // COLD deposits with specific terms
+    else if (term_code == 3) {
+      deposit_term = CryptoNote::parameters::TESTNET_COLD_MIN_TERM;  // 16,000 blocks
+      term_label = "3 months";
+    } else if (term_code == 12) {
+      deposit_term = CryptoNote::parameters::TESTNET_COLD_MAX_TERM;    // 65,000 blocks
+      term_label = "1 year";
+    } else {
+      fail_msg_writer() << "Invalid term code. Use:";
+      fail_msg_writer() << "  0 for HEAT burn (0.8 XFG only)";
+      fail_msg_writer() << "  3 for 3-month COLD deposit";
+      fail_msg_writer() << "  12 for 1-year COLD deposit";
+      return true;
+    }
+
+    // Validate term codes - ALL amount tiers can be used for both HEAT and COLD
+    // Term code 0 = HEAT burn (forever), Term codes 3/12 = COLD deposits
+    if (term_code != 0 && term_code != 3 && term_code != 12) {
+      fail_msg_writer() << "Invalid term code. Use:";
+      fail_msg_writer() << "  0 for HEAT burn (any amount tier)";
+      fail_msg_writer() << "  3 for 3-month COLD deposit (any amount tier)";
+      fail_msg_writer() << "  12 for 1-year COLD deposit (any amount tier)";
+      return true;
+    }
+
+    // Confirm with user
+    success_msg_writer() << "Creating deposit:";
+    success_msg_writer() << "  Amount: " << m_currency.formatAmount(deposit_amount) << " (" << amount_label << ")";
+    success_msg_writer() << "  Term: " << term_label << " (" << deposit_term << " blocks)";
+
+    std::string confirm;
+    success_msg_writer() << "Confirm? (y/n): ";
+    std::getline(std::cin, confirm);
+    if (confirm != "y" && confirm != "Y") {
+      success_msg_writer() << "Deposit cancelled";
+      return true;
+    }
+
+    success_msg_writer() << "Creating deposit...";
+
+    // Use IWalletLegacy deposit method
+    uint64_t fee = m_currency.minimumFee();
+    CryptoNote::TransactionId txId = m_wallet->deposit(deposit_term, deposit_amount, fee, 0);
+
+    if (deposit_term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+      success_msg_writer(true) << "HEAT burn deposit transaction created successfully!";
+      success_msg_writer() << "Transaction ID: " << txId;
+      success_msg_writer() << "Amount to be burned: " << m_currency.formatAmount(deposit_amount);
+      success_msg_writer() << "This will generate off-chain yield via STARK proofs.";
+    } else {
+      success_msg_writer(true) << "COLD yield deposit transaction created successfully!";
+      success_msg_writer() << "Transaction ID: " << txId;
+      success_msg_writer() << "Amount to be locked: " << m_currency.formatAmount(deposit_amount);
+      success_msg_writer() << "Term: " << term_label;
+    }
+  }
+  catch (const std::system_error& e)
+  {
+    fail_msg_writer() << "System error: " << e.what();
+  }
+  catch (const std::exception& e)
+  {
+    fail_msg_writer() << "Error: " << e.what();
+  }
+  catch (...)
+  {
+    fail_msg_writer() << "unknown error";
+  }
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::withdraw_deposit(const std::vector<std::string> &args)
+{
+  if (args.size() != 1)
+  {
+    fail_msg_writer() << "Usage: withdraw_deposit <id>";
+    return true;
+  }
+
+  try
+  {
+    size_t deposit_count = m_wallet->getDepositCount();
+    if (deposit_count == 0)
+    {
+      fail_msg_writer() << "No deposits have been made in this wallet.";
+      return true;
+    }
+
+    uint64_t deposit_id = boost::lexical_cast<uint64_t>(args[0]);
+
+    // Check if deposit exists
+    if (deposit_id >= deposit_count) {
+      fail_msg_writer() << "Invalid deposit ID.";
+      return true;
+    }
+
+    CryptoNote::Deposit deposit;
+    if (!m_wallet->getDeposit(deposit_id, deposit)) {
+      fail_msg_writer() << "Failed to retrieve deposit information.";
+      return true;
+    }
+
+    if (deposit.locked) {
+      fail_msg_writer() << "Deposit is still locked. Unlock height: " << deposit.unlockHeight;
+      return true;
+    }
+
+    std::vector<CryptoNote::DepositId> depositIds = {deposit_id};
+    uint64_t fee = m_currency.minimumFee();
+    CryptoNote::TransactionId txId = m_wallet->withdrawDeposits(depositIds, fee);
+
+    success_msg_writer(true) << "Deposit withdrawal transaction created successfully!";
+    success_msg_writer() << "Transaction ID: " << txId;
+  }
+  catch (std::exception &e)
+  {
+    fail_msg_writer() << "Failed to withdraw deposit: " << e.what();
+  }
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::list_deposits(const std::vector<std::string> &)
+{
+  size_t deposit_count = m_wallet->getDepositCount();
+
+  if (deposit_count == 0)
+  {
+    success_msg_writer() << "No deposits found";
+    return true;
+  }
+
+  success_msg_writer() << "Deposits (" << deposit_count << "):";
+  success_msg_writer() << "ID    | Amount             | Term          | Unlock Height | Status";
+  success_msg_writer() << "------|--------------------|---------------|---------------|--------";
+
+  // go through deposits ids for the amount of deposits in wallet
+  for (CryptoNote::DepositId id = 0; id < deposit_count; ++id)
+  {
+    // get deposit info from id and store it to deposit
+    CryptoNote::Deposit deposit;
+    if (!m_wallet->getDeposit(id, deposit)) {
+      continue; // Skip invalid deposits
+    }
+
+    // Format amount
+    std::string amount_str = m_currency.formatAmount(deposit.amount);
+
+    // Format term
+    std::string term_str = "";
+    if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+      term_str = "HEAT (forever)";
+    } else if (deposit.term == CryptoNote::parameters::TESTNET_COLD_MIN_TERM) {
+      term_str = "3 months";
+    } else if (deposit.term == CryptoNote::parameters::TESTNET_COLD_MAX_TERM) {
+      term_str = "1 year";
+    } else {
+      term_str = std::to_string(deposit.term) + " blocks";
+    }
+
+    // Format unlock height
+    std::string unlock_str = "";
+    if (deposit.locked) {
+      unlock_str = std::to_string(deposit.unlockHeight);
+    } else if (deposit.spendingTransactionId != CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+      unlock_str = "Withdrawn";
+    } else {
+      unlock_str = "Unlocked";
+    }
+
+    // Format status
+    std::string status_str = "";
+    if (deposit.locked) {
+      status_str = "Locked";
+    } else if (deposit.spendingTransactionId == CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+      status_str = "Unlocked";
+    } else {
+      status_str = "Withdrawn";
+    }
+
+    success_msg_writer() << std::left <<
+      std::setw(5)  << std::to_string(id) << " | " <<
+      std::setw(18) << amount_str << " | " <<
+      std::setw(13) << term_str << " | " <<
+      std::setw(13) << unlock_str << " | " <<
+      std::setw(8) << status_str;
+  }
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::deposit_info(const std::vector<std::string> &args)
+{
+  if (args.size() != 1)
+  {
+    fail_msg_writer() << "Usage: deposit_info <id>";
+    return true;
+  }
+
+  try {
+    uint64_t deposit_id = boost::lexical_cast<uint64_t>(args[0]);
+
+    if (deposit_id >= m_wallet->getDepositCount()) {
+      fail_msg_writer() << "Invalid deposit ID.";
+      return true;
+    }
+
+    CryptoNote::Deposit deposit;
+    if (!m_wallet->getDeposit(deposit_id, deposit)) {
+      fail_msg_writer() << "Failed to retrieve deposit information.";
+      return true;
+    }
+
+    success_msg_writer() << "Deposit Information:";
+    success_msg_writer() << "ID:            " << deposit_id;
+    success_msg_writer() << "Amount:        " << m_currency.formatAmount(deposit.amount);
+
+    // Show term information
+    if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+      success_msg_writer() << "Term:          HEAT burn (forever)";
+    } else if (deposit.term == CryptoNote::parameters::TESTNET_COLD_MIN_TERM) {
+      success_msg_writer() << "Term:          3 months (16,000 blocks)";
+    } else if (deposit.term == CryptoNote::parameters::TESTNET_COLD_MAX_TERM) {
+      success_msg_writer() << "Term:          1 year (65,000 blocks)";
+    } else {
+      success_msg_writer() << "Term:          " << deposit.term << " blocks";
+    }
+
+    success_msg_writer() << "Height:        " << deposit.height;
+    success_msg_writer() << "Unlock Height: " << deposit.unlockHeight;
+
+    // Show status
+    if (deposit.locked) {
+      success_msg_writer() << "Status:        Locked";
+    } else if (deposit.spendingTransactionId == CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+      success_msg_writer() << "Status:        Unlocked";
+    } else {
+      success_msg_writer() << "Status:        Withdrawn";
+    }
+
+    success_msg_writer() << "Transaction:   " << Common::podToHex(deposit.transactionHash);
+
+  } catch (const std::exception &e) {
+    fail_msg_writer() << "Error: " << e.what();
+    return false;
+  }
+
+  return true;
 }

@@ -265,6 +265,7 @@ namespace CryptoNote
       INVOKE_HANDLER(COMMAND_HANDSHAKE, &NodeServer::handle_handshake)
       INVOKE_HANDLER(COMMAND_TIMED_SYNC, &NodeServer::handle_timed_sync)
       INVOKE_HANDLER(COMMAND_PING, &NodeServer::handle_ping)
+      INVOKE_HANDLER(COMMAND_ELDERFIER_SIGNATURE, &NodeServer::handle_elderfier_signature)
 #ifdef ALLOW_DEBUG_COMMANDS
       INVOKE_HANDLER(COMMAND_REQUEST_STAT_INFO, &NodeServer::handle_get_stat_info)
       INVOKE_HANDLER(COMMAND_REQUEST_NETWORK_STATE, &NodeServer::handle_get_network_state)
@@ -1433,6 +1434,25 @@ namespace CryptoNote
     rsp.status = PING_OK_RESPONSE_STATUS_TEXT;
     rsp.peer_id = m_config.m_peer_id;
     return 1;
+  }
+  //-----------------------------------------------------------------------------------
+
+  int NodeServer::handle_elderfier_signature(int command, COMMAND_ELDERFIER_SIGNATURE::request& arg, COMMAND_ELDERFIER_SIGNATURE::response& rsp, P2pConnectionContext& context)
+  {
+    logger(Logging::TRACE) << context << "COMMAND_ELDERFIER_SIGNATURE from EFiD " << (int)arg.elderfier_id;
+
+    // TODO: When CommitmentIndex and EldernodeIndex are created:
+    // 1. Validate message format (merkle_root, signature not empty)
+    // 2. Check if elderfier is registered via EldernodeIndex
+    // 3. Get public key for validation
+    // 4. Validate ECDSA signature
+    // 5. Create cached signature entry
+    // 6. Add to CommitmentIndex cache
+
+    // For now, just relay to all peers for gossip propagation
+    relay_notify_to_all(command, LevinProtocol::encode(arg), &context.m_connection_id);
+
+    return 1;  // Success
   }
   //-----------------------------------------------------------------------------------
 

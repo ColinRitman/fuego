@@ -522,8 +522,8 @@ bool EldernodeIndexManager::requestElderfierUnlock(const Crypto::PublicKey& publ
         return false;
     }
     
-    // Request unlock
-    deposit.requestUnlock(timestamp);
+    // Request unlock (using the unstaking model)
+    deposit.initiateUnstake(timestamp);
     
     m_lastUpdate = std::chrono::system_clock::now();
     
@@ -548,8 +548,8 @@ bool EldernodeIndexManager::processElderfierUnlock(const Crypto::PublicKey& publ
     ElderfierDepositData& deposit = it->second;
     
     // Check if unlock can be processed
-    if (!deposit.unlockRequested) {
-        logger(WARNING) << "No unlock request pending for Elderfier: " 
+    if (!deposit.unstakingRequested) {
+        logger(WARNING) << "No unlock request pending for Elderfier: "
                         << Common::podToHex(publicKey);
         return false;
     }
@@ -2685,7 +2685,7 @@ bool EldernodeIndexManager::validateUnlockRequest(const ElderfierDepositData& de
     }
     
     // Check if unlock was already requested
-    if (deposit.unlockRequested) {
+    if (deposit.unstakingRequested) {
         logger(WARNING) << "Unlock already requested";
         return false;
     }

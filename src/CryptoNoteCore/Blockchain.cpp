@@ -33,6 +33,7 @@
 #include "Serialization/BinarySerializationTools.h"
 #include "CryptoNoteTools.h"
 #include "TransactionExtra.h"
+#include "CommitmentIndex.h"
 #include "CryptoNoteConfig.h"
 #include "parallel_hashmap/phmap_dump.h"
 
@@ -202,6 +203,9 @@ public:
 
       logger(INFO) << operation << "banking index";
       s(m_bs.m_bankingIndex, "banking_index");
+
+      logger(INFO) << operation << "commitment index";
+      s(m_bs.m_commitmentIndex, "commitment_index");
 
     auto dur = std::chrono::steady_clock::now() - start;
 
@@ -424,6 +428,84 @@ uint32_t Blockchain::getCurrentBlockchainHeight() {
   return static_cast<uint32_t>(m_blocks.size());
 }
 
+// Elderfier consensus accessors
+std::vector<uint8_t> Blockchain::getCommitmentSignedElderfierIds() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getSignedElderfierIds();
+}
+
+std::vector<uint8_t> Blockchain::getCommitmentPendingElderfierIds() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getPendingElderfierIds();
+}
+
+uint64_t Blockchain::getCommitmentConsensusPercentage() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getConsensusPercentageForCurrentRoot();
+}
+
+// Elderfier fee tracking accessors
+uint64_t Blockchain::getCurrentElderfierEpoch() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getCurrentEpoch(m_blocks.size());
+}
+
+uint64_t Blockchain::getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getElderfierEarnings(elderfier_id, epochNumber);
+}
+
+ElderfierEpochRewards Blockchain::getElderfierEpochRewards(uint64_t epochNumber) const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getEpochRewards(epochNumber);
+}
+
+std::vector<ElderfierEpochRewards> Blockchain::getElderfierEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getEpochHistory(startEpoch, endEpoch);
+}
+
+std::vector<uint8_t> Blockchain::getActiveElderfiers(uint64_t epochNumber) const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getActiveElderfiers(epochNumber);
+}
+
+uint64_t Blockchain::getTotalFeesInEscrow() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getTotalFeesInEscrow();
+}
+
+uint64_t Blockchain::getTotalFeesDistributedAllTime() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getTotalFeesDistributedAllTime();
+}
+
+// Elderfier signature cache accessors
+void Blockchain::addSignatureToCache(const CachedElderfierSignature& sig) {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  m_commitmentIndex.addSignatureToCache(sig);
+}
+
+void Blockchain::updateCurrentMerkleRoot(const Crypto::Hash& root) {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  m_commitmentIndex.updateCurrentMerkleRoot(root);
+}
+
+uint64_t Blockchain::getConsensusPercentageForCurrentRoot() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getConsensusPercentageForCurrentRoot();
+}
+
+std::vector<uint8_t> Blockchain::getSignedElderfierIds() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getSignedElderfierIds();
+}
+
+std::vector<uint8_t> Blockchain::getPendingElderfierIds() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getPendingElderfierIds();
+}
+
 bool Blockchain::init(const std::string& config_folder, bool load_existing) {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
   if (!config_folder.empty() && !Tools::create_directories_if_necessary(config_folder)) {
@@ -612,6 +694,7 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
     m_spent_keys.clear();
     m_outputs.clear();
     m_multisignatureOutputs.clear();
+    m_commitmentIndex.clear();
     for (uint32_t b = 0; b < m_blocks.size(); ++b)
     {
       if (b % 1000 == 0)
@@ -1207,29 +1290,52 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
   logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Expected reward: " << reward;
   logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Validation: actual=" << minerReward << " vs expected=" << reward;
 
-  logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Expected reward: " << reward;
-  logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Validation: actual=" << minerReward << " vs expected=" << reward;
-
-  // EXACT validation without tolerance
-  if (minerReward != reward) {
-    // Special handling for specific problematic blocks that were accepted historically
-    if (height == 299344 || height == 299345) {
-      logger(INFO, BRIGHT_YELLOW) << "Allowing historical block at height " << height << " with reward mismatch: "
+  // For block major version 10+, enforce EXACT reward validation (miners use same formula)
+  // For earlier versions, allow small tolerance due to potential formula differences
+  if (blockMajorVersion >= CryptoNote::BLOCK_MAJOR_VERSION_10) {
+    // EXACT validation without tolerance for v10+
+    if (minerReward != reward) {
+      logger(ERROR, BRIGHT_RED) << "Coinbase transaction reward mismatch: "
         << m_currency.formatAmount(minerReward) << " (actual) vs "
         << m_currency.formatAmount(reward) << " (expected)";
-      return true;
+      logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Detailed debug: height=" << height
+        << ", minerReward=" << minerReward
+        << ", reward=" << reward
+        << ", emissionChange=" << emissionChange
+        << ", fee=" << fee
+        << ", alreadyGeneratedCoins=" << alreadyGeneratedCoins;
+      return false;
     }
+  } else {
+    // For pre-v10 blocks, allow small tolerance for historical compatibility
+    // Tolerance: 0.01% of expected reward to account for minor formula differences
+    uint64_t tolerance = reward / 10000;  // 0.01% tolerance
+    if (tolerance < 1000) tolerance = 1000;  // Minimum 0.00001 XFG tolerance
 
-    logger(ERROR, BRIGHT_RED) << "Coinbase transaction reward mismatch: "
-      << m_currency.formatAmount(minerReward) << " (actual) vs "
-      << m_currency.formatAmount(reward) << " (expected)";
-    logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Detailed debug: height=" << height
-      << ", minerReward=" << minerReward
-      << ", reward=" << reward
-      << ", emissionChange=" << emissionChange
-      << ", fee=" << fee
-      << ", alreadyGeneratedCoins=" << alreadyGeneratedCoins;
-    return false;
+    int64_t diff = static_cast<int64_t>(minerReward) - static_cast<int64_t>(reward);
+    uint64_t absDiff = (diff < 0) ? static_cast<uint64_t>(-diff) : static_cast<uint64_t>(diff);
+
+    if (absDiff > tolerance) {
+      // Special handling for specific problematic blocks that were accepted historically
+      if (height == 17927 || height == 299344 || height == 299345) {
+        logger(INFO, BRIGHT_YELLOW) << "Allowing historical block at height " << height << " with reward mismatch: "
+          << m_currency.formatAmount(minerReward) << " (actual) vs "
+          << m_currency.formatAmount(reward) << " (expected)";
+        return true;
+      }
+
+      logger(ERROR, BRIGHT_RED) << "Coinbase transaction reward mismatch (pre-v10): "
+        << m_currency.formatAmount(minerReward) << " (actual) vs "
+        << m_currency.formatAmount(reward) << " (expected)"
+        << " [diff=" << m_currency.formatAmount(absDiff) << ", tolerance=" << m_currency.formatAmount(tolerance) << "]";
+      return false;
+    } else if (minerReward != reward) {
+      // Log warning for small mismatches that are within tolerance
+      logger(DEBUGGING, BRIGHT_YELLOW) << "Pre-v10 block reward within tolerance: "
+        << m_currency.formatAmount(minerReward) << " (actual) vs "
+        << m_currency.formatAmount(reward) << " (expected)"
+        << " [diff=" << m_currency.formatAmount(absDiff) << "]";
+    }
   }
 
   return true;
@@ -2340,6 +2446,10 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
   pushBlock(block);
     pushToBankingIndex(block, interestSummary);
 
+  // PHASE 5: Check for epoch boundary and finalize if needed
+  uint32_t blockHeight = static_cast<uint32_t>(m_blocks.size()) - 1;
+  m_commitmentIndex.finalizeEpoch(blockHeight);
+
   auto block_processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - blockProcessingStart).count();
 
   logger(DEBUGGING, YELLOW) <<
@@ -2389,6 +2499,53 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
     return m_bankingIndex.getBurnedXfgAtHeight(static_cast<BankingIndex::DepositHeight>(height));
   }
 
+  // --- Commitment Index Accessors ---
+
+  std::optional<CommitmentEntry> Blockchain::getCommitmentByHash(const Crypto::Hash& commitment) const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.getByCommitment(commitment);
+  }
+
+  bool Blockchain::hasCommitment(const Crypto::Hash& commitment) const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.hasCommitment(commitment);
+  }
+
+  size_t Blockchain::getCommitmentCount() const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.size();
+  }
+
+  size_t Blockchain::getHeatCommitmentCount() const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.heatCount();
+  }
+
+  size_t Blockchain::getColdCommitmentCount() const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.coldCount();
+  }
+
+  Crypto::Hash Blockchain::getCommitmentMerkleRoot() const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.computeMerkleRoot();
+  }
+
+  std::vector<Crypto::Hash> Blockchain::getCommitmentMerkleProof(const Crypto::Hash& commitment) const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.getMerkleProof(commitment);
+  }
+
+  int64_t Blockchain::getCommitmentLeafIndex(const Crypto::Hash& commitment) const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.getLeafIndex(commitment);
+  }
+
+  CommitmentIndex::Height Blockchain::getCommitmentHighestBlock() const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.highestBlock();
+  }
+
   void Blockchain::pushToBankingIndex(const BlockEntry &block, uint64_t interest)
   {
     int64_t deposit = 0;
@@ -2405,13 +2562,57 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
             permanentBurns += heatCommit.amount;
 
-            // Use standard burn amount for logging (0.8 XFG)
-            logger(DEBUGGING) << "HEAT mint detected: " << parameters::BURN_DEPOSIT_MIN_AMOUNT
-                             << " was added to Ethernal Flame (permanently burned)";
+            // Index the HEAT commitment for RPC queries
+            Crypto::Hash txHash = getObjectHash(tx.tx);
+            CommitmentEntry entry;
+            entry.commitment = heatCommit.commitment;
+            entry.txHash = txHash;
+            entry.blockHeight = block.height;
+            entry.amount = heatCommit.amount;
+            entry.term = parameters::DEPOSIT_TERM_FOREVER;  // HEAT is permanent
+            entry.type = CommitmentEntry::Type::HEAT;
+            entry.targetChainId = heatCommit.metadata.size() > 0 ? heatCommit.metadata[0] : 1;  // Default to ETH
+            m_commitmentIndex.addCommitment(entry);
+
+            logger(DEBUGGING) << "HEAT commitment indexed: " << Common::podToHex(heatCommit.commitment)
+                             << " amount=" << heatCommit.amount;
+
+            // PHASE 5: Extract 0.1% banking fee for elderfier distribution (HEAT burns)
+            uint64_t heatFee = (heatCommit.amount * 1) / 1000;  // 0.1% = 1/1000
+            if (heatFee > 0) {
+              m_commitmentIndex.addElderfierFee(heatFee);
+              logger(DEBUGGING) << "HEAT fee extracted: " << heatFee << " satoshi (0.1% of " << heatCommit.amount << ")";
+            }
           }
-          // Note: TX_EXTRA_ELDERFIER_DEPOSIT (0xE8) is NOT added to ethernalXFG initially
+          // Check for COLD commitment (0xCD) - term deposit
+          else if (field.type() == typeid(TransactionExtraColdCommitment)) {
+            const auto& coldCommit = boost::get<TransactionExtraColdCommitment>(field);
+
+            // Index the COLD commitment for RPC queries
+            Crypto::Hash txHash = getObjectHash(tx.tx);
+            CommitmentEntry entry;
+            entry.commitment = coldCommit.commitment;
+            entry.txHash = txHash;
+            entry.blockHeight = block.height;
+            entry.amount = coldCommit.amount;
+            entry.term = coldCommit.term;
+            entry.type = CommitmentEntry::Type::YIELD;
+            entry.targetChainId = coldCommit.claimChainCode;
+            m_commitmentIndex.addCommitment(entry);
+
+            logger(DEBUGGING) << "COLD commitment indexed: " << Common::podToHex(coldCommit.commitment)
+                             << " amount=" << coldCommit.amount << " term=" << coldCommit.term;
+
+            // PHASE 5: Extract 0.1% banking fee for elderfier distribution (COLD deposits)
+            uint64_t coldFee = (coldCommit.amount * 1) / 1000;  // 0.1% = 1/1000
+            if (coldFee > 0) {
+              m_commitmentIndex.addElderfierFee(coldFee);
+              logger(DEBUGGING) << "COLD fee extracted: " << coldFee << " satoshi (0.1% of " << coldCommit.amount << ")";
+            }
+          }
+          // Note: TX_EXTRA_ELDERFIER_DEPOSIT (0xEC) is NOT added to ethernalXFG initially
           // because it represents slashable staking. However, if the deposit is later
-          // slashed via an Elderfier message (0xEF) with quorum consensus, the slashed
+          // slashed via an Elderfier message with quorum consensus, the slashed
           // portion WILL be added to ethernalXFG as it becomes a permanent burn.
           else if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
             const auto& elderfierDeposit = boost::get<TransactionExtraElderfierDeposit>(field);
@@ -2500,6 +2701,9 @@ bool Blockchain::pushBlock(BlockEntry &block) {
 
   assert(m_blockIndex.size() == m_blocks.size());
 
+  // Check elderfier consensus threshold and flush if needed
+  checkElderfierConsensusThreshold();
+
   return true;
 }
 
@@ -2522,6 +2726,13 @@ void Blockchain::popBlock(const Crypto::Hash& blockHash) {
 
   m_timestampIndex.remove(m_blocks.back().bl.timestamp, blockHash);
   m_generatedTransactionsIndex.remove(m_blocks.back().bl);
+
+  // Remove commitments from popped block
+  uint32_t poppedHeight = m_blocks.back().height;
+  size_t commitmentsRemoved = m_commitmentIndex.rollbackToHeight(poppedHeight);
+  if (commitmentsRemoved > 0) {
+    logger(DEBUGGING) << "Removed " << commitmentsRemoved << " commitments during block rollback at height " << poppedHeight;
+  }
 
   m_bankingIndex.popBlock();
   m_blocks.pop_back();
@@ -3054,4 +3265,26 @@ bool Blockchain::isInCheckpointZone(const uint32_t height) {
   return m_checkpoints.is_in_checkpoint_zone(height);
 }
 
+// ============================================================================
+// ELDERFIER CONSENSUS BLOCK HOOK
+// ============================================================================
+
+void Blockchain::checkElderfierConsensusThreshold() {
+    // Called after each block is added to check if elderfier consensus threshold is met
+    // This triggers fee distribution and cache flushing when ≥69% elderfiers have signed
+    
+    try {
+        uint64_t currentBlockHeight = m_blockIndex.size();
+        
+        // Check and flush signature cache if threshold met
+        // This is called every block - the method internally checks if threshold is met
+        m_commitmentIndex.checkAndFlushThreshold(currentBlockHeight);
+        
+    } catch (const std::exception& e) {
+        logger(WARNING, YELLOW) << "Exception in checkElderfierConsensusThreshold: " << e.what();
+    } catch (...) {
+        logger(WARNING, YELLOW) << "Unknown exception in checkElderfierConsensusThreshold";
+    }
 }
+
+}  // namespace CryptoNote

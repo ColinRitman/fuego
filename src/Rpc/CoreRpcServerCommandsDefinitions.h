@@ -1028,4 +1028,133 @@ struct K_COMMAND_RPC_CHECK_RESERVE_PROOF {
 	};
 };
 
+
+//-----------------------------------------------
+// Elderfier Signature Consensus RPC Endpoints
+//-----------------------------------------------
+
+struct COMMAND_RPC_GET_ELDERFIER_SIGNATURES {
+	typedef EMPTY_STRUCT request;
+
+	struct SignatureInfo {
+		uint8_t elderfier_id;
+		std::string signature;
+		uint64_t block_height;
+		uint64_t timestamp;
+		bool is_valid;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(elderfier_id)
+			KV_MEMBER(signature)
+			KV_MEMBER(block_height)
+			KV_MEMBER(timestamp)
+			KV_MEMBER(is_valid)
+		}
+	};
+
+	struct response {
+		std::vector<SignatureInfo> signatures;
+		std::string current_merkle_root;
+		uint64_t current_block_height;
+		size_t total_registered_elderfiers;
+		size_t signatures_received;
+		uint8_t consensus_percentage;
+		bool threshold_met;
+		std::vector<uint8_t> signed_by;
+		std::vector<uint8_t> pending;
+		std::string status;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(signatures)
+			KV_MEMBER(current_merkle_root)
+			KV_MEMBER(current_block_height)
+			KV_MEMBER(total_registered_elderfiers)
+			KV_MEMBER(signatures_received)
+			KV_MEMBER(consensus_percentage)
+			KV_MEMBER(threshold_met)
+			KV_MEMBER(signed_by)
+			KV_MEMBER(pending)
+			KV_MEMBER(status)
+		}
+	};
+};
+
+struct COMMAND_RPC_GET_ELDERFIER_CONSENSUS_STATUS {
+	typedef EMPTY_STRUCT request;
+
+	struct response {
+		std::string current_merkle_root;
+		uint64_t current_block_height;
+		size_t total_registered_elderfiers;
+		size_t elderfiers_signed;
+		uint8_t consensus_percentage;
+		std::vector<uint8_t> signed_by;
+		std::vector<uint8_t> pending;
+		bool meets_69_percent;
+		bool ready_for_user_claim;
+		uint64_t blocks_until_next_flush;
+		std::string status;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(current_merkle_root)
+			KV_MEMBER(current_block_height)
+			KV_MEMBER(total_registered_elderfiers)
+			KV_MEMBER(elderfiers_signed)
+			KV_MEMBER(consensus_percentage)
+			KV_MEMBER(signed_by)
+			KV_MEMBER(pending)
+			KV_MEMBER(meets_69_percent)
+			KV_MEMBER(ready_for_user_claim)
+			KV_MEMBER(blocks_until_next_flush)
+			KV_MEMBER(status)
+		}
+	};
+};
+
+struct COMMAND_RPC_GET_ELDERFIER_FEE_BALANCE {
+	struct request {
+		uint8_t elderfier_id;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(elderfier_id)
+		}
+	};
+
+	struct response {
+		uint8_t elderfier_id;
+		uint64_t accumulated_fees;
+		uint64_t total_fees_earned;
+		uint64_t number_of_rounds_signed;
+		std::string status;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(elderfier_id)
+			KV_MEMBER(accumulated_fees)
+			KV_MEMBER(total_fees_earned)
+			KV_MEMBER(number_of_rounds_signed)
+			KV_MEMBER(status)
+		}
+	};
+};
+
+struct COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS {
+	typedef EMPTY_STRUCT request;
+
+	struct response {
+		uint64_t total_fees_distributed_all_time;
+		uint64_t total_fees_pending_in_escrow;
+		size_t total_registered_elderfiers;
+		uint64_t current_block_height;
+		std::string status;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(total_fees_distributed_all_time)
+			KV_MEMBER(total_fees_pending_in_escrow)
+			KV_MEMBER(total_registered_elderfiers)
+			KV_MEMBER(current_block_height)
+			KV_MEMBER(status)
+		}
+	};
+};
+
 }

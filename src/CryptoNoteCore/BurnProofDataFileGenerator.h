@@ -98,7 +98,7 @@ public:
     // Validate Arbitrum address format
     static bool isValidArbitrumAddress(const std::string& address);
     
-    // Validate XFG amount (supports 0.8 XFG and 800 XFG)
+    // Validate XFG amount (supports 4 tiers: 0.8, 8, 80, 800 XFG)
     static bool isValidXfgAmount(uint64_t amount);
 
 private:

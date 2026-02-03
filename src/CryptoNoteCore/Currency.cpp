@@ -1303,8 +1303,8 @@ double Currency::getBurnPercentage() const {
     difficultyCut(parameters::DIFFICULTY_CUT);
 
     depositMinAmount(parameters::DEPOSIT_MIN_AMOUNT);
-    depositMinTerm(parameters::DEPOSIT_MIN_TERM);
-    depositMaxTerm(parameters::DEPOSIT_MAX_TERM);
+    depositMinTerm(parameters::COLD_MIN_TERM);
+    depositMaxTerm(parameters::COLD_MAX_TERM);
 
     // Burn deposit configuration
     burnDepositMinAmount(parameters::BURN_DEPOSIT_MIN_AMOUNT);

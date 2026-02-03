@@ -81,6 +81,25 @@ private:
   bool on_get_height(const COMMAND_RPC_GET_HEIGHT::request& req, COMMAND_RPC_GET_HEIGHT::response& res);
   bool on_get_deposits(const COMMAND_RPC_GET_DEPOSITS::request& req, COMMAND_RPC_GET_DEPOSITS::response& res);
   bool on_get_transactions(const COMMAND_RPC_GET_TRANSACTIONS::request& req, COMMAND_RPC_GET_TRANSACTIONS::response& res);
+  // TODO: Implement commitment RPC endpoints
+  // bool on_get_commitment(const COMMAND_RPC_GET_COMMITMENT::request& req, COMMAND_RPC_GET_COMMITMENT::response& res);
+  // bool on_get_commitment_stats(const COMMAND_RPC_GET_COMMITMENT_STATS::request& req, COMMAND_RPC_GET_COMMITMENT_STATS::response& res);
+  // bool on_get_commitment_merkle_root(const COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::response& res);
+  // bool on_get_commitment_merkle_proof(const COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::response& res);
+
+  // Domain-based verification (Option B MVP)
+  // bool on_check_commitment_exists(const COMMAND_RPC_CHECK_COMMITMENT_EXISTS::request& req, COMMAND_RPC_CHECK_COMMITMENT_EXISTS::response& res);
+
+  // Phase 4: Elderfier RPC endpoints
+  bool on_get_elderfier_signatures(const COMMAND_RPC_GET_ELDERFIER_SIGNATURES::request& req,
+                                    COMMAND_RPC_GET_ELDERFIER_SIGNATURES::response& res);
+  bool on_get_elderfier_consensus_status(const COMMAND_RPC_GET_ELDERFIER_CONSENSUS_STATUS::request& req,
+                                          COMMAND_RPC_GET_ELDERFIER_CONSENSUS_STATUS::response& res);
+  bool on_get_elderfier_fee_balance(const COMMAND_RPC_GET_ELDERFIER_FEE_BALANCE::request& req,
+                                     COMMAND_RPC_GET_ELDERFIER_FEE_BALANCE::response& res);
+  bool on_get_elderfier_network_stats(const COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::request& req,
+                                       COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::response& res);
+
   bool on_get_peer_list(const COMMAND_RPC_GET_PEER_LIST::request& req, COMMAND_RPC_GET_PEER_LIST::response& res);
   bool on_prove_collateral(const COMMAND_RPC_PROVE_COLLATERAL::request& req, COMMAND_RPC_PROVE_COLLATERAL::response& res);
   bool on_send_raw_tx(const COMMAND_RPC_SEND_RAW_TX::request& req, COMMAND_RPC_SEND_RAW_TX::response& res);

@@ -26,12 +26,14 @@
 
 #include "IWalletLegacy.h"
 #include "PasswordContainer.h"
+#include "ClientHelper.h"
 
 #include "Common/ConsoleHandler.h"
 #include "CryptoNoteCore/CryptoNoteBasicImpl.h"
 #include "CryptoNoteCore/Currency.h"
 #include "NodeRpcProxy/NodeRpcProxy.h"
 #include "WalletLegacy/WalletHelper.h"
+#include "Transfers/IBlockchainSynchronizer.h"
 
 #include <Logging/LoggerRef.h>
 #include <Logging/LoggerManager.h>
@@ -39,9 +41,10 @@
 #include <System/Dispatcher.h>
 #include <System/Ipv4Address.h>
 
-std::string remote_fee_address;
 namespace CryptoNote
 {
+  extern std::string remote_fee_address;
+
   /************************************************************************/
   /*                                                                      */
   /************************************************************************/
@@ -107,6 +110,12 @@ namespace CryptoNote
     bool set_log(const std::vector<std::string> &args);
     bool payment_id(const std::vector<std::string> &args);
 
+    // Deposit commands
+    bool deposit(const std::vector<std::string> &args);
+    bool withdraw_deposit(const std::vector<std::string> &args);
+    bool list_deposits(const std::vector<std::string> &args);
+    bool deposit_info(const std::vector<std::string> &args);
+
     // COLD deposit secret management command
     bool create_cold_secret(const std::vector<std::string> &args);
     // Proof generation using stored secrets
@@ -116,7 +125,8 @@ namespace CryptoNote
     std::string resolveAlias(const std::string& aliasUrl);
     void printConnectionError() const;
 
-    std::string generate_mnemonic(Crypto::SecretKey &);
+       std::string get_wallet_keys() const;
+ std::string generate_mnemonic(Crypto::SecretKey &);
     void log_incorrect_words(std::vector<std::string>);
     bool is_valid_mnemonic(std::string &, Crypto::SecretKey &);
 

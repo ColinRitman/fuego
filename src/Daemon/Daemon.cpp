@@ -129,6 +129,9 @@ JsonValue buildLoggerConfiguration(Level level, const std::string& logfile) {
   return loggerConfiguration;
 }
 
+// Forward declaration for elderfier broadcaster initialization
+void initializeElderfierBroadcaster(CryptoNote::core& ccore, CryptoNote::NodeServer& p2psrv, LoggerRef& logger);
+
 int main(int argc, char* argv[])
 {
   // Set locale for UTF-8 support
@@ -343,6 +346,9 @@ int main(int argc, char* argv[])
 
     logger(INFO) << "Core initialized OK";
 
+    // Initialize elderfier signature broadcaster (if configured)
+    initializeElderfierBroadcaster(ccore, p2psrv, logger);
+
     // start components
     if (!command_line::has_arg(vm, arg_console)) {
       dch.start_handling();
@@ -433,3 +439,35 @@ bool command_line_preprocessor(const boost::program_options::variables_map &vm, 
 
   return false;
 }
+
+
+// ============================================================================
+// ELDERFIER SIGNATURE BROADCASTER INITIALIZATION
+// ============================================================================
+
+void initializeElderfierBroadcaster(CryptoNote::core& ccore, CryptoNote::NodeServer& p2psrv, LoggerRef& logger) {
+    // This function should be called after core initialization
+    // It checks if this node is configured to run as an elderfier and starts the background broadcaster
+
+    try {
+        // TODO: Check environment variables or config file for elderfier mode
+        // bool elderfier_enabled = /* read from config */;
+        // uint8_t elderfier_id = /* read from config */;
+        // std::string wallet_address = /* read from config */;
+        // std::string signing_key_hex = /* read from config */;
+
+        // if (elderfier_enabled) {
+        //     auto broadcaster = std::make_unique<CryptoNote::ElderfierSignatureBroadcaster>(ccore, p2psrv);
+        //     if (broadcaster->initialize(elderfier_id, wallet_address, signing_key)) {
+        //         broadcaster->start();
+        //         logger(INFO) << "Elderfier broadcaster started for EFiD " << (int)elderfier_id;
+        //     }
+        // }
+
+        logger(TRACE) << "Elderfier broadcaster initialization placeholder - check config for 'elderfier' settings";
+
+    } catch (const std::exception& e) {
+        logger(WARNING) << "Exception initializing elderfier broadcaster: " << e.what();
+    }
+}
+

@@ -172,8 +172,8 @@ go test
 
 The TUI interfaces with the C++ components via these RPC endpoints:
 
-- `localhost:18081` - Node RPC
-- `localhost:18082` - Wallet RPC
+- `localhost:18180` - Node RPC
+- `localhost:28280` - Wallet RPC
 
 No direct compilation dependencies exist between the Go TUI and C++ components.
 

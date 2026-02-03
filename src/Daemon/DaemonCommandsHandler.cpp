@@ -333,7 +333,7 @@ bool DaemonCommandsHandler::status(const std::vector<std::string>& args) {
 
 std::cout << std::endl
          << "FUEGO |" << (m_core.currency().isTestnet() ? " Testnet - " : " MAINNET | ")
-         << (synced ? "synced " : "syncing ") << height << "/" << last_known_block_index 
+         << (synced ? "synced " : "syncing ") << height << "/" << last_known_block_index
          << " (" << get_sync_percentage(height, last_known_block_index) << "%) "<< std::endl;
 std::cout << "**************************************************"<< std::endl;
 std::cout << "Network Hashrate: " << get_mining_speed(hashrate) << ", Difficulty: " << difficulty << std::endl;
@@ -469,7 +469,7 @@ bool DaemonCommandsHandler::ban(const std::vector<std::string>& args)
     if (seconds == 0) {
       return false;
     }
-  } 
+  }
   try {
     ip = Common::stringToIpAddress(addr);
   } catch (const std::exception &e) {

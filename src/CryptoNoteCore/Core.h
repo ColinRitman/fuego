@@ -36,6 +36,7 @@
 #include "CryptoNoteCore/MessageQueue.h"
 #include "CryptoNoteCore/BlockchainMessages.h"
 #include "CryptoNoteCore/BankingIndex.h"
+#include "CryptoNoteCore/CommitmentIndex.h"
 
 #include <Logging/LoggerMessage.h>
 
@@ -145,7 +146,7 @@ namespace CryptoNote {
     virtual bool get_random_outs_for_amounts(const COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_request &req, COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_response &res) override;
     void pause_mining() override;
     void update_block_template_and_resume_mining() override;
-    //Blockchain& get_blockchain_storage(){return m_blockchain;}
+    Blockchain& get_blockchain_storage(){return m_blockchain;}
     //debug functions
     void print_blockchain(uint32_t start_index, uint32_t end_index);
     void print_blockchain_index();
@@ -165,6 +166,31 @@ namespace CryptoNote {
     uint64_t depositAmountAtHeight(size_t height) const;
     uint64_t getBurnedXfgAtHeight(size_t height) const;
     uint8_t getBlockMajorVersionForHeight(uint32_t height) const;
+
+    // Commitment index accessors
+    std::optional<CommitmentEntry> getCommitmentByHash(const Crypto::Hash& commitment) const;
+    bool hasCommitment(const Crypto::Hash& commitment) const;
+    size_t getCommitmentCount() const;
+    size_t getHeatCommitmentCount() const;
+    size_t getColdCommitmentCount() const;
+    Crypto::Hash getCommitmentMerkleRoot() const;
+    std::vector<Crypto::Hash> getCommitmentMerkleProof(const Crypto::Hash& commitment) const;
+    int64_t getCommitmentLeafIndex(const Crypto::Hash& commitment) const;
+    uint64_t getCommitmentHighestBlock() const;
+
+    // Elderfier consensus accessors
+    std::vector<uint8_t> getCommitmentSignedElderfierIds() const;
+    std::vector<uint8_t> getCommitmentPendingElderfierIds() const;
+    uint64_t getCommitmentConsensusPercentage() const;
+
+    // Elderfier fee tracking accessors
+    uint64_t getCurrentElderfierEpoch() const;
+    uint64_t getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const;
+    ElderfierEpochRewards getElderfierEpochRewards(uint64_t epochNumber) const;
+    std::vector<ElderfierEpochRewards> getElderfierEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const;
+    std::vector<uint8_t> getActiveElderfiers(uint64_t epochNumber) const;
+    uint64_t getTotalFeesInEscrow() const;
+    uint64_t getTotalFeesDistributedAllTime() const;
 
     bool is_key_image_spent(const Crypto::KeyImage &key_im);
 

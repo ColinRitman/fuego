@@ -1299,4 +1299,83 @@ uint64_t core::getBurnedXfgAtHeight(size_t height) const {
   return m_blockchain.getBurnedXfgAtHeight(height);
 }
 
+// --- Commitment Index Accessors ---
+
+std::optional<CommitmentEntry> core::getCommitmentByHash(const Crypto::Hash& commitment) const {
+  return m_blockchain.getCommitmentByHash(commitment);
+}
+
+bool core::hasCommitment(const Crypto::Hash& commitment) const {
+  return m_blockchain.hasCommitment(commitment);
+}
+
+size_t core::getCommitmentCount() const {
+  return m_blockchain.getCommitmentCount();
+}
+
+size_t core::getHeatCommitmentCount() const {
+  return m_blockchain.getHeatCommitmentCount();
+}
+
+size_t core::getColdCommitmentCount() const {
+  return m_blockchain.getColdCommitmentCount();
+}
+
+Crypto::Hash core::getCommitmentMerkleRoot() const {
+  return m_blockchain.getCommitmentMerkleRoot();
+}
+
+std::vector<Crypto::Hash> core::getCommitmentMerkleProof(const Crypto::Hash& commitment) const {
+  return m_blockchain.getCommitmentMerkleProof(commitment);
+}
+
+int64_t core::getCommitmentLeafIndex(const Crypto::Hash& commitment) const {
+  return m_blockchain.getCommitmentLeafIndex(commitment);
+}
+
+uint64_t core::getCommitmentHighestBlock() const {
+  return m_blockchain.getCommitmentHighestBlock();
+}
+
+// Elderfier consensus accessors - delegate to Blockchain
+std::vector<uint8_t> core::getCommitmentSignedElderfierIds() const {
+  return m_blockchain.getCommitmentSignedElderfierIds();
+}
+
+std::vector<uint8_t> core::getCommitmentPendingElderfierIds() const {
+  return m_blockchain.getCommitmentPendingElderfierIds();
+}
+
+uint64_t core::getCommitmentConsensusPercentage() const {
+  return m_blockchain.getCommitmentConsensusPercentage();
+}
+
+uint64_t core::getCurrentElderfierEpoch() const {
+  return m_blockchain.getCurrentElderfierEpoch();
+}
+
+uint64_t core::getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const {
+  return m_blockchain.getElderfierEarnings(elderfier_id, epochNumber);
+}
+
+ElderfierEpochRewards core::getElderfierEpochRewards(uint64_t epochNumber) const {
+  return m_blockchain.getElderfierEpochRewards(epochNumber);
+}
+
+std::vector<ElderfierEpochRewards> core::getElderfierEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const {
+  return m_blockchain.getElderfierEpochHistory(startEpoch, endEpoch);
+}
+
+std::vector<uint8_t> core::getActiveElderfiers(uint64_t epochNumber) const {
+  return m_blockchain.getActiveElderfiers(epochNumber);
+}
+
+uint64_t core::getTotalFeesInEscrow() const {
+  return m_blockchain.getTotalFeesInEscrow();
+}
+
+uint64_t core::getTotalFeesDistributedAllTime() const {
+  return m_blockchain.getTotalFeesDistributedAllTime();
+}
+
 }

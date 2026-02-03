@@ -69,12 +69,6 @@ endif()
 
   # Add Boost linking to existing System target
 
-
-
-
-
-
-
 # Explicitly include ContextGroupTimeout files for all platforms
 list(APPEND System
   System/ContextGroupTimeout.cpp
@@ -107,8 +101,6 @@ target_include_directories(BlockchainExplorer SYSTEM PUBLIC ${JSONCPP_INCLUDE_DI
 target_link_libraries(BlockchainExplorer PUBLIC ${JSONCPP_LIBRARIES} ${Boost_LIBRARIES})
 add_library(Common STATIC ${Common})
 # System target already defined at line 81 - removing duplicate definition
-
-
 
 
 add_library(CryptoNoteCore STATIC ${CryptoNoteCore})
@@ -238,10 +230,14 @@ add_executable(SimpleWallet ${SimpleWallet})
 add_executable(PaymentGateService ${PaymentGateService})
 add_executable(Optimizer ${Optimizer})
 
-# JSON libraries will be linked through keyword signatures below
 
 # Add TestnetWallet executable
-add_executable(testnet-wallet-cli TestnetWallet/TestnetWallet.cpp)
+add_executable(testnet-wallet-cli
+    TestnetWallet/TestnetWallet.cpp
+    SimpleWallet/PasswordContainer.cpp
+    SimpleWallet/ClientHelper.cpp
+    SimpleWallet/TransferCmd.cpp
+)
 
 # Set proper linker flags to find FuegoTor library
 # FuegoTor library path is handled by target_link_directories
@@ -256,7 +252,6 @@ target_link_directories(TestnetDaemon PRIVATE ${FUEGOTOR_LIB_PATH})
 target_link_directories(testnet-wallet-cli PRIVATE ${FUEGOTOR_LIB_PATH})
 
 target_link_libraries(testnet-wallet-cli PRIVATE
-    SimpleWalletLib
     Wallet
     NodeRpcProxy
     Transfers
@@ -419,7 +414,7 @@ add_dependencies(P2P version)
 # --------------------------
 # Output names
 # --------------------------
-set_property(TARGET SimpleWallet PROPERTY OUTPUT_NAME "xfg_wallet")
+set_property(TARGET SimpleWallet PROPERTY OUTPUT_NAME "fire_wallet")
 set_property(TARGET testnet-wallet-cli PROPERTY OUTPUT_NAME "test_wallet")
 set_property(TARGET PaymentGateService PROPERTY OUTPUT_NAME "walletd")
 set_property(TARGET Daemon PROPERTY OUTPUT_NAME "fuegod")

@@ -56,7 +56,14 @@ public:
                                                     uint64_t term,
                                                     uint64_t amount,
                                                     uint64_t fee,
-                                                    uint64_t mixIn = 0);
+                                                    uint64_t mixIn);
+  std::unique_ptr<WalletRequest> makeDepositRequest(TransactionId& transactionId,
+                                                    std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
+                                                    uint64_t term,
+                                                    uint64_t amount,
+                                                    uint64_t fee,
+                                                    const std::string& extra,
+                                                    uint64_t mixIn);
 
   std::unique_ptr<WalletRequest> makeWithdrawDepositRequest(TransactionId& transactionId,
                                                             std::deque<std::unique_ptr<WalletLegacyEvent>>& events,

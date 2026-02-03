@@ -42,8 +42,10 @@
 // 0x_8 tags: Burn-related deposit types
 #define TX_EXTRA_HEAT_COMMITMENT            0x08  // Heat commitment (burn)
 #define TX_EXTRA_BURN_RECEIPT               0x18  // Burn transaction receipt
-#define TX_EXTRA_ELDERFIER_DEPOSIT          0xE8  // Elderfier staking (moved from 0x06)
 #define TX_EXTRA_DIGM_MINT                  0xA8  // DIGM coin mint by burn (Split 3 ways dev, digm treasury, burn)
+
+// 0xEC tag: Elderfier staking
+#define TX_EXTRA_ELDERFIER_DEPOSIT          0xEC  // Elderfier staking deposit (no banking fee)
 
 // 0x_A tags: DIGM Artist related meta/msgs/txns
 #define TX_EXTRA_DIGM_ALBUM                 0x0A  // Album metadata
@@ -65,7 +67,7 @@
 // 0x07 FUEGO MOB Custom Interest Assets   Check full compatibility -
 #define TX_EXTRA_YIELD_COMMITMENT           0x07  //  yield commitment
 
-// 0x_E tags: Elderfier system (consensus/messaging)
+// 0x_F tags: Elderfier system (consensus/messaging)
 #define TX_EXTRA_ELDERFIER_MESSAGE          0xEF  // Elderfier messaging/consensus
 
 #define TX_EXTRA_NONCE_PAYMENT_ID           0x00
@@ -163,21 +165,24 @@ struct TransactionExtraElderfierMessage {
 // DIGM transaction extra structures will be implemented later
 // Reserved tags: 0x0A (Album), 0x0B (Listen Rights), 0x0C (Curator), 0x1C (CURA Coin), 0xA8 (DIGM Mint)
 
-struct TransactionExtraCDDepositSecret {
-  Crypto::Hash commitment;       // 🔒 SECURE: Only commitment hash on blockchain
-  uint64_t amount;               // Principal amount in XFG
-  uint32_t term;                 // Deposit term in blocks
-  std::vector<uint8_t> metadata;
-  uint8_t claimChainCode;        // Claim chain (1=ETH, 2=SOL, 3=C0DL)
-  uint32_t apr_basis_points;     // APR in basis points for CD
-  std::vector<uint8_t> gift_secret;        // Secret key encrypted with recipient's view key
-                                            // Only used for gifted deposits, otherwise dummy data with pattern
+// COLD commitment structure - mirrors HEAT but includes term in commitment preimage
+struct TransactionExtraColdCommitment {
+  Crypto::Hash commitment;       // 🔒 SECURE: keccak256(secret+amount+tx_hash+recipient+network+chain+version+term)
+  uint64_t amount;               // Principal amount in atomic units
+  uint32_t term;                 // Deposit term in blocks (differentiates from HEAT which is FOREVER)
+  std::vector<uint8_t> metadata; // Chain info, EVM address encoded
+  uint8_t claimChainCode;        // Claim chain (1=ETH, 2=ARB, 3=SOL, etc.)
+  std::vector<uint8_t> gift_secret;  // Secret key encrypted with recipient's view key
+                                     // Only used for gifted deposits, empty if not gifting
 
   bool serialize(ISerializer& serializer);
 };
 
+// Legacy alias for backward compatibility
+using TransactionExtraCDDepositSecret = TransactionExtraColdCommitment;
 
-typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraCDDepositSecret, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;
+
+typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraColdCommitment, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;
 
 
 
@@ -239,10 +244,20 @@ bool createElderfierWitnessMessage(const Crypto::PublicKey& senderKey, const Cry
 
 // DIGM helper functions will be implemented later
 
-// CD Deposit Secret helper functions
-bool createTxExtraWithCDDepositSecret(const std::vector<uint8_t>& secret_key, uint64_t amount, uint32_t apr_basis_points, uint8_t term_code, uint8_t chain_code, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
-bool addCDDepositSecretToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraCDDepositSecret& deposit_secret);
-bool getCDDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraCDDepositSecret& deposit_secret);
+// COLD Commitment helper functions (unified with HEAT style)
+bool createTxExtraWithColdCommitment(const Crypto::Hash& commitment, uint64_t amount, uint32_t term,
+                                      uint8_t claimChainCode, const std::vector<uint8_t>& metadata,
+                                      const std::vector<uint8_t>& gift_secret, std::vector<uint8_t>& extra);
+bool addColdCommitmentToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraColdCommitment& commitment);
+bool getColdCommitmentFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraColdCommitment& commitment);
+
+// Legacy aliases for backward compatibility
+inline bool addCDDepositSecretToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraColdCommitment& c) {
+  return addColdCommitmentToExtra(tx_extra, c);
+}
+inline bool getCDDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraColdCommitment& c) {
+  return getColdCommitmentFromExtra(tx_extra, c);
+}
 
 // Secret encryption helper functions
 bool encryptSecretWithViewKey(const std::vector<uint8_t>& secret, const Crypto::PublicKey& recipientViewKey, std::vector<uint8_t>& gift_secret);
@@ -252,31 +267,74 @@ bool decryptSecretWithViewKey(const std::vector<uint8_t>& gift_secret, const Cry
 bool isDummyGiftSecret(const std::vector<uint8_t>& gift_secret);
 std::vector<uint8_t> createDummyGiftSecret();
 
-// CD Deposit validation and utility functions
-bool validateCDTermAndAPR(uint8_t term_code, uint32_t apr_basis_points);
-uint64_t getCDTermDays(uint8_t term_code);
-double getCDAPRPercent(uint8_t term_code);
+// COLD Deposit validation and utility functions
+// Note: APR is now derived from tier in smart contract, not stored on-chain
+uint64_t getColdTermBlocks(uint8_t term_code);
+uint64_t getColdTermDays(uint8_t term_code);
 
-// Helper APIs for wallet integration
-// Computes Keccak256(address || "recipient") into out_hash
-bool computeHeatRecipientHash(const std::string& eth_address, Crypto::Hash& out_hash);
-// Computes Keccak256(secret || le64(amount) || tx_prefix_hash || recipient_hash || network_id || target_chain_id || version)
+// ---------------- UNIFIED COMMITMENT FORMAT ----------------
+// Both HEAT and COLD use the SAME 88-byte preimage:
+//   keccak256(secret || le64(amount) || tx_prefix_hash || network_id || target_chain_id || version || le32(term))
+//
+// HEAT burns use term = DEPOSIT_TERM_FOREVER (0xFFFFFFFF)
+// COLD deposits use their actual term in blocks
+//
+// PRIVACY MODEL: No recipient in commitment - contract mints to msg.sender, nullifier prevents replay
+
+// Unified commitment computation for BOTH HEAT and COLD
+// Uses 88-byte preimage: 32 + 8 + 32 + 4 + 4 + 4 + 4 = 88 bytes
+// For HEAT: pass term = parameters::DEPOSIT_TERM_FOREVER (0xFFFFFFFF)
+// For COLD: pass actual term in blocks
+Crypto::Hash computeCommitment(const std::array<uint8_t, 32>& secret,
+                               uint64_t amount_atomic,
+                               const Crypto::Hash& tx_prefix_hash,
+                               uint32_t network_id,
+                               uint32_t target_chain_id,
+                               uint32_t commitment_version,
+                               uint32_t term);
+
+// HEAT convenience wrapper - uses DEPOSIT_TERM_FOREVER for term
+// Computes: keccak256(secret || amount || tx_hash || network || chain || version || 0xFFFFFFFF)
 Crypto::Hash computeHeatCommitment(const std::array<uint8_t, 32>& secret,
                                    uint64_t amount_atomic,
                                    const Crypto::Hash& tx_prefix_hash,
-                                   const std::string& eth_address,
                                    uint32_t network_id,
                                    uint32_t target_chain_id,
                                    uint32_t commitment_version);
+
 // Builds tx.extra with TX_EXTRA_HEAT_COMMITMENT (0x08) given inputs
+// PRIVACY MODEL: No recipient - contract mints to msg.sender
 bool buildHeatExtra(const std::array<uint8_t, 32>& secret,
                     uint64_t amount_atomic,
                     const Crypto::Hash& tx_prefix_hash,
-                    const std::string& eth_address,
                     uint32_t network_id,
                     uint32_t target_chain_id,
                     uint32_t commitment_version,
                     const std::vector<uint8_t>& metadata,
+                    std::vector<uint8_t>& extra);
+
+// COLD convenience wrapper - same as computeCommitment but named for clarity
+// Computes: keccak256(secret || amount || tx_hash || network || chain || version || term)
+Crypto::Hash computeColdCommitment(const std::array<uint8_t, 32>& secret,
+                                   uint64_t amount_atomic,
+                                   const Crypto::Hash& tx_prefix_hash,
+                                   uint32_t network_id,
+                                   uint32_t target_chain_id,
+                                   uint32_t commitment_version,
+                                   uint32_t term);
+
+// Builds tx.extra with TX_EXTRA_COLD_COMMITMENT (0xCD) given inputs
+// PRIVACY MODEL: No recipient - contract mints to msg.sender
+bool buildColdExtra(const std::array<uint8_t, 32>& secret,
+                    uint64_t amount_atomic,
+                    const Crypto::Hash& tx_prefix_hash,
+                    uint32_t network_id,
+                    uint32_t target_chain_id,
+                    uint32_t commitment_version,
+                    uint32_t term,
+                    uint8_t claimChainCode,
+                    const std::vector<uint8_t>& metadata,
+                    const std::vector<uint8_t>& gift_secret,
                     std::vector<uint8_t>& extra);
 
 
