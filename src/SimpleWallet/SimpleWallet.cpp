@@ -1576,74 +1576,137 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
   if (args.size() != 0)
   {
     fail_msg_writer() << "Usage: elderking_ceremony";
-    fail_msg_writer() << "";
-    fail_msg_writer() << "⚡ ELDERFIER REGISTRATION CEREMONY ⚡";
-    fail_msg_writer() << "Register as an Elderfier by depositing 4000 XFG (5 × 800 XFG)";
-    fail_msg_writer() << "";
-    fail_msg_writer() << "Requirements:";
-    fail_msg_writer() << "  • 4000 XFG minimum (5 deposits of 800 XFG each)";
-    fail_msg_writer() << "  • Network confirms automatically after 5 deposits detected";
-    fail_msg_writer() << "  • Deposits are tagged 0xEC (Elderfier staking tag)";
-    fail_msg_writer() << "  • No banking fees applied to elderfier deposits";
-    fail_msg_writer() << "";
-    fail_msg_writer() << "Benefits:";
-    fail_msg_writer() << "  • Participate in merkle root signing consensus";
-    fail_msg_writer() << "  • Earn 0.1% of HEAT/COLD banking fees (only if you sign)";
-    fail_msg_writer() << "  • 69% threshold required to finalize fee distribution";
     return true;
   }
 
   try
   {
+    // Display the Elderfire StayKing Ceremony info screen first
+    success_msg_writer() << "";
+    success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+    success_msg_writer() << "║                                                            ║";
+    success_msg_writer() << "║            🔥⚡  ELDERFIRE STAYKING CEREMONY  ⚡🔥          ║";
+    success_msg_writer() << "║                                                            ║";
+    success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+    success_msg_writer() << "";
+    success_msg_writer() << "┌─── WHAT IS THIS? ──────────────────────────────────────────┐";
+    success_msg_writer() << "│ The Elderfire StayKing Ceremony is the ritual through which │";
+    success_msg_writer() << "│ you commit to becoming an ELDERFIER on the Fuego network.   │";
+    success_msg_writer() << "│ Elderfiers form the backbone of consensus, signing merkle   │";
+    success_msg_writer() << "│ roots and earning rewards for their vigilance.             │";
+    success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
+    success_msg_writer() << "";
+    success_msg_writer() << "┌─── WHAT DO YOU NEED? ──────────────────────────────────────┐";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "│  📊 STAKING REQUIREMENTS:                                  │";
+    success_msg_writer() << "│     • Exactly 5 deposits of 800 XFG each                   │";
+    success_msg_writer() << "│     • Total commitment: 4,000 XFG                          │";
+    success_msg_writer() << "│     • Tagged with 0xEC (Elderfier staking tag)             │";
+    success_msg_writer() << "│     • No banking fees applied to your deposits             │";
+    success_msg_writer() << "│     • Network transaction fees: ~0.00005 XFG per deposit   │";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "│  💰 TOTAL COST:                                            │";
+    success_msg_writer() << "│     • 4,000 XFG (deposits) + network fees                  │";
+    success_msg_writer() << "│     • (Will be calculated below)                           │";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
+    success_msg_writer() << "";
+    success_msg_writer() << "┌─── WHAT DOES IT ENABLE? ──────────────────────────────────┐";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "│  🔐 ELDERFIER POWERS:                                      │";
+    success_msg_writer() << "│     ✓ Sign merkle roots of deposit commitments             │";
+    success_msg_writer() << "│     ✓ Participate in consensus validation (69% threshold)  │";
+    success_msg_writer() << "│     ✓ Earn 0.1% of all HEAT/COLD banking fees             │";
+    success_msg_writer() << "│     ✓ Pro-rata fee distribution (only to signers)          │";
+    success_msg_writer() << "│     ✓ Contribute to network security & decentralization    │";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "│  🌍 NETWORK REGISTRATION:                                  │";
+    success_msg_writer() << "│     • Network automatically detects your 5 deposits        │";
+    success_msg_writer() << "│     • You are assigned an Elderfier ID (0-255)             │";
+    success_msg_writer() << "│     • Your deposits become immune to normal withdrawals     │";
+    success_msg_writer() << "│     • You're added to the active elderfiers registry       │";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
+    success_msg_writer() << "";
+    success_msg_writer() << "┌─── HOW DOES IT WORK? ──────────────────────────────────────┐";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "│  1️⃣  YOU perform the ceremony (deposit 4000 XFG)           │";
+    success_msg_writer() << "│  2️⃣  5 transactions are broadcast to the network           │";
+    success_msg_writer() << "│  3️⃣  Miners confirm all 5 deposits in blocks               │";
+    success_msg_writer() << "│  4️⃣  Network auto-detects pattern & registers you         │";
+    success_msg_writer() << "│  5️⃣  You receive an Elderfier ID                          │";
+    success_msg_writer() << "│  6️⃣  Your node can now sign merkle roots independently    │";
+    success_msg_writer() << "│  7️⃣  Fees earned when ≥69% elderfiers validate same root  │";
+    success_msg_writer() << "│  8️⃣  You receive pro-rata share of banking fees           │";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
+    success_msg_writer() << "";
+    success_msg_writer() << "┌─── IMPORTANT NOTES ────────────────────────────────────────┐";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "│  ⚠️  This is a PERMANENT commitment to the network         │";
+    success_msg_writer() << "│  ⚠️  Deposits become part of elderfier consensus            │";
+    success_msg_writer() << "│  ⚠️  Only sign roots you believe are valid                 │";
+    success_msg_writer() << "│  ⚠️  Malicious signing can result in slashing              │";
+    success_msg_writer() << "│  ⚠️  You MUST run an elderfier node to earn fees           │";
+    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
+    success_msg_writer() << "";
+
     // Check wallet balance
     uint64_t balance = m_wallet->actualBalance();
     uint64_t required = 4 * CryptoNote::parameters::COIN;  // 4000 XFG
     uint64_t fee = m_currency.minimumFee();
 
+    success_msg_writer() << "┌─── BALANCE CHECK ──────────────────────────────────────────┐";
+    success_msg_writer() << "│  Wallet balance:        " << m_currency.formatAmount(balance) << " XFG";
+    success_msg_writer() << "│  Deposit amount:        " << m_currency.formatAmount(required) << " XFG (5 × 800)";
+    success_msg_writer() << "│  Network fees (5×):     " << m_currency.formatAmount(5 * fee) << " XFG";
+    success_msg_writer() << "│  ─────────────────────────────────────────────────────────";
+    success_msg_writer() << "│  Total required:        " << m_currency.formatAmount(required + (5 * fee)) << " XFG";
+    success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
+    success_msg_writer() << "";
+
     if (balance < required + (5 * fee)) {
-      fail_msg_writer() << "Insufficient balance for elderfier registration.";
-      fail_msg_writer() << "Required: " << m_currency.formatAmount(required + (5 * fee)) << " XFG";
-      fail_msg_writer() << "Available: " << m_currency.formatAmount(balance) << " XFG";
+      fail_msg_writer() << "";
+      fail_msg_writer() << "❌ INSUFFICIENT BALANCE";
+      fail_msg_writer() << "   You need " << m_currency.formatAmount(required + (5 * fee) - balance) << " more XFG";
+      fail_msg_writer() << "   Ceremony cancelled.";
       return true;
     }
 
-    // Confirm with user
+    success_msg_writer() << "✅ Balance check passed - you have sufficient funds!";
     success_msg_writer() << "";
     success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-    success_msg_writer() << "║         🔥 ELDERFIER REGISTRATION CEREMONY 🔥              ║";
+    success_msg_writer() << "║  Ready to proceed with the Elderfire StayKing Ceremony?    ║";
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
-    success_msg_writer() << "You are about to register as an Elderfier by staking:";
-    success_msg_writer() << "  • 5 deposits of 800 XFG each (4000 XFG total)";
-    success_msg_writer() << "  • Tag: 0xEC (Elderfier staking deposit)";
-    success_msg_writer() << "  • Banking fee: NONE (elderfiers exempt)";
-    success_msg_writer() << "  • Network transaction fee: " << m_currency.formatAmount(5 * fee);
-    success_msg_writer() << "";
-    success_msg_writer() << "Total cost: " << m_currency.formatAmount(required + (5 * fee)) << " XFG";
-    success_msg_writer() << "";
-    success_msg_writer() << "⚠️  This is a permanent commitment to the network.";
-    success_msg_writer() << "⚠️  Your deposits become part of the elderfier consensus mechanism.";
-    success_msg_writer() << "";
+    success_msg_writer() << "⚡ Type 'IGNITE' to begin the ceremony, or press Enter to abort: ";
 
     std::string confirm;
-    success_msg_writer() << "Proceed with registration? (type 'CONFIRM' to continue): ";
     std::getline(std::cin, confirm);
 
-    if (confirm != "CONFIRM") {
-      success_msg_writer() << "Elderfier registration cancelled.";
+    if (confirm != "IGNITE") {
+      success_msg_writer() << "";
+      success_msg_writer() << "🚫 Ceremony aborted. The Elderfire remains dormant.";
       return true;
     }
+
+    success_msg_writer() << "";
+    success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+    success_msg_writer() << "║                 🔥⚡ THE CEREMONY BEGINS ⚡🔥               ║";
+    success_msg_writer() << "║              Igniting the Elderfire StayKing ritual...     ║";
+    success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+    success_msg_writer() << "";
 
     // Create 5 deposits of 800 XFG each with 0xEC tag
     uint64_t amount_per_deposit = 800 * CryptoNote::parameters::COIN;  // 800 XFG
-    success_msg_writer() << "";
-    success_msg_writer() << "🔥 Initiating elderfier registration...";
-    success_msg_writer() << "";
 
     std::vector<CryptoNote::TransactionId> txIds;
 
     for (int i = 0; i < 5; ++i) {
-      success_msg_writer() << "Creating deposit " << (i + 1) << " of 5 (800 XFG)...";
+      success_msg_writer() << "";
+      success_msg_writer() << "⚡ Ritual " << (i + 1) << " of 5: Forging Elderfire Stake ⚡";
+      success_msg_writer() << "  Creating 800 XFG commitment...";
 
       // Create elderfier deposit with 0xEC tag
       std::vector<uint8_t> extra;
@@ -1680,35 +1743,47 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       );
 
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
-        fail_msg_writer() << "Failed to create deposit " << (i + 1) << " of 5";
-        fail_msg_writer() << "Elderfier registration INCOMPLETE. Only " << i << " deposits created.";
+        fail_msg_writer() << "";
+        fail_msg_writer() << "❌ CEREMONY FAILED AT RITUAL " << (i + 1) << " OF 5";
+        fail_msg_writer() << "   The Elderfire has been extinguished.";
+        fail_msg_writer() << "   Only " << i << " stakes were forged before the ritual faltered.";
         return true;
       }
 
       txIds.push_back(txId);
-      success_msg_writer() << "✓ Deposit " << (i + 1) << " sent. TX ID: " << txId;
+      success_msg_writer() << "  ✨ Stake " << (i + 1) << " forged!";
+      success_msg_writer() << "  📡 TX Hash: " << txId;
     }
 
     success_msg_writer() << "";
     success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-    success_msg_writer() << "║              ✨ REGISTRATION COMPLETE! ✨                   ║";
+    success_msg_writer() << "║         🔥⚡ CEREMONY COMPLETE - ELDERFIRE IGNITED! ⚡🔥    ║";
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
-    success_msg_writer() << "🎉 All 5 deposits created successfully!";
-    success_msg_writer() << "   Total staked: 4000 XFG";
+    success_msg_writer() << "✅ All 5 Elderfire stakes forged successfully!";
+    success_msg_writer() << "   🔥 Total commitment: 4,000 XFG";
+    success_msg_writer() << "   ⚡ Ritual complete. The fires now burn bright.";
     success_msg_writer() << "";
-    success_msg_writer() << "⏳ Network processing...";
-    success_msg_writer() << "   The network will automatically detect your 5 deposits";
-    success_msg_writer() << "   and register you as an Elderfier.";
+    success_msg_writer() << "⏳ NETWORK RECOGNITION (Automatic)";
+    success_msg_writer() << "   The network recognizes your commitment and will:";
+    success_msg_writer() << "   ✓ Detect all 5 stakes in the blockchain";
+    success_msg_writer() << "   ✓ Register you as an ELDERFIER";
+    success_msg_writer() << "   ✓ Assign you an Elderfier ID (0-255)";
+    success_msg_writer() << "   ✓ Add you to the active elderfiers registry";
     success_msg_writer() << "";
-    success_msg_writer() << "🔑 Your Elderfier ID:";
-    success_msg_writer() << "   Will be assigned by the network (0-255)";
-    success_msg_writer() << "   Check: list_deposits or use RPC to query status";
+    success_msg_writer() << "⚡ YOUR NEW POWERS";
+    success_msg_writer() << "   🔐 SIGN merkle roots of deposit commitments";
+    success_msg_writer() << "   💰 EARN 0.1% of all HEAT/COLD banking fees";
+    success_msg_writer() << "   🌍 PARTICIPATE in 69% consensus validation";
+    success_msg_writer() << "   🛡️  PROTECT network security & decentralization";
     success_msg_writer() << "";
-    success_msg_writer() << "📊 You can now:";
-    success_msg_writer() << "   • Sign merkle roots with your elderfier node";
-    success_msg_writer() << "   • Earn 0.1% of HEAT/COLD banking fees (if you sign)";
-    success_msg_writer() << "   • Participate in elderfier consensus (69% threshold)";
+    success_msg_writer() << "📊 NEXT STEPS";
+    success_msg_writer() << "   1. Check your deposits: list_deposits";
+    success_msg_writer() << "   2. Query your status: RPC get_elderfier_consensus_status";
+    success_msg_writer() << "   3. Run your elderfier node to sign merkle roots";
+    success_msg_writer() << "   4. Start earning fees when consensus is reached";
+    success_msg_writer() << "";
+    success_msg_writer() << "🎉 Welcome to the Elderfire StayKing ranks!";
     success_msg_writer() << "";
 
     return true;
