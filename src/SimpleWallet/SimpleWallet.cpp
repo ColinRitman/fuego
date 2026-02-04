@@ -541,10 +541,11 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("list_deposits", boost::bind(&simple_wallet::list_deposits, this, boost::arg<1>()), "list_deposits - List all deposits");
   m_consoleHandler.setHandler("deposit_info", boost::bind(&simple_wallet::deposit_info, this, boost::arg<1>()), "deposit_info <id> - Get detailed info for deposit");
 
-  // COLD deposit commitment management command
-  m_consoleHandler.setHandler("create_cold_secret", boost::bind(&simple_wallet::create_cold_secret, this, boost::arg<1>()), "create_cold_secret <amount> <term_blocks> <chain_code> <metadata> - Create COLD commitment");
-  // Proof generation using stored secrets
-  m_consoleHandler.setHandler("generate_proof", boost::bind(&simple_wallet::generate_proof, this, boost::arg<1>()), "generate_proof <tx_hash> - Generate proof for deposit transaction");
+  // NOTE: create_cold_secret and generate_proof are INTERNAL commands
+  // Users should NOT manually create commitments (auto-embedded in tx_extra)
+  // But users MUST generate STARK proofs from deposits for L2 claims
+  // DISABLED: m_consoleHandler.setHandler("create_cold_secret", ...);
+  m_consoleHandler.setHandler("generate_proof", boost::bind(&simple_wallet::generate_proof, this, boost::arg<1>()), "generate_proof <tx_hash> - Generate STARK proof for deposit transaction (for L2 claims)");
 }
 
 bool simple_wallet::show_dust(const std::vector<std::string>& args) {
@@ -1185,6 +1186,8 @@ bool simple_wallet::deposit(const std::vector<std::string> &args)
 }
 
 //----------------------------------------------------------------------------------------------------
+// DISABLED: Internal command - users should not create their own commitments
+/*
 bool simple_wallet::create_cold_secret(const std::vector<std::string> &args) {
  // PRIVACY MODEL: No ETH address required - recipient binding at STARK proof generation time
  if (args.size() != 3) {
@@ -1278,6 +1281,7 @@ bool simple_wallet::create_cold_secret(const std::vector<std::string> &args) {
 
  return true;
 }
+*/
 
 //----------------------------------------------------------------------------------------------------
 bool simple_wallet::close_wallet()
@@ -1855,6 +1859,7 @@ bool simple_wallet::withdraw_deposit(const std::vector<std::string> &args)
  }
 
  //----------------------------------------------------------------------------------------------------
+// USER-FACING: Users MUST generate STARK proofs from deposits for L2 claims
 bool simple_wallet::generate_proof(const std::vector<std::string> &args) {
    if (args.size() != 1) {
      fail_msg_writer() << "Usage: generate_proof <tx_hash>";
