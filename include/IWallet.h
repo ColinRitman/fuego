@@ -83,7 +83,7 @@ struct Deposit
   Crypto::Hash transactionHash;
   std::string address;
   std::string extra;    // Transaction extra field (contains commitment info)
-  Type depositType = Type::HEAT;  // Default to HEAT for backward compatibility
+  Type depositType = Type::COLD;  // Default to COLD (less scary than defaulting to HEAT/burn)
 };
 
 struct WalletTransactionUpdatedData

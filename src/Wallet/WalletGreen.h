@@ -146,7 +146,9 @@ private:
   DepositId insertDeposit(const Deposit &deposit, size_t bankingIndexInTransaction, const Crypto::Hash &transactionHash);
   DepositId insertNewDeposit(const TransactionOutputInformation &depositOutput,
                              TransactionId creatingTransactionId,
-                             const Currency &currency, uint32_t height);
+                             const Currency &currency,
+                             uint32_t height,
+                             const std::vector<uint8_t> &transactionExtra);
 
 protected:
   struct NewAddressData

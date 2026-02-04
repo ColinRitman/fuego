@@ -3505,7 +3505,8 @@ namespace CryptoNote
       const TransactionOutputInformation &depositOutput,
       TransactionId creatingTransactionId,
       const Currency &currency,
-      uint32_t height)
+      uint32_t height,
+      const std::vector<uint8_t> &transactionExtra)
   {
     assert(depositOutput.type == TransactionTypes::OutputType::Multisignature);
     assert(depositOutput.term != 0);
@@ -3519,6 +3520,29 @@ namespace CryptoNote
     deposit.height = height;
     deposit.unlockHeight = height + depositOutput.term;
     deposit.locked = true;
+
+    // Populate depositType and extra from transaction extra field
+    deposit.extra = std::string(transactionExtra.begin(), transactionExtra.end());
+
+    // Parse transaction extra to determine deposit type
+    std::vector<TransactionExtraField> extraFields;
+    if (parseTransactionExtra(transactionExtra, extraFields)) {
+      for (const auto& field : extraFields) {
+        if (field.type() == typeid(TransactionExtraHeatCommitment)) {
+          deposit.depositType = Deposit::Type::HEAT;
+          break;
+        } else if (field.type() == typeid(TransactionExtraColdCommitment)) {
+          deposit.depositType = Deposit::Type::COLD;
+          break;
+        } else if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
+          deposit.depositType = Deposit::Type::ELDERFIER;
+          break;
+        }
+      }
+    } else {
+      // Default to COLD if parsing fails (better UX - don't scare users by defaulting to HEAT/burn)
+      deposit.depositType = Deposit::Type::COLD;
+    }
 
     return insertDeposit(deposit, depositOutput.outputInTransaction, depositOutput.transactionHash);
   }
@@ -3609,7 +3633,7 @@ namespace CryptoNote
         {
           continue;
         }
-        auto id = insertNewDeposit(newDepositOuts[i], transactionId, m_currency, transactionInfo.blockHeight);
+        auto id = insertNewDeposit(newDepositOuts[i], transactionId, m_currency, transactionInfo.blockHeight, transactionInfo.extra);
         updatedDepositIds.push_back(id);
       }
 
