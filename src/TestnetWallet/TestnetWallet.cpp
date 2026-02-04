@@ -111,7 +111,21 @@ namespace CryptoNote
 
       uint32_t burn_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
       uint64_t fee = m_currency.minimumFee();
-      std::string extraString = "";
+
+      // Create HEAT commitment for burn deposit (0x08 tag)
+      std::vector<uint8_t> extra;
+      Crypto::PublicKey pubkey;
+      Crypto::SecretKey seckey;
+      Crypto::generate_keys(pubkey, seckey);
+      Crypto::Hash heatCommit = Crypto::cn_fast_hash(pubkey.data, sizeof(pubkey.data));
+
+      CryptoNote::TransactionExtraHeatCommitment heatCommitment;
+      heatCommitment.commitment = heatCommit;
+      heatCommitment.amount = burn_amount;
+      heatCommitment.metadata = {0x08};  // Tag 0x08 for HEAT
+
+      CryptoNote::addHeatCommitmentToExtra(extra, heatCommitment);
+      std::string extraString = std::string(extra.begin(), extra.end());
 
       success_msg_writer() << "Creating HEAT burn deposit: " << m_currency.formatAmount(burn_amount) << " XFG";
       CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
@@ -186,7 +200,22 @@ namespace CryptoNote
       }
 
       uint64_t fee = m_currency.minimumFee();
-      std::string extraString = "";
+
+      // Create COLD commitment for yield deposit (0xCD tag)
+      std::vector<uint8_t> extra;
+      Crypto::PublicKey pubkey;
+      Crypto::SecretKey seckey;
+      Crypto::generate_keys(pubkey, seckey);
+      Crypto::Hash coldCommit = Crypto::cn_fast_hash(pubkey.data, sizeof(pubkey.data));
+
+      CryptoNote::TransactionExtraColdCommitment coldCommitment;
+      coldCommitment.commitment = coldCommit;
+      coldCommitment.amount = cold_amount;
+      coldCommitment.term = cold_term;
+      coldCommitment.claimChainCode = 1;  // Default to ETH chain
+
+      CryptoNote::addColdCommitmentToExtra(extra, coldCommitment);
+      std::string extraString = std::string(extra.begin(), extra.end());
 
       success_msg_writer() << "Creating COLD deposit: " << m_currency.formatAmount(cold_amount) << " XFG for " << term_label;
       CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee, extraString, 0);
@@ -276,6 +305,9 @@ namespace CryptoNote
         elderfierDeposit.isSlashable = true;
 
         CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
+
+        // Convert extra vector to string for wallet deposit() call
+        extraString = std::string(extra.begin(), extra.end());
 
         CryptoNote::TransactionId txId = m_wallet->deposit(
           CryptoNote::parameters::DEPOSIT_TERM_FOREVER,
