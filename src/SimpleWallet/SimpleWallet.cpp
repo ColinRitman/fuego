@@ -529,7 +529,10 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("stop_mining", boost::bind(&simple_wallet::stop_mining, this, boost::arg<1>()), "stop_mining - Stop mining");
 
   // Deposit commands
-  m_consoleHandler.setHandler("deposit", boost::bind(&simple_wallet::deposit, this, boost::arg<1>()), "deposit <amount> <term_code> - Create a deposit (0.8, 8, 80, 800 XFG with terms 0=HEAT, 3=3mo, 12=1yr). ETH address provided at claim time for privacy.");
+  // TODO: May re-enable 'deposit' command later for backward compatibility
+  // m_consoleHandler.setHandler("deposit", boost::bind(&simple_wallet::deposit, this, boost::arg<1>()), "deposit <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr). ETH address provided at claim time for privacy.");
+  m_consoleHandler.setHandler("burn", boost::bind(&simple_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
+  m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
   m_consoleHandler.setHandler("withdraw_deposit", boost::bind(&simple_wallet::withdraw_deposit, this, boost::arg<1>()), "withdraw_deposit <id> - Withdraw a deposit");
   m_consoleHandler.setHandler("list_deposits", boost::bind(&simple_wallet::list_deposits, this, boost::arg<1>()), "list_deposits - List all deposits");
   m_consoleHandler.setHandler("deposit_info", boost::bind(&simple_wallet::deposit_info, this, boost::arg<1>()), "deposit_info <id> - Get detailed info for deposit");
@@ -948,7 +951,9 @@ bool simple_wallet::deposit(const std::vector<std::string> &args)
   {
     fail_msg_writer() << "Usage: deposit <amount> <term_code>";
     fail_msg_writer() << "Amount tiers: 0.8, 8, 80, 800 XFG";
-    fail_msg_writer() << "Term codes: 0 (HEAT burn), 3 (3 months), 12 (1 year)";
+    fail_msg_writer() << "Term codes: 3 (3 months), 12 (1 year)";
+    fail_msg_writer() << "";
+    fail_msg_writer() << "For HEAT burn deposits, use: burn <amount>";
     fail_msg_writer() << "";
     fail_msg_writer() << "ETH address is provided later when generating STARK proof.";
     fail_msg_writer() << "         This prevents linking your Fuego wallet to your ETH address on-chain.";
@@ -999,38 +1004,28 @@ bool simple_wallet::deposit(const std::vector<std::string> &args)
       return amount == CryptoNote::parameters::AMOUNT_TIER_0;
     };
 
-    // Parse and validate term code
+    // Parse term code
     uint32_t term_code = boost::lexical_cast<uint32_t>(args[1]);
     uint32_t deposit_term = 0;
     std::string term_label = "";
 
-    // HEAT burn deposit (any amount tier with forever term)
-    if (term_code == 0) {
-      deposit_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
-      term_label = "HEAT burn (forever)";
-    }
-    // COLD deposits with specific terms (APR derived from tier in smart contract)
-    else if (term_code == 3) {
-      deposit_term = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;  // 3 months
+    // Define valid terms based on network
+    uint32_t min_term = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;
+    uint32_t max_term = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;
+
+    // Validate term codes - only COLD deposits (3 or 12), no HEAT (0)
+    if (term_code == 3) {
+      deposit_term = min_term;
       term_label = "3 months";
     } else if (term_code == 12) {
-      deposit_term = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;    // 1 year
+      deposit_term = max_term;
       term_label = "1 year";
     } else {
-      fail_msg_writer() << "Invalid term code. Use:";
-      fail_msg_writer() << "  0 for HEAT burn (any amount tier)";
-      fail_msg_writer() << "  3 for 3-month COLD deposit (any amount tier)";
-      fail_msg_writer() << "  12 for 1-year COLD deposit (any amount tier)";
-      return true;
-    }
-
-    // Validate term codes - ALL amount tiers can be used for both HEAT and COLD
-    // Term code 0 = HEAT burn (forever), Term codes 3/12 = COLD deposits
-    if (term_code != 0 && term_code != 3 && term_code != 12) {
-      fail_msg_writer() << "Invalid term code. Use:";
-      fail_msg_writer() << "  0 for HEAT burn (any amount tier)";
-      fail_msg_writer() << "  3 for 3-month COLD deposit (any amount tier)";
-      fail_msg_writer() << "  12 for 1-year COLD deposit (any amount tier)";
+      fail_msg_writer() << "Invalid term code. Valid codes for deposit:";
+      fail_msg_writer() << "  3 for 3-month COLD deposit";
+      fail_msg_writer() << "  12 for 1-year COLD deposit";
+      fail_msg_writer() << "";
+      fail_msg_writer() << "For HEAT burn deposits, use: burn <amount>";
       return true;
     }
 
@@ -1380,6 +1375,196 @@ bool simple_wallet::list_deposits(const std::vector<std::string> &)
   }
 
   return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::burn(const std::vector<std::string> &args)
+{
+  // Simplified burn command - just takes amount, term is always FOREVER
+  if (args.size() != 1)
+  {
+    fail_msg_writer() << "Usage: burn <amount>";
+    fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
+    fail_msg_writer() << "";
+    fail_msg_writer() << "Creates a HEAT burn deposit with term automatically set to FOREVER.";
+    fail_msg_writer() << "ETH address is provided later when generating STARK proof.";
+    return true;
+  }
+
+  try
+  {
+    // Parse and validate amount
+    uint64_t burn_amount = 0;
+    bool ok = m_currency.parseAmount(args[0], burn_amount);
+
+    if (!ok || 0 == burn_amount)
+    {
+      fail_msg_writer() << "Invalid amount format: " << args[0];
+      return true;
+    }
+
+    // Validate amount is one of the allowed tiers
+    std::vector<uint64_t> valid_amounts = {
+      CryptoNote::parameters::AMOUNT_TIER_0,  // 0.8 XFG
+      CryptoNote::parameters::AMOUNT_TIER_1,  // 8 XFG
+      CryptoNote::parameters::AMOUNT_TIER_2,  // 80 XFG
+      CryptoNote::parameters::AMOUNT_TIER_3   // 800 XFG
+    };
+
+    std::vector<std::string> amount_labels = {
+      "0.8 XFG",
+      "8 XFG",
+      "80 XFG",
+      "800 XFG"
+    };
+
+    auto it = std::find(valid_amounts.begin(), valid_amounts.end(), burn_amount);
+    if (it == valid_amounts.end()) {
+      fail_msg_writer() << "Invalid amount. Valid tiers:";
+      for (const auto& label : amount_labels) {
+        fail_msg_writer() << "  " << label;
+      }
+      return true;
+    }
+
+    size_t amount_index = std::distance(valid_amounts.begin(), it);
+    std::string amount_label = amount_labels[amount_index];
+
+    // HEAT burn deposits always use DEPOSIT_TERM_FOREVER
+    uint32_t burn_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
+    std::string term_label = "HEAT burn (forever)";
+
+    // Confirm with user
+    success_msg_writer() << "Creating HEAT burn deposit:";
+    success_msg_writer() << "  Amount: " << m_currency.formatAmount(burn_amount) << " (" << amount_label << ")";
+    success_msg_writer() << "  Term: " << term_label << " (" << burn_term << " blocks)";
+    success_msg_writer() << "";
+    success_msg_writer() << "ETH address is provided later when generating STARK proof.";
+    success_msg_writer() << "  This prevents linking your Fuego wallet to your ETH address on-chain.";
+
+    // Send the burn deposit transaction
+    uint64_t fee = m_currency.minimumFee();
+    std::string extraString = "";
+    CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
+
+    if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+      fail_msg_writer() << "Sending deposit transaction failed";
+      return true;
+    }
+
+    success_msg_writer() << "HEAT burn deposit transaction sent! ID: " << txId;
+    return true;
+  }
+  catch (const std::exception& e)
+  {
+    fail_msg_writer() << "Error: " << e.what();
+    return true;
+  }
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::cold(const std::vector<std::string> &args)
+{
+  // Simplified COLD deposit command - amount + term code (3 or 12)
+  if (args.size() != 2)
+  {
+    fail_msg_writer() << "Usage: cold <amount> <term_code>";
+    fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
+    fail_msg_writer() << "Valid term codes: 3 (3 months), 12 (1 year)";
+    fail_msg_writer() << "";
+    fail_msg_writer() << "ETH address is provided later when generating STARK proof.";
+    fail_msg_writer() << "  This prevents linking your Fuego wallet to your ETH address on-chain.";
+    return true;
+  }
+
+  try
+  {
+    // Parse and validate amount
+    uint64_t cold_amount = 0;
+    bool ok = m_currency.parseAmount(args[0], cold_amount);
+
+    if (!ok || 0 == cold_amount)
+    {
+      fail_msg_writer() << "Invalid amount format: " << args[0];
+      return true;
+    }
+
+    // Validate amount is one of the allowed tiers
+    std::vector<uint64_t> valid_amounts = {
+      CryptoNote::parameters::AMOUNT_TIER_0,  // 0.8 XFG
+      CryptoNote::parameters::AMOUNT_TIER_1,  // 8 XFG
+      CryptoNote::parameters::AMOUNT_TIER_2,  // 80 XFG
+      CryptoNote::parameters::AMOUNT_TIER_3   // 800 XFG
+    };
+
+    std::vector<std::string> amount_labels = {
+      "0.8 XFG",
+      "8 XFG",
+      "80 XFG",
+      "800 XFG"
+    };
+
+    auto it = std::find(valid_amounts.begin(), valid_amounts.end(), cold_amount);
+    if (it == valid_amounts.end()) {
+      fail_msg_writer() << "Invalid amount. Valid tiers:";
+      for (const auto& label : amount_labels) {
+        fail_msg_writer() << "  " << label;
+      }
+      return true;
+    }
+
+    size_t amount_index = std::distance(valid_amounts.begin(), it);
+    std::string amount_label = amount_labels[amount_index];
+
+    // Parse term code
+    uint32_t term_code = boost::lexical_cast<uint32_t>(args[1]);
+    uint32_t cold_term = 0;
+    std::string term_label = "";
+
+    // Define valid terms based on network
+    uint32_t min_term = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;
+    uint32_t max_term = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;
+
+    // Validate term codes - only 3 or 12
+    if (term_code == 3) {
+      cold_term = min_term;
+      term_label = "3 months";
+    } else if (term_code == 12) {
+      cold_term = max_term;
+      term_label = "1 year";
+    } else {
+      fail_msg_writer() << "Invalid term code. Valid codes:";
+      fail_msg_writer() << "  3 for 3-month COLD deposit";
+      fail_msg_writer() << "  12 for 1-year COLD deposit";
+      return true;
+    }
+
+    // Confirm with user
+    success_msg_writer() << "Creating COLD deposit:";
+    success_msg_writer() << "  Amount: " << m_currency.formatAmount(cold_amount) << " (" << amount_label << ")";
+    success_msg_writer() << "  Term: " << term_label << " (" << cold_term << " blocks)";
+    success_msg_writer() << "";
+    success_msg_writer() << "ETH address is provided later when generating STARK proof.";
+    success_msg_writer() << "  This prevents linking your Fuego wallet to your ETH address on-chain.";
+
+    // Send the COLD deposit transaction
+    uint64_t fee = m_currency.minimumFee();
+    std::string extraString = "";
+    CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee, extraString, 0);
+
+    if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+      fail_msg_writer() << "Sending deposit transaction failed";
+      return true;
+    }
+
+    success_msg_writer() << "COLD deposit transaction sent! ID: " << txId;
+    return true;
+  }
+  catch (const std::exception& e)
+  {
+    fail_msg_writer() << "Error: " << e.what();
+    return true;
+  }
 }
 
 //----------------------------------------------------------------------------------------------------

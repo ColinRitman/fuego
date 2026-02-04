@@ -332,7 +332,7 @@ endif()
 # --------------------------
 add_subdirectory(external)
 add_subdirectory(src)
-add_subdirectory(tui)
+# add_subdirectory(tui)  # Disabled - requires separate build
 
 # --------------------------
 # ICU linking for executables (macOS)

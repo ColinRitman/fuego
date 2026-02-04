@@ -1783,22 +1783,25 @@ namespace PaymentService
         if (!isForeverTerm) {
           /* For regular deposits, validate term constraints */
 
-          /* Deposits should be either COLD_MIN_TERM or COLD_MAX_TERM */
-          if (term != CryptoNote::parameters::COLD_MIN_TERM ||term != CryptoNote::parameters::COLD_MAX_TERM ||term != CryptoNote::parameters::DEPOSIT_TERM_BURN)
-          {
+          /* Deposits should be either COLD_MIN_TERM, COLD_MAX_TERM, or DEPOSIT_TERM_FOREVER (HEAT burn) */
+          bool isValidTerm = (term == CryptoNote::parameters::COLD_MIN_TERM ||
+                             term == CryptoNote::parameters::COLD_MAX_TERM ||
+                             term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
+          if (!isValidTerm) {
             return make_error_code(CryptoNote::error::DEPOSIT_WRONG_TERM);
           }
 
-          /* The minimum term should be COLD_MIN_TERM */
-          if (term < CryptoNote::parameters::COLD_MIN_TERM)
-          {
-            return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_SMALL);
-          }
+          /* Skip range validation for HEAT burn (DEPOSIT_TERM_FOREVER) */
+          if (term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+            /* The minimum term should be COLD_MIN_TERM */
+            if (term < CryptoNote::parameters::COLD_MIN_TERM) {
+              return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_SMALL);
+            }
 
-          /* Current deposit rates are for a maximum term of DEPOSIT_MAX_TERM */
-          if (term > CryptoNote::parameters::DEPOSIT_MAX_TERM)
-          {
-            return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_BIG);
+            /* Current deposit rates are for a maximum term of DEPOSIT_MAX_TERM */
+            if (term > CryptoNote::parameters::DEPOSIT_MAX_TERM) {
+              return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_BIG);
+            }
           }
         }
 

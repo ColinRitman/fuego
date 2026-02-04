@@ -318,8 +318,11 @@ namespace CryptoNote
       uint64_t mixIn)
   {
 
-    throwIf(term < m_currency.depositMinTerm(), error::DEPOSIT_TERM_TOO_SMALL);
-    throwIf(term > m_currency.depositMaxTerm(), error::DEPOSIT_TERM_TOO_BIG);
+    // HEAT burn deposits use DEPOSIT_TERM_FOREVER and bypass normal term validation
+    if (term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+      throwIf(term < m_currency.depositMinTerm(), error::DEPOSIT_TERM_TOO_SMALL);
+      throwIf(term > m_currency.depositMaxTerm(), error::DEPOSIT_TERM_TOO_BIG);
+    }
     throwIf(amount < m_currency.depositMinAmount(), error::DEPOSIT_AMOUNT_TOO_SMALL);
 
     uint64_t neededMoney = getSumWithOverflowCheck(amount, fee);

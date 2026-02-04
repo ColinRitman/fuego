@@ -112,6 +112,8 @@ namespace CryptoNote
 
     // Deposit commands
     bool deposit(const std::vector<std::string> &args);
+    bool burn(const std::vector<std::string> &args);
+    bool cold(const std::vector<std::string> &args);
     bool withdraw_deposit(const std::vector<std::string> &args);
     bool list_deposits(const std::vector<std::string> &args);
     bool deposit_info(const std::vector<std::string> &args);
