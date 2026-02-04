@@ -2683,7 +2683,13 @@ std::string simple_wallet::resolveAlias(const std::string& aliasUrl) {
   std::string address;
 
   if (!Common::fetch_dns_txt(aliasUrl, records)) {
-    throw std::runtime_error("Failed to lookup DNS record");
+    #ifdef _WIN32
+    throw std::runtime_error("Failed to lookup DNS record for: " + aliasUrl);
+    #else
+    // DNS TXT resolution not available on this platform (macOS/Linux)
+    // Users can still use standard Fuego wallet addresses directly
+    throw std::runtime_error("OpenAlias (oa1:xfg) not supported on this platform. Please use a standard Fuego wallet address directly, or use Windows/a system with DNS resolver support.");
+    #endif
   }
 
   for (const auto& record : records) {
@@ -2691,7 +2697,7 @@ std::string simple_wallet::resolveAlias(const std::string& aliasUrl) {
       return address;
     }
   }
-  throw std::runtime_error("Failed to parse server response");
+  throw std::runtime_error("Failed to parse OpenAlias response for: " + aliasUrl);
 }
 
 //----------------------------------------------------------------------------------------------------
