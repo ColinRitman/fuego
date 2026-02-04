@@ -25,13 +25,14 @@ struct CommitmentEntry {
 
   // Internal commitment type (compatible with existing CommitmentType)
   enum class Type : uint8_t {
-    HEAT = 0,   // Permanent burn (FOREVER deposits)
-    YIELD = 1   // Interest-bearing deposits
+    HEAT = 0,              // Permanent burn (FOREVER deposits) - 0x08
+    YIELD = 1,             // Interest-bearing deposits - 0xCD
+    ELDERFIER_STAKING = 2  // Elderfier registration stakes - 0xEC (5x 800 XFG)
   };
 
   Type type = Type::HEAT;
 
-  uint32_t targetChainId = 0;  // 0xEC = 236 for elderfier deposits
+  uint32_t targetChainId = 0;  // Chain ID: 0x08 (HEAT), 0xCD (COLD/YIELD), 0xEC (ELDERFIER_STAKING)
 
   void serialize(ISerializer& s);
 };

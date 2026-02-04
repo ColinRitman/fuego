@@ -68,13 +68,13 @@ void CommitmentIndex::addSignatureToCache(const CachedElderfierSignature& sig) {
 void CommitmentIndex::checkAndFlushThreshold(uint64_t current_block_height) {
   std::lock_guard<std::mutex> lock(m_mutex);
 
-  // Calculate consensus percentage
+  // Calculate consensus percentage for current merkle root
   std::string current_root_hex = Common::podToHex(m_current_merkle_root);
-  size_t valid_signatures = 0;
+  std::vector<uint8_t> signed_efids;
 
   for (const auto& [key, sig] : m_signatures) {
     if (key.second == current_root_hex && sig.is_valid) {
-      valid_signatures++;
+      signed_efids.push_back(key.first);
     }
   }
 
@@ -83,20 +83,46 @@ void CommitmentIndex::checkAndFlushThreshold(uint64_t current_block_height) {
   }
 
   uint64_t total_elderfiers = m_elderfier_ids.size();
-  uint64_t consensus_pct = (valid_signatures * 100) / total_elderfiers;
+  uint64_t consensus_pct = (signed_efids.size() * 100) / total_elderfiers;
 
-  // TODO: Implement fee distribution and signature cache flushing at 69% threshold
+  // ===== FEE DISTRIBUTION AT THRESHOLD =====
   if (consensus_pct >= 69) {
-    // Flush signatures for current root
-    std::vector<std::pair<uint8_t, std::string>> to_remove;
-    for (const auto& [key, sig] : m_signatures) {
-      if (key.second != current_root_hex) {
-        to_remove.push_back(key);
+    // 1. Distribute accumulated fees pro-rata to signers only
+    if (m_currentEpochTotalFees > 0 && !signed_efids.empty()) {
+      uint64_t fee_per_signer = m_currentEpochTotalFees / signed_efids.size();
+
+      // Create epoch record with fee distribution
+      ElderfierEpochRewards epoch;
+      epoch.epochNumber = m_epochHistory.size();
+      epoch.epochStartBlock = m_currentEpochStartBlock;
+      epoch.epochEndBlock = current_block_height;
+      epoch.totalFeesCollected = m_currentEpochTotalFees;
+      epoch.activeElderfiers = signed_efids;
+
+      // Distribute fees only to signers
+      for (uint8_t efid : signed_efids) {
+        epoch.distribution[efid] = fee_per_signer;
+      }
+
+      m_epochHistory.push_back(epoch);
+
+      // Update all-time totals
+      for (uint8_t efid : signed_efids) {
+        // Track all-time earnings by EFiD
+        // (This would be persisted in a proper implementation)
       }
     }
-    for (const auto& key : to_remove) {
-      m_signatures.erase(key);
-    }
+
+    // 2. Clear accumulated fees for this round
+    m_currentEpochTotalFees = 0;
+
+    // 3. Clear signature cache (auto-flush) and prepare for next round
+    m_signatures.clear();
+    m_root_first_seen_block.clear();
+
+    // 4. Ready for next merkle root collection
+    m_current_merkle_root = Crypto::Hash();  // Reset for next round
+    m_current_block_height = 0;
   }
 }
 
