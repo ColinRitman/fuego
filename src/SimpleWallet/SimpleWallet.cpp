@@ -1657,7 +1657,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
 
     // Check wallet balance
     uint64_t balance = m_wallet->actualBalance();
-    uint64_t required = 4 * CryptoNote::parameters::COIN;  // 4000 XFG
+    uint64_t required = 4000 * CryptoNote::parameters::COIN;  // 4000 XFG (5 × 800 XFG)
     uint64_t fee = m_currency.minimumFee();
 
     success_msg_writer() << "┌─── BALANCE CHECK ──────────────────────────────────────────┐";
