@@ -1336,11 +1336,8 @@ bool simple_wallet::list_deposits(const std::vector<std::string> &)
       continue; // Skip invalid deposits
     }
 
-    // Format amount with interest for yield deposits
+    // Format amount (no interest on Fuego - interest handled off-chain via L2)
     std::string amount_str = m_currency.formatAmount(deposit.amount);
-    if (deposit.amount != CryptoNote::parameters::AMOUNT_TIER_0 && deposit.interest > 0) {
-      amount_str += " + " + m_currency.formatAmount(deposit.interest) + " interest";
-    }
 
     // Format term
     std::string term_str = "";
@@ -1978,11 +1975,7 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
     success_msg_writer() << "Deposit Information:";
     success_msg_writer() << "ID:            " << deposit_id;
     success_msg_writer() << "Amount:        " << m_currency.formatAmount(deposit.amount);
-
-    if (deposit.interest > 0) {
-      success_msg_writer() << "Interest:      " << m_currency.formatAmount(deposit.interest);
-      success_msg_writer() << "Total Return:  " << m_currency.formatAmount(deposit.amount + deposit.interest);
-    }
+    // NOTE: No interest display on Fuego - interest handled off-chain via L2
 
     // Display deposit type (from transaction extra field)
     std::string depositType = "Unknown";
