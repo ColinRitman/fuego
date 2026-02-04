@@ -2028,10 +2028,28 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
     success_msg_writer() << "Type:          " << depositType;
     success_msg_writer() << "Description:   " << typeDescription;
 
-    // Show transaction extra (contains commitment info)
+    // Parse and display commitment from transaction extra
     if (!deposit.extra.empty()) {
+      std::vector<TransactionExtraField> extraFields;
       std::vector<uint8_t> extraBytes(deposit.extra.begin(), deposit.extra.end());
-      success_msg_writer() << "Extra:         " << Common::toHex(extraBytes);
+
+      if (parseTransactionExtra(extraBytes, extraFields)) {
+        for (const auto& field : extraFields) {
+          if (field.type() == typeid(TransactionExtraHeatCommitment)) {
+            const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
+            success_msg_writer() << "Commitment:    " << Common::podToHex(heatCommit.commitment);
+          } else if (field.type() == typeid(TransactionExtraColdCommitment)) {
+            const auto& coldCommit = boost::get<TransactionExtraColdCommitment>(field);
+            success_msg_writer() << "Commitment:    " << Common::podToHex(coldCommit.commitment);
+          } else if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
+            const auto& elfDeposit = boost::get<TransactionExtraElderfierDeposit>(field);
+            success_msg_writer() << "Commitment:    " << Common::podToHex(elfDeposit.depositHash);
+          }
+        }
+      }
+
+      // Also show raw extra hex for debugging
+      success_msg_writer() << "Extra (hex):   " << Common::toHex(extraBytes);
     }
 
   } catch (const std::exception &e) {
