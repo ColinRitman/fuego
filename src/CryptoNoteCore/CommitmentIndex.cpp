@@ -197,9 +197,13 @@ std::vector<uint8_t> CommitmentIndex::getPendingElderfierIds() const {
 }
 
 bool CommitmentIndex::isElderfierRegistrationDeposit(const CommitmentEntry& entry) {
-  // Check for YIELD type deposits (which can be used for elderfier registration)
-  // with 0xE8 tag
-  return entry.type == CommitmentEntry::Type::YIELD && entry.targetChainId == 0xE8;
+  // Elderfier registration deposits are marked with:
+  // - ELDERFIER_STAKING type (type = 2)
+  // - OR 0xEC target chain ID (backwards compat with TransactionExtraElderfierDeposit)
+  //
+  // Registration requires 5 separate 0xEC deposits of 800 XFG each (4,000 XFG total)
+  return (entry.type == CommitmentEntry::Type::ELDERFIER_STAKING) ||
+         (entry.targetChainId == 0xEC);
 }
 
 std::string CommitmentIndex::getWalletAddressFromTx(const Crypto::Hash& txHash) {
