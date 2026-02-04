@@ -9,8 +9,8 @@
 
 #include "SimpleWallet/SimpleWallet.h"
 #include "TestnetWallet/TestnetWallet.h"
+#include "TestnetWallet/Const.h"  // Testnet-specific constants (testnet RPC port 28280)
 #include "SimpleWallet/ClientHelper.h"
-#include "SimpleWallet/Const.h"
 
 #include "Common/CommandLine.h"
 #include "Common/PathTools.h"
