@@ -63,8 +63,8 @@ namespace CryptoNote
 
     const CryptoNote::Currency& currency() const { return m_currency; }
 
-  private:
-
+  protected:
+    // Protected for testnet_wallet subclass access
     Logging::LoggerMessage success_msg_writer(bool color = false) {
       return logger(Logging::INFO, color ? Logging::GREEN : Logging::DEFAULT);
     }
@@ -74,6 +74,8 @@ namespace CryptoNote
       msg << "Error: ";
       return msg;
     }
+
+  private:
 
     void handle_command_line(const boost::program_options::variables_map& vm);
 
@@ -206,6 +208,8 @@ namespace CryptoNote
 
     std::unique_ptr<std::promise<std::error_code>> m_initResultPromise;
 
+  protected:
+    // Protected for testnet_wallet subclass access
     Common::ConsoleHandler m_consoleHandler;
     const CryptoNote::Currency& m_currency;
     Logging::LoggerManager& logManager;
@@ -215,6 +219,8 @@ namespace CryptoNote
     std::unique_ptr<CryptoNote::NodeRpcProxy> m_node;
     std::unique_ptr<CryptoNote::IWalletLegacy> m_wallet;
     refresh_progress_reporter_t m_refresh_progress_reporter;
+
+  private:
 
     bool m_walletSynchronized;
     std::mutex m_walletSynchronizedMutex;

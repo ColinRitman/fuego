@@ -31,8 +31,11 @@ file(GLOB_RECURSE JsonRpcServer JsonRpcServer/*)
 file(GLOB_RECURSE PaymentGate PaymentGate/*)
 file(GLOB_RECURSE PaymentGateService PaymentGateService/*)
 file(GLOB_RECURSE SimpleWallet SimpleWallet/*)
+
+# Remove duplicate glob definition and explicitly define library sources
+list(REMOVE_ITEM SimpleWallet SimpleWallet/main.cpp)
+
 file(GLOB_RECURSE Optimizer Optimizer/*)
-file(GLOB_RECURSE SimpleWalletLib SimpleWallet/*)
 
 # Tor integration
 #add_subdirectory(FuegoTor)
@@ -224,15 +227,33 @@ add_library(JsonRpcServer STATIC ${JsonRpcServer})
 target_include_directories(JsonRpcServer SYSTEM PUBLIC ${JSONCPP_INCLUDE_DIRS})
 target_link_libraries(JsonRpcServer PUBLIC ${JSONCPP_LIBRARIES})
 add_library(SimpleWalletLib STATIC ${SimpleWallet})
+target_link_libraries(SimpleWalletLib PUBLIC
+    Wallet
+    NodeRpcProxy
+    Transfers
+    Rpc
+    Http
+    CryptoNoteCore
+    System
+    Logging
+    Common
+    Crypto
+    ${Boost_LIBRARIES}
+    Serialization
+    ${JSONCPP_LIBRARIES}
+)
+
 add_executable(Daemon ${Daemon})
 add_executable(TestnetDaemon Daemon/DaemonCommandsHandler.cpp Daemon/DaemonCommandsHandler.h TestnetDaemon/TestnetDaemon.cpp)
-add_executable(SimpleWallet ${SimpleWallet})
+# SimpleWallet executable uses library + adds back main.cpp
+add_executable(SimpleWallet ${SimpleWallet} SimpleWallet/main.cpp)
 add_executable(PaymentGateService ${PaymentGateService})
 add_executable(Optimizer ${Optimizer})
 
 
-# Add TestnetWallet executable
+# Add TestnetWallet executable (extends simple_wallet with testnet-specific commands)
 add_executable(testnet-wallet-cli
+    TestnetWallet/main.cpp
     TestnetWallet/TestnetWallet.cpp
     SimpleWallet/PasswordContainer.cpp
     SimpleWallet/ClientHelper.cpp
@@ -265,6 +286,7 @@ target_link_libraries(testnet-wallet-cli PRIVATE
     Common
     upnpc-static
     BlockchainExplorer
+    SimpleWalletLib
     ${Boost_LIBRARIES}
     Serialization
     ${JSONCPP_LIBRARIES}
@@ -361,19 +383,6 @@ target_link_libraries(Optimizer PRIVATE
 
 target_link_libraries(SimpleWallet PRIVATE
     SimpleWalletLib
-    Wallet
-    NodeRpcProxy
-    Transfers
-    Rpc
-    Http
-    CryptoNoteCore
-    System
-    Logging
-    Common
-    Crypto
-    ${Boost_LIBRARIES}
-    Serialization
-    ${JSONCPP_LIBRARIES}
 )
 
 # Suppress deprecation warnings for Rpc target
