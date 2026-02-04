@@ -82,6 +82,7 @@ struct Deposit
   uint32_t outputInTransaction;
   Crypto::Hash transactionHash;
   std::string address;
+  std::string extra;    // Transaction extra field (contains commitment info)
   Type depositType = Type::HEAT;  // Default to HEAT for backward compatibility
 };
 

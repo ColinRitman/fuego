@@ -2035,6 +2035,12 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
     success_msg_writer() << "Type:          " << depositType;
     success_msg_writer() << "Description:   " << typeDescription;
 
+    // Show transaction extra (contains commitment info)
+    if (!deposit.extra.empty()) {
+      std::vector<uint8_t> extraBytes(deposit.extra.begin(), deposit.extra.end());
+      success_msg_writer() << "Extra:         " << Common::toHex(extraBytes);
+    }
+
   } catch (const std::exception &e) {
     fail_msg_writer() << "Error: " << e.what();
     return false;
