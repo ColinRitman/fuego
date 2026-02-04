@@ -1,91 +1,119 @@
-// Copyright (c) 2017-2025 Fuego Developers
-// Copyright (c) 2018-2019 Conceal Network & Conceal Devs
-// Copyright (c) 2016-2019 The Karbowanec developers
-// Copyright (c) 2012-2018 The CryptoNote developers
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2018-2023 Conceal Network & Conceal Devs
 //
-// This file is part of Fuego.
-//
-// Fuego is free software distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the
-// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
-// PURPOSE. You can redistribute it and/or modify it under the terms
-// of the GNU General Public License v3 or later versions as published
-// by the Free Software Foundation. Fuego includes elements written
-// by third parties. See file labeled LICENSE for more details.
-// You should have received a copy of the GNU General Public License
-// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
+// Distributed under the MIT/X11 software license, see the accompanying
+// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+
+#include <fstream>
+#include <boost/program_options.hpp>
 
 #include "SimpleWallet/SimpleWallet.h"
-
-#include <boost/program_options.hpp>
-#include <boost/algorithm/string.hpp>
+#include "TestnetWallet/TestnetWallet.h"
+#include "SimpleWallet/ClientHelper.h"
+#include "SimpleWallet/Const.h"
 
 #include "Common/CommandLine.h"
+#include "Common/PathTools.h"
 #include "Common/SignalHandler.h"
-#include "CryptoNoteCore/CryptoNoteBasicImpl.h"
-#include "CryptoNoteCore/Currency.h"
+#include "Wallet/WalletRpcServer.h"
+
 #include "version.h"
 
+#include <Logging/LoggerManager.h>
+
+// Namespace alias for compatibility
+namespace cn = CryptoNote;
+
 namespace po = boost::program_options;
+using namespace Logging;
 
-//----------------------------------------------------------------------------------------------------
-// Main entry point for testnet wallet CLI
-//----------------------------------------------------------------------------------------------------
-int main(int argc, char* argv[]) {
-  try {
-    // This binary uses testnet_wallet which extends simple_wallet with testnet-specific commands
-    po::options_description desc_general("General options");
-    po::options_description desc_params("Parameters");
+int main(int argc, char* argv[])
+{
+  po::options_description desc_general("General options");
+  command_line::add_arg(desc_general, command_line::arg_help);
+  command_line::add_arg(desc_general, command_line::arg_version);
 
-    desc_general.add_options()
-      ("wallet-file,w", po::value<std::string>(), "use wallet <arg>")
-      ("generate-new-wallet,g", po::value<std::string>(), "generate new wallet and save it to <arg>")
-      ("import-new-wallet,i", po::value<std::string>(), "import new wallet")
-      ("daemon-address,d", po::value<std::string>(), "use daemon instance at <host:port>")
-      ("daemon-host,h", po::value<std::string>(), "use daemon instance at host <arg>")
-      ("daemon-port,p", po::value<uint16_t>(), "use daemon instance at port <arg>")
-      ("testnet", "testnet mode")
-      ("stagenet", "stagenet mode")
-      ("help", "produce help message")
-      ("version", "show version");
+  po::options_description desc_params("Testnet Wallet options");
+  command_line::add_arg(desc_params, arg_wallet_file);
+  command_line::add_arg(desc_params, arg_generate_new_wallet);
+  command_line::add_arg(desc_params, arg_password);
+  command_line::add_arg(desc_params, arg_daemon_address);
+  command_line::add_arg(desc_params, arg_daemon_host);
+  command_line::add_arg(desc_params, arg_daemon_port);
+  command_line::add_arg(desc_params, arg_command);
+  command_line::add_arg(desc_params, arg_log_level);
+  command_line::add_arg(desc_params, arg_testnet);
+  Tools::wallet_rpc_server::init_options(desc_params);
 
-    po::variables_map vm;
-    bool r = Command_Line_Interpreter::parse_command_line(argc, argv, desc_general, vm);
+  po::positional_options_description positional_options;
+  positional_options.add(arg_command.name, -1);
 
-    if (!r) {
-      std::cerr << "Failed to parse command line options" << std::endl;
-      return 1;
+  po::options_description desc_all;
+  desc_all.add(desc_general).add(desc_params);
+
+  Logging::LoggerManager logManager;
+  Logging::LoggerRef logger(logManager, "testnetwallet");
+  System::Dispatcher dispatcher;
+
+  po::variables_map vm;
+
+  cn::client_helper m_chelper;
+
+  bool r = command_line::handle_error_helper(desc_all, [&]()
+  {
+    po::store(command_line::parse_command_line(argc, argv, desc_general, true), vm);
+
+    if (command_line::get_arg(vm, command_line::arg_help))
+    {
+      std::cout << "Testnet Wallet " << PROJECT_RELEASE_VERSION << std::endl;
+      std::cout << desc_all << std::endl;
+
+      return false;
+    }
+    else if (command_line::get_arg(vm, command_line::arg_version))
+    {
+      std::cout << "Testnet Wallet " << PROJECT_RELEASE_VERSION << std::endl;
+      return false;
     }
 
-    if (vm.count("help")) {
-      std::cout << "Fuego Testnet Wallet CLI" << std::endl;
-      std::cout << desc_general << std::endl;
-      return 0;
-    }
+    auto parser = po::command_line_parser(argc, argv).options(desc_params).positional(positional_options);
+    po::store(parser.run(), vm);
+    po::notify(vm);
+    return true;
+  });
 
-    if (vm.count("version")) {
-      std::cout << "Fuego Testnet Wallet CLI v" << FUEGO_VERSION << std::endl;
-      return 0;
-    }
+  if (!r)
+    return 1;
 
-    // Initialize system and logging
-    System::Dispatcher dispatcher;
-    Logging::LoggerManager logManager;
+  //set up logging options
+  Level logLevel = INFO;
 
-    // Get currency (testnet)
-    const CryptoNote::Currency& currency = CryptoNote::Currency::instance();
+  if (command_line::has_arg(vm, arg_log_level))
+    logLevel = static_cast<Level>(command_line::get_arg(vm, arg_log_level));
 
-    // Create testnet wallet (extends simple_wallet)
-    CryptoNote::testnet_wallet wallet(dispatcher, currency, logManager);
+  logManager.configure(m_chelper.buildLoggerConfiguration(logLevel, Common::ReplaceExtenstion(argv[0], ".log")));
 
-    if (!wallet.init(vm)) {
-      return 1;
-    }
+  logger(INFO, BRIGHT_YELLOW) << "Testnet Wallet " << PROJECT_RELEASE_VERSION;
 
-    return wallet.run() ? 0 : 1;
-  }
-  catch (const std::exception& e) {
-    std::cerr << "Testnet Wallet Error: " << e.what() << std::endl;
+  // NOTE: Testnet wallet uses testnet=true always (not configurable via --testnet flag)
+  bool testnet = true;
+  logger(INFO, MAGENTA) << "/!\\ Running in testnet mode /!\\";
+
+  cn::Currency currency = cn::CurrencyBuilder(logManager).
+    testnet(testnet).currency();
+
+  if (command_line::has_arg(vm, Tools::wallet_rpc_server::arg_rpc_bind_port))
+  {
+    //runs wallet with rpc interface
+    logger(ERROR, BRIGHT_RED) << "RPC server not supported in testnet wallet CLI";
     return 1;
   }
+
+  // Create testnet wallet (extends simple_wallet with testnet-specific commands)
+  cn::testnet_wallet wallet(dispatcher, currency, logManager);
+
+  if (!wallet.init(vm))
+    return 1;
+
+  return wallet.run() ? 0 : 1;
 }
