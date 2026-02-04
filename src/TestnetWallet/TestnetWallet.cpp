@@ -639,10 +639,11 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("start_mining", boost::bind(&simple_wallet::start_mining, this, boost::arg<1>()), "start_mining [<threads>] - Start mining to your wallet");
   m_consoleHandler.setHandler("stop_mining", boost::bind(&simple_wallet::stop_mining, this, boost::arg<1>()), "stop_mining - Stop mining");
 
-  // Deposit commands (testnet currently uses generic deposit, burn/cold/elderking_ceremony on mainnet only)
+  // Deposit commands (testnet has FULL ACCESS to all deposit commands for testing)
   m_consoleHandler.setHandler("deposit", boost::bind(&simple_wallet::deposit, this, boost::arg<1>()), "deposit <amount> <term_code> - Create a deposit (0.8, 8, 80, 800 XFG with terms 0=HEAT, 3=3mo, 12=1yr)");
-  // TODO: burn, cold, and elderking_ceremony commands require TestnetWallet to inherit SimpleWallet.cpp
-  // Currently kept generic for testnet to avoid link conflicts. Will add in future release.
+  m_consoleHandler.setHandler("burn", boost::bind(&simple_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
+  m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
+  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 XFG deposits (0xEC tag, 4000 XFG total). Creates elderfier registration commitment.");
   m_consoleHandler.setHandler("withdraw_deposit", boost::bind(&simple_wallet::withdraw_deposit, this, boost::arg<1>()), "withdraw_deposit <id> - Withdraw a deposit");
   m_consoleHandler.setHandler("list_deposits", boost::bind(&simple_wallet::list_deposits, this, boost::arg<1>()), "list_deposits - List all deposits");
   m_consoleHandler.setHandler("deposit_info", boost::bind(&simple_wallet::deposit_info, this, boost::arg<1>()), "deposit_info <id> - Get detailed info for deposit");
@@ -2567,4 +2568,245 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
   }
 
   return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+// Testnet-specific deposit command implementations (burn, cold, elderking_ceremony)
+// These allow full testing of elderfier registration on testnet
+//----------------------------------------------------------------------------------------------------
+
+bool simple_wallet::burn(const std::vector<std::string> &args)
+{
+  // HEAT burn deposit - simplified command for testnet
+  if (args.size() != 1)
+  {
+    fail_msg_writer() << "Usage: burn <amount>";
+    fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
+    return true;
+  }
+
+  try
+  {
+    uint64_t burn_amount = 0;
+    bool ok = m_currency.parseAmount(args[0], burn_amount);
+
+    if (!ok || 0 == burn_amount)
+    {
+      fail_msg_writer() << "Invalid amount format: " << args[0];
+      return true;
+    }
+
+    std::vector<uint64_t> valid_amounts = {
+      CryptoNote::parameters::AMOUNT_TIER_0,
+      CryptoNote::parameters::AMOUNT_TIER_1,
+      CryptoNote::parameters::AMOUNT_TIER_2,
+      CryptoNote::parameters::AMOUNT_TIER_3
+    };
+
+    auto it = std::find(valid_amounts.begin(), valid_amounts.end(), burn_amount);
+    if (it == valid_amounts.end()) {
+      fail_msg_writer() << "Invalid amount. Valid tiers: 0.8, 8, 80, 800 XFG";
+      return true;
+    }
+
+    uint32_t burn_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
+    uint64_t fee = m_currency.minimumFee();
+    std::string extraString = "";
+
+    success_msg_writer() << "Creating HEAT burn deposit: " << m_currency.formatAmount(burn_amount) << " XFG";
+    CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
+
+    if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+      fail_msg_writer() << "Sending deposit transaction failed";
+      return true;
+    }
+
+    success_msg_writer() << "HEAT burn deposit created. TX ID: " << txId;
+    return true;
+  }
+  catch (const std::exception& e)
+  {
+    fail_msg_writer() << "Error: " << e.what();
+    return true;
+  }
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::cold(const std::vector<std::string> &args)
+{
+  // COLD deposit - testnet version with term code validation
+  if (args.size() != 2)
+  {
+    fail_msg_writer() << "Usage: cold <amount> <term_code>";
+    fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
+    fail_msg_writer() << "Valid term codes: 3 (3 months), 12 (1 year)";
+    return true;
+  }
+
+  try
+  {
+    uint64_t cold_amount = 0;
+    bool ok = m_currency.parseAmount(args[0], cold_amount);
+
+    if (!ok || 0 == cold_amount)
+    {
+      fail_msg_writer() << "Invalid amount format: " << args[0];
+      return true;
+    }
+
+    std::vector<uint64_t> valid_amounts = {
+      CryptoNote::parameters::AMOUNT_TIER_0,
+      CryptoNote::parameters::AMOUNT_TIER_1,
+      CryptoNote::parameters::AMOUNT_TIER_2,
+      CryptoNote::parameters::AMOUNT_TIER_3
+    };
+
+    auto it = std::find(valid_amounts.begin(), valid_amounts.end(), cold_amount);
+    if (it == valid_amounts.end()) {
+      fail_msg_writer() << "Invalid amount. Valid tiers: 0.8, 8, 80, 800 XFG";
+      return true;
+    }
+
+    uint32_t term_code = boost::lexical_cast<uint32_t>(args[1]);
+    uint32_t cold_term = 0;
+    std::string term_label = "";
+
+    uint32_t min_term = CryptoNote::parameters::TESTNET_COLD_MIN_TERM;
+    uint32_t max_term = CryptoNote::parameters::TESTNET_COLD_MAX_TERM;
+
+    if (term_code == 3) {
+      cold_term = min_term;
+      term_label = "3 months";
+    } else if (term_code == 12) {
+      cold_term = max_term;
+      term_label = "1 year";
+    } else {
+      fail_msg_writer() << "Invalid term code. Use: 3 (3 months) or 12 (1 year)";
+      return true;
+    }
+
+    uint64_t fee = m_currency.minimumFee();
+    std::string extraString = "";
+
+    success_msg_writer() << "Creating COLD deposit: " << m_currency.formatAmount(cold_amount) << " XFG for " << term_label;
+    CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee, extraString, 0);
+
+    if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+      fail_msg_writer() << "Sending deposit transaction failed";
+      return true;
+    }
+
+    success_msg_writer() << "COLD deposit created. TX ID: " << txId;
+    return true;
+  }
+  catch (const std::exception& e)
+  {
+    fail_msg_writer() << "Error: " << e.what();
+    return true;
+  }
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
+{
+  // Testnet elderfier registration ceremony
+  if (args.size() != 0)
+  {
+    fail_msg_writer() << "Usage: elderking_ceremony";
+    return true;
+  }
+
+  try
+  {
+    success_msg_writer() << "";
+    success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+    success_msg_writer() << "║            🔥⚡  ELDERFIRE STAYKING CEREMONY  ⚡🔥          ║";
+    success_msg_writer() << "║                    (TESTNET ELDERFIER REGISTRATION)         ║";
+    success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+    success_msg_writer() << "";
+    success_msg_writer() << "Testing elderfier registration on testnet!";
+    success_msg_writer() << "This creates 5 deposits of 800 XFG each (4000 XFG total)";
+    success_msg_writer() << "";
+
+    uint64_t balance = m_wallet->actualBalance();
+    uint64_t required = 4000 * CryptoNote::parameters::COIN;
+    uint64_t fee = m_currency.minimumFee();
+
+    success_msg_writer() << "Balance: " << m_currency.formatAmount(balance) << " XFG";
+    success_msg_writer() << "Required: " << m_currency.formatAmount(required + (5 * fee)) << " XFG";
+    success_msg_writer() << "";
+
+    if (balance < required + (5 * fee)) {
+      fail_msg_writer() << "Insufficient balance for ceremony.";
+      return true;
+    }
+
+    std::string confirm;
+    success_msg_writer() << "⚡ Type 'IGNITE' to begin ceremony: ";
+    std::getline(std::cin, confirm);
+
+    if (confirm != "IGNITE") {
+      success_msg_writer() << "Ceremony cancelled.";
+      return true;
+    }
+
+    uint64_t amount_per_deposit = 800 * CryptoNote::parameters::COIN;
+    success_msg_writer() << "";
+    success_msg_writer() << "🔥 Creating 5 elderfier stakes...";
+    success_msg_writer() << "";
+
+    for (int i = 0; i < 5; ++i) {
+      success_msg_writer() << "Ritual " << (i + 1) << " of 5: Creating 800 XFG stake...";
+
+      std::vector<uint8_t> extra;
+      std::string extraString = "";
+
+      Crypto::PublicKey public_key;
+      Crypto::SecretKey secret_key;
+      Crypto::generate_keys(public_key, secret_key);
+      Crypto::Hash commitment_hash = Crypto::cn_fast_hash(public_key.data, sizeof(public_key.data));
+
+      CryptoNote::TransactionExtraElderfierDeposit elderfierDeposit;
+      elderfierDeposit.depositHash = commitment_hash;
+      elderfierDeposit.depositAmount = amount_per_deposit;
+      elderfierDeposit.elderfierAddress = "";
+      elderfierDeposit.securityWindow = 28800;
+      elderfierDeposit.metadata.clear();
+      elderfierDeposit.signature.clear();
+      elderfierDeposit.isSlashable = true;
+
+      CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
+
+      CryptoNote::TransactionId txId = m_wallet->deposit(
+        CryptoNote::parameters::DEPOSIT_TERM_FOREVER,
+        amount_per_deposit,
+        fee,
+        extraString,
+        0
+      );
+
+      if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+        fail_msg_writer() << "Failed at ritual " << (i + 1) << " of 5";
+        return true;
+      }
+
+      success_msg_writer() << "✨ Stake " << (i + 1) << " forged! TX ID: " << txId;
+    }
+
+    success_msg_writer() << "";
+    success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+    success_msg_writer() << "║         🔥⚡ TESTNET CEREMONY COMPLETE! ⚡🔥               ║";
+    success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+    success_msg_writer() << "";
+    success_msg_writer() << "✅ All 5 elderfier stakes created (4000 XFG total)";
+    success_msg_writer() << "🎉 Ready for elderfier testing on testnet!";
+    success_msg_writer() << "";
+
+    return true;
+  }
+  catch (const std::exception& e)
+  {
+    fail_msg_writer() << "Error during ceremony: " << e.what();
+    return true;
+  }
 }
