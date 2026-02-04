@@ -64,9 +64,16 @@ struct WalletTransactionCreatedData
 
 struct Deposit
 {
+  // Deposit type enum
+  enum class Type : uint8_t {
+    HEAT = 0x08,        // HEAT burn deposit (0x08)
+    COLD = 0xCD,        // COLD yield deposit (0xCD)
+    ELDERFIER = 0xEC    // ELDERFIER staking deposit (0xEC)
+  };
+
   size_t creatingTransactionId;
   size_t spendingTransactionId;
-  uint32_t term;
+  uint32_t term;        // User-defined unlock time (independent of type)
   uint64_t amount;
   uint64_t interest;
   uint64_t height;
@@ -75,6 +82,7 @@ struct Deposit
   uint32_t outputInTransaction;
   Crypto::Hash transactionHash;
   std::string address;
+  Type depositType = Type::HEAT;  // Default to HEAT for backward compatibility
 };
 
 struct WalletTransactionUpdatedData

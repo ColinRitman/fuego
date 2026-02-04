@@ -1984,9 +1984,31 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
       success_msg_writer() << "Total Return:  " << m_currency.formatAmount(deposit.amount + deposit.interest);
     }
 
-    // Show term information
+    // Display deposit type (from transaction extra field)
+    std::string depositType = "Unknown";
+    std::string typeDescription = "";
+
+    switch (deposit.depositType) {
+      case CryptoNote::Deposit::Type::HEAT:
+        depositType = "HEAT Burn (0x08)";
+        typeDescription = "Permanent burn deposit - removed from circulation";
+        break;
+      case CryptoNote::Deposit::Type::COLD:
+        depositType = "COLD Yield (0xCD)";
+        typeDescription = "Off-chain yield deposit - locked for specified term";
+        break;
+      case CryptoNote::Deposit::Type::ELDERFIER:
+        depositType = "ELDERFIER Stake (0xEC)";
+        typeDescription = "Staking deposit for elderfier - unstakeable with 8-day hold window";
+        break;
+      default:
+        depositType = "Unknown";
+        typeDescription = "Unknown deposit type";
+    }
+
+    // Display term (user-defined unlock time, independent of deposit type)
     if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
-      success_msg_writer() << "Term:          HEAT burn (forever)";
+      success_msg_writer() << "Term:          FOREVER";
     } else if (deposit.term == CryptoNote::parameters::COLD_MIN_TERM) {
       success_msg_writer() << "Term:          3 months (16,000 blocks)";
     } else if (deposit.term == CryptoNote::parameters::COLD_MAX_TERM) {
@@ -2009,14 +2031,9 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
 
     success_msg_writer() << "Transaction:   " << Common::podToHex(deposit.transactionHash);
 
-    // Show commitment information if available
-    if (deposit.amount == CryptoNote::parameters::AMOUNT_TIER_0) {
-      success_msg_writer() << "Type:          HEAT Burn Deposit";
-      success_msg_writer() << "Commitment:    Will generate off-chain yield via STARK proofs";
-    } else {
-      success_msg_writer() << "Type:          COLD Yield Deposit";
-      success_msg_writer() << "Commitment:    Generates CD commitments for on-chain verification";
-    }
+    // Show deposit type information
+    success_msg_writer() << "Type:          " << depositType;
+    success_msg_writer() << "Description:   " << typeDescription;
 
   } catch (const std::exception &e) {
     fail_msg_writer() << "Error: " << e.what();
