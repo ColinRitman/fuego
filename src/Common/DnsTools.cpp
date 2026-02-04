@@ -100,7 +100,10 @@ namespace Common {
 				return false;
 		}
 
-		ns_initparse(query_buffer, response, &nsMsg);
+		// DISABLED: ns_initparse not available on macOS
+	// ns_initparse(query_buffer, response, &nsMsg);
+	// Returning false - DNS TXT resolution not supported on this platform
+	return false;
 
 		map<ns_type, function<void(const ns_rr &rr)>> callbacks;
 
