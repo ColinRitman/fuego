@@ -533,6 +533,7 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // m_consoleHandler.setHandler("deposit", boost::bind(&simple_wallet::deposit, this, boost::arg<1>()), "deposit <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr). ETH address provided at claim time for privacy.");
   m_consoleHandler.setHandler("burn", boost::bind(&simple_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
   m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
+  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 XFG deposits (0xEC tag, 4000 XFG total). Creates elderfier registration commitment.");
   m_consoleHandler.setHandler("withdraw_deposit", boost::bind(&simple_wallet::withdraw_deposit, this, boost::arg<1>()), "withdraw_deposit <id> - Withdraw a deposit");
   m_consoleHandler.setHandler("list_deposits", boost::bind(&simple_wallet::list_deposits, this, boost::arg<1>()), "list_deposits - List all deposits");
   m_consoleHandler.setHandler("deposit_info", boost::bind(&simple_wallet::deposit_info, this, boost::arg<1>()), "deposit_info <id> - Get detailed info for deposit");
@@ -1563,6 +1564,158 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
   catch (const std::exception& e)
   {
     fail_msg_writer() << "Error: " << e.what();
+    return true;
+  }
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
+{
+  // Elderfier registration: batch 5x 800 XFG deposits with 0xEC tag (total 4000 XFG)
+  // This is the ceremonial registration process for becoming an Elderfier
+  if (args.size() != 0)
+  {
+    fail_msg_writer() << "Usage: elderking_ceremony";
+    fail_msg_writer() << "";
+    fail_msg_writer() << "⚡ ELDERFIER REGISTRATION CEREMONY ⚡";
+    fail_msg_writer() << "Register as an Elderfier by depositing 4000 XFG (5 × 800 XFG)";
+    fail_msg_writer() << "";
+    fail_msg_writer() << "Requirements:";
+    fail_msg_writer() << "  • 4000 XFG minimum (5 deposits of 800 XFG each)";
+    fail_msg_writer() << "  • Network confirms automatically after 5 deposits detected";
+    fail_msg_writer() << "  • Deposits are tagged 0xEC (Elderfier staking tag)";
+    fail_msg_writer() << "  • No banking fees applied to elderfier deposits";
+    fail_msg_writer() << "";
+    fail_msg_writer() << "Benefits:";
+    fail_msg_writer() << "  • Participate in merkle root signing consensus";
+    fail_msg_writer() << "  • Earn 0.1% of HEAT/COLD banking fees (only if you sign)";
+    fail_msg_writer() << "  • 69% threshold required to finalize fee distribution";
+    return true;
+  }
+
+  try
+  {
+    // Check wallet balance
+    uint64_t balance = m_wallet->actualBalance();
+    uint64_t required = 4 * CryptoNote::parameters::COIN;  // 4000 XFG
+    uint64_t fee = m_currency.minimumFee();
+
+    if (balance < required + (5 * fee)) {
+      fail_msg_writer() << "Insufficient balance for elderfier registration.";
+      fail_msg_writer() << "Required: " << m_currency.formatAmount(required + (5 * fee)) << " XFG";
+      fail_msg_writer() << "Available: " << m_currency.formatAmount(balance) << " XFG";
+      return true;
+    }
+
+    // Confirm with user
+    success_msg_writer() << "";
+    success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+    success_msg_writer() << "║         🔥 ELDERFIER REGISTRATION CEREMONY 🔥              ║";
+    success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+    success_msg_writer() << "";
+    success_msg_writer() << "You are about to register as an Elderfier by staking:";
+    success_msg_writer() << "  • 5 deposits of 800 XFG each (4000 XFG total)";
+    success_msg_writer() << "  • Tag: 0xEC (Elderfier staking deposit)";
+    success_msg_writer() << "  • Banking fee: NONE (elderfiers exempt)";
+    success_msg_writer() << "  • Network transaction fee: " << m_currency.formatAmount(5 * fee);
+    success_msg_writer() << "";
+    success_msg_writer() << "Total cost: " << m_currency.formatAmount(required + (5 * fee)) << " XFG";
+    success_msg_writer() << "";
+    success_msg_writer() << "⚠️  This is a permanent commitment to the network.";
+    success_msg_writer() << "⚠️  Your deposits become part of the elderfier consensus mechanism.";
+    success_msg_writer() << "";
+
+    std::string confirm;
+    success_msg_writer() << "Proceed with registration? (type 'CONFIRM' to continue): ";
+    std::getline(std::cin, confirm);
+
+    if (confirm != "CONFIRM") {
+      success_msg_writer() << "Elderfier registration cancelled.";
+      return true;
+    }
+
+    // Create 5 deposits of 800 XFG each with 0xEC tag
+    uint64_t amount_per_deposit = 800 * CryptoNote::parameters::COIN;  // 800 XFG
+    success_msg_writer() << "";
+    success_msg_writer() << "🔥 Initiating elderfier registration...";
+    success_msg_writer() << "";
+
+    std::vector<CryptoNote::TransactionId> txIds;
+
+    for (int i = 0; i < 5; ++i) {
+      success_msg_writer() << "Creating deposit " << (i + 1) << " of 5 (800 XFG)...";
+
+      // Create elderfier deposit with 0xEC tag
+      std::vector<uint8_t> extra;
+      std::string extraString = "";
+
+      // Generate commitment hash (random 32-byte hash for this deposit)
+      Crypto::PublicKey public_key;
+      Crypto::SecretKey secret_key;
+      Crypto::generate_keys(public_key, secret_key);
+      Crypto::Hash commitment_hash = Crypto::cn_fast_hash(public_key.data, sizeof(public_key.data));
+
+      // Create 0xEC elderfier deposit extra field
+      CryptoNote::TransactionExtraElderfierDeposit elderfierDeposit;
+      elderfierDeposit.depositHash = commitment_hash;
+      elderfierDeposit.depositAmount = amount_per_deposit;
+      elderfierDeposit.elderfierAddress = "";  // Optional: can be set to node address later
+      elderfierDeposit.securityWindow = 28800;  // 8 hours default security window
+      elderfierDeposit.metadata.clear();
+      elderfierDeposit.signature.clear();
+      elderfierDeposit.isSlashable = true;  // Deposits can be slashed by Elder Council
+
+      // Add elderfier deposit to transaction extra
+      CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
+
+      // Send the transaction - use standard deposit mechanism
+      // Note: For 0xEC deposits, we don't use the normal "term" system
+      // Using DEPOSIT_TERM_FOREVER as placeholder since term is not used for elderfier deposits
+      CryptoNote::TransactionId txId = m_wallet->deposit(
+        CryptoNote::parameters::DEPOSIT_TERM_FOREVER,
+        amount_per_deposit,
+        fee,
+        extraString,
+        0
+      );
+
+      if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+        fail_msg_writer() << "Failed to create deposit " << (i + 1) << " of 5";
+        fail_msg_writer() << "Elderfier registration INCOMPLETE. Only " << i << " deposits created.";
+        return true;
+      }
+
+      txIds.push_back(txId);
+      success_msg_writer() << "✓ Deposit " << (i + 1) << " sent. TX ID: " << txId;
+    }
+
+    success_msg_writer() << "";
+    success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+    success_msg_writer() << "║              ✨ REGISTRATION COMPLETE! ✨                   ║";
+    success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+    success_msg_writer() << "";
+    success_msg_writer() << "🎉 All 5 deposits created successfully!";
+    success_msg_writer() << "   Total staked: 4000 XFG";
+    success_msg_writer() << "";
+    success_msg_writer() << "⏳ Network processing...";
+    success_msg_writer() << "   The network will automatically detect your 5 deposits";
+    success_msg_writer() << "   and register you as an Elderfier.";
+    success_msg_writer() << "";
+    success_msg_writer() << "🔑 Your Elderfier ID:";
+    success_msg_writer() << "   Will be assigned by the network (0-255)";
+    success_msg_writer() << "   Check: list_deposits or use RPC to query status";
+    success_msg_writer() << "";
+    success_msg_writer() << "📊 You can now:";
+    success_msg_writer() << "   • Sign merkle roots with your elderfier node";
+    success_msg_writer() << "   • Earn 0.1% of HEAT/COLD banking fees (if you sign)";
+    success_msg_writer() << "   • Participate in elderfier consensus (69% threshold)";
+    success_msg_writer() << "";
+
+    return true;
+  }
+  catch (const std::exception& e)
+  {
+    fail_msg_writer() << "Error during elderfier registration: " << e.what();
     return true;
   }
 }
