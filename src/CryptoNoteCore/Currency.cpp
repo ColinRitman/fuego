@@ -246,32 +246,34 @@ double Currency::getBurnPercentage() const {
 		uint64_t fee, uint32_t height, uint64_t& reward, int64_t& emissionChange) const {
 		unsigned int m_emissionSpeedFactor = emissionSpeedFactor(blockMajorVersion);
 
-    // Calculate emission while accounting for burns)
+    assert(m_emissionSpeedFactor > 0 && m_emissionSpeedFactor <= 8 * sizeof(uint64_t));
+
+    // Calculate emission while accounting for burns
     uint64_t Osavvirsak = alreadyGeneratedCoins - getEternalFlame();
     Osavvirsak = std::max(Osavvirsak, static_cast<uint64_t>(0));  // Prevent negative values
 
     assert(Osavvirsak <= m_moneySupply);
     assert(m_emissionSpeedFactor > 0 && m_emissionSpeedFactor <= 8 * sizeof(uint64_t));
-
+    // Only use burn-adjusted reward formula for v10+ blocks (when burns were introduced)
     uint64_t baseReward;
-    if (getEternalFlame() > 0) {
+    if (blockMajorVersion >= BLOCK_MAJOR_VERSION_10 && getEternalFlame() > 0) {
         baseReward = (m_moneySupply - Osavvirsak) >> m_emissionSpeedFactor;
     } else {
         baseReward = (m_moneySupply - alreadyGeneratedCoins) >> m_emissionSpeedFactor;
-    }  // start after bmv10
-		logger(DEBUGGING) << "getBlockReward baseReward calculation: m_moneySupply=" << m_moneySupply
-			<< ", alreadyGeneratedCoins=" << alreadyGeneratedCoins
-			<< ", Osavvirsak=" << Osavvirsak
-			<< ", baseReward=" << baseReward;
+    }
+    logger(DEBUGGING) << "getBlockReward baseReward calculation: m_moneySupply=" << m_moneySupply
+      << ", alreadyGeneratedCoins=" << alreadyGeneratedCoins
+      << ", Osavvirsak=" << Osavvirsak
+      << ", baseReward=" << baseReward;
 
     // Debug output for reward calculation analysis
     static uint32_t lastDebugHeight = 0;
     if (height > 900000 && height % 10000 == 0 && height != lastDebugHeight) {
         lastDebugHeight = height;
         logger(INFO) << "BLOCK " << height << ": XFG minted=" << alreadyGeneratedCoins
-                         << ", Ethereal XFG=" << getEternalFlame()
-                         << ", Osavvirsak=" << Osavvirsak
-                         << ", Base Reward=" << baseReward;
+                     << ", Ethereal XFG=" << getEternalFlame()
+                     << ", Osavvirsak=" << Osavvirsak
+                     << ", Base Reward=" << baseReward;
     }
 
     size_t blockGrantedFullRewardZone = blockGrantedFullRewardZoneByBlockVersion(blockMajorVersion);
