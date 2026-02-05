@@ -59,7 +59,7 @@ bool ElderfierSignatureDaemon::isRunning() const {
 
 void ElderfierSignatureDaemon::setSigningEnabled(bool enabled) {
   m_signingEnabled = enabled;
-  m_logger(Logging::DEBUG, Logging::BRIGHT_WHITE)
+  m_logger(Logging::DEBUGGING, Logging::BRIGHT_WHITE)
       << "Signature generation " << (enabled ? "enabled" : "disabled");
 }
 
@@ -128,7 +128,9 @@ void ElderfierSignatureDaemon::daemonThread() {
 
   while (m_running) {
     try {
-      uint32_t currentHeight = m_core.get_current_blockchain_height();
+      uint32_t currentHeight;
+      Crypto::Hash topId;
+      m_core.get_blockchain_top(currentHeight, topId);
 
       // Process pending blocks
       {
@@ -229,7 +231,8 @@ Crypto::Signature ElderfierSignatureDaemon::signMerkleRoot(const Crypto::Hash& m
   Crypto::generate_keys(pubkey, seckey);
 
   // Sign the merkle root
-  Crypto::Signature signature = Crypto::generate_signature(merkleRoot, pubkey, seckey);
+  Crypto::Signature signature;
+  Crypto::generate_signature(merkleRoot, pubkey, seckey, signature);
   return signature;
 }
 

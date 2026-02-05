@@ -1684,12 +1684,12 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "║  Ready to proceed with the Elderfire StayKing Ceremony?    ║";
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
-    success_msg_writer() << "⚡ Type 'IGNITE' to begin the ceremony, or press Enter to abort: ";
+    success_msg_writer() << "⚡ Type 'DRACARYS' to begin the ceremony, or press Enter to abort: ";
 
     std::string confirm;
     std::getline(std::cin, confirm);
 
-    if (confirm != "IGNITE") {
+    if (confirm != "DRACARYS") {
       success_msg_writer() << "";
       success_msg_writer() << "🚫 Ceremony aborted. The Elderfire remains dormant.";
       return true;
@@ -1709,7 +1709,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
 
     for (int i = 0; i < 5; ++i) {
       success_msg_writer() << "";
-      success_msg_writer() << "⚡ Ritual " << (i + 1) << " of 5: Forging Elderfire Stake ⚡";
+      success_msg_writer() << "⚡ Ritual " << (i + 1) << " of 5: Forming Elderfire Stake ⚡";
       success_msg_writer() << "  Creating 800 XFG commitment...";
 
       // Create elderfier deposit with 0xEC tag
@@ -1749,13 +1749,13 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
         fail_msg_writer() << "";
         fail_msg_writer() << "❌ CEREMONY FAILED AT RITUAL " << (i + 1) << " OF 5";
-        fail_msg_writer() << "   The Elderfire has been extinguished.";
-        fail_msg_writer() << "   Only " << i << " stakes were forged before the ritual faltered.";
+        fail_msg_writer() << "   Your Elderfier was not created .";
+        fail_msg_writer() << "   Only " << i << " stakes were wrought before the ritual faltered.";
         return true;
       }
 
       txIds.push_back(txId);
-      success_msg_writer() << "  ✨ Stake " << (i + 1) << " forged!";
+      success_msg_writer() << "  ✨ Stake " << (i + 1) << " wrought!";
       success_msg_writer() << "  📡 TX Hash: " << txId;
     }
 
@@ -1779,7 +1779,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "   🔐 SIGN merkle roots of deposit commitments";
     success_msg_writer() << "   💰 EARN 0.1% of all HEAT/COLD banking fees";
     success_msg_writer() << "   🌍 PARTICIPATE in 69% consensus validation";
-    success_msg_writer() << "   🛡️  PROTECT network security & decentralization";
+    success_msg_writer() << "   🛡️ PROTECT network security & decentralization";
     success_msg_writer() << "";
     success_msg_writer() << "📊 NEXT STEPS";
     success_msg_writer() << "   1. Check your deposits: list_deposits";
@@ -1787,7 +1787,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "   3. Run your elderfier node to sign merkle roots";
     success_msg_writer() << "   4. Start earning fees when consensus is reached";
     success_msg_writer() << "";
-    success_msg_writer() << "🎉 Welcome to the Elderfire StayKing ranks!";
+    success_msg_writer() << "🎉 Welcome King, to the Ælder Council!";
     success_msg_writer() << "";
 
     return true;
@@ -2908,4 +2908,3 @@ bool simple_wallet::process_command(const std::vector<std::string> &args) {
 void simple_wallet::printConnectionError() const {
   fail_msg_writer() << "wallet failed to connect to daemon (" << m_daemon_address << ").";
 }
-

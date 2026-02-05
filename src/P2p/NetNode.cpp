@@ -1,3 +1,5 @@
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2020-2026 Elderfire Privacy Group
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
 // Copyright (c) 2018-2019 The TurtleCoin developers
@@ -1471,14 +1473,14 @@ namespace CryptoNote
     // STEP 3: Validate timestamp (not too old/new)
     uint64_t currentTime = std::time(nullptr);
     if (arg.timestamp > currentTime + 300 || arg.timestamp + 3600 < currentTime) {  // Allow 5 min ahead, 1 hour old
-      logger(Logging::DEBUG) << context << "Elderfier signature with suspicious timestamp: "
+      logger(Logging::DEBUGGING) << context << "Elderfier signature with suspicious timestamp: "
                              << arg.timestamp << " vs current " << currentTime;
       // Still relay, but flag as potentially suspicious
     }
 
     // STEP 4: Cache the signature
     // Create cached signature entry for CommitmentIndex
-    CommitmentIndex::CachedElderfierSignature cached_sig;
+    CachedElderfierSignature cached_sig;
     cached_sig.merkle_root = arg.merkle_root;
     cached_sig.signature = arg.signature;
     cached_sig.elderfier_id = arg.elderfier_id;

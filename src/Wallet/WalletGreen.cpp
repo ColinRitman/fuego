@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -366,12 +366,12 @@ namespace CryptoNote
     TransactionOutputInformation transfer;
 
     uint64_t foundMoney = 0;
-    foundMoney += deposit.amount + deposit.interest;
+    foundMoney += deposit.amount;
     m_logger(DEBUGGING, WHITE) << "found money " << foundMoney;
 
     container->getTransfer(deposit.transactionHash, deposit.outputInTransaction, transfer, state);
 
-    if (state != ITransfersContainer::TransferState::TransferAvailable) 
+    if (state != ITransfersContainer::TransferState::TransferAvailable)
     {
       throw std::system_error(make_error_code(CryptoNote::error::DEPOSIT_LOCKED));
     }
@@ -594,47 +594,47 @@ namespace CryptoNote
 
     /* Process commitment based on deposit type */
     bool isBurnDeposit = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
-    
+
     if (isBurnDeposit) {
       m_logger(DEBUGGING, BRIGHT_GREEN) << "Creating burn deposit with HEAT commitment for " << amount << " XFG";
-      
+
       /* Use provided HEAT commitment or generate one */
       DepositCommitment finalCommitment = commitment;
       if (commitment.type != CommitmentType::HEAT) {
         // Generate HEAT commitment automatically (pure, no recipient)
         finalCommitment = DepositCommitmentGenerator::generateHeatCommitment(
           amount, commitment.metadata);
-        
+
         m_logger(DEBUGGING, BRIGHT_GREEN) << "Generated HEAT commitment: " << Common::podToHex(finalCommitment.commitment);
       }
-      
+
       /* Calculate HEAT amount based on XFG amount (0.8 XFG = 8M HEAT) */
       uint64_t heatAmount = DepositCommitmentGenerator::convertXfgToHeat(amount);
-      
+
       /* Add HEAT commitment to transaction extra */
       std::vector<uint8_t> extra;
       if (!CryptoNote::createTxExtraWithHeatCommitment(finalCommitment.commitment, heatAmount, finalCommitment.metadata, extra))
       {
         throw std::system_error(make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR), "Failed to create HEAT commitment in transaction extra");
       }
-      
+
       /* Append HEAT commitment to transaction extra */
       transaction->appendExtra(extra);
-      
+
       m_logger(DEBUGGING, BRIGHT_GREEN) << "HEAT commitment added to burn deposit transaction: " << amount << " XFG = " << heatAmount << " HEAT";
     } else {
       m_logger(DEBUGGING, BRIGHT_GREEN) << "Creating yield deposit with YIELD commitment for " << amount << " XFG";
-      
+
       /* Use provided YIELD commitment or generate one */
       DepositCommitment finalCommitment = commitment;
       if (commitment.type != CommitmentType::YIELD) {
         // Generate YIELD commitment automatically
         finalCommitment = DepositCommitmentGenerator::generateYieldCommitment(
           term, amount, commitment.metadata);
-        
+
         m_logger(DEBUGGING, BRIGHT_GREEN) << "Generated YIELD commitment: " << Common::podToHex(finalCommitment.commitment);
       }
-      
+
       /* Add YIELD commitment to transaction extra */
       std::vector<uint8_t> extra;
       std::vector<uint8_t> gift_secret; // Empty gift secret for non-gifted deposits
@@ -642,10 +642,10 @@ namespace CryptoNote
       {
         throw std::system_error(make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR), "Failed to create YIELD commitment in transaction extra");
       }
-      
+
       /* Append YIELD commitment to transaction extra */
       transaction->appendExtra(extra);
-      
+
       m_logger(DEBUGGING, BRIGHT_GREEN) << "YIELD commitment added to yield deposit transaction: " << amount << " XFG";
     }
 
@@ -691,14 +691,14 @@ namespace CryptoNote
 
     /* Return the transaction hash */
     transactionHash = Common::podToHex(transaction->getTransactionHash());
-    
+
     /* Store staged unlock preference if requested */
     if (useStagedUnlock) {
       // Store the staged unlock preference for this deposit
       m_stagedUnlocks[transactionHash] = true;
       m_logger(DEBUGGING, BRIGHT_GREEN) << "Deposit created with staged unlock preference: " << transactionHash;
     }
-    
+
     size_t id = validateSaveAndSendTransaction(*transaction, {}, false, true);
   }
 
@@ -2228,7 +2228,7 @@ namespace CryptoNote
     try {
         auto relayTransactionCompleted = std::promise<std::error_code>();
         auto relayTransactionWaitFuture = relayTransactionCompleted.get_future();
-    
+
         m_node.relayTransaction(m_uncommitedTransactions[transactionId], [&ec, &relayTransactionCompleted, this](std::error_code error) {
           auto detachedPromise = std::move(relayTransactionCompleted);
           detachedPromise.set_value(ec);
@@ -3011,8 +3011,8 @@ namespace CryptoNote
         }
         else
         {
-          /** Add the amount to the selected transfers so long as 
-           * foundMoney is still less than neededMoney. This prevents 
+          /** Add the amount to the selected transfers so long as
+           * foundMoney is still less than neededMoney. This prevents
            * larger outputs than we need when we already have enough funds */
           if (foundMoney < neededMoney)
           {
@@ -3719,7 +3719,7 @@ namespace CryptoNote
         updated |= updateWalletDepositInfo(depositId, info);
       }
 
-      /* If there are new deposits, update the transaction information with the 
+      /* If there are new deposits, update the transaction information with the
          firstDepositId and the depositCount */
       if (!updatedDepositIds.empty())
       {
@@ -3934,7 +3934,7 @@ namespace CryptoNote
       updated = true;
     }
 
-    /* Update locked deposit balance, this will cover deposits, as well 
+    /* Update locked deposit balance, this will cover deposits, as well
        as investments since they are all deposits with different parameters */
     std::vector<TransactionOutputInformation> transfers2;
     container->getOutputs(transfers2, ITransfersContainer::IncludeTypeDeposit | ITransfersContainer::IncludeStateLocked | ITransfersContainer::IncludeStateSoftLocked);
@@ -4781,9 +4781,9 @@ namespace CryptoNote
     // Store burn deposit secret locally (never on blockchain)
     WalletGreen::BurnDepositInfo burnInfo(transactionHash, secret, amount, metadata);
     burnInfo.timestamp = static_cast<uint64_t>(std::time(nullptr));
-    
+
     m_burnDepositSecrets[transactionHash] = burnInfo;
-    
+
     // TODO: Persist to wallet file for backup
     // This ensures secrets survive wallet restarts
   }
@@ -4793,12 +4793,12 @@ namespace CryptoNote
     if (it == m_burnDepositSecrets.end()) {
       return false;  // Secret not found
     }
-    
+
     const WalletGreen::BurnDepositInfo& burnInfo = it->second;
     secret = burnInfo.secret;
     amount = burnInfo.amount;
     metadata = burnInfo.metadata;
-    
+
     return true;
   }
 
