@@ -1319,44 +1319,50 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
                         << ", bankingIndexSize=" << bankingIndexSize
                         << ", height=" << height
                         << ", blocksSize=" << m_blocks.size();
-       
-      // Special handling for blocks that contain burns - check if this is a burn block
-      // and adjust expected EternalFlame to what it should be BEFORE processing this block
-      bool isBurnBlock = false;
-      uint64_t burnAmountInThisBlock = 0;
+        
+     // check if its a burn block - adjust expected EternalFlame to what it should be before processing this block
+     bool isBurnBlock = false;
+     uint64_t burnAmountInThisBlock = 0;
       
-      // Parse the block's transactions to detect burns
-      for (const auto &tx : blockData.transactions) {
-        std::vector<TransactionExtraField> extraFields;
-        if (parseTransactionExtra(tx.extra, extraFields)) {
-          for (const auto& field : extraFields) {
-            if (field.type() == typeid(TransactionExtraHeatCommitment)) {
-              const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
-              isBurnBlock = true;
-              burnAmountInThisBlock += heatCommit.amount;
-            }
-          }
-        }
-      }
+     // parse txns in block to detect burns
+     // use m_blocks to get txns  (Block param is only txn hashes)
+     if (height < m_blocks.size()) {
+       const BlockEntry& currentBlockEntry = m_blocks[height];
+       if (currentBlockEntry.height == height) {
+         for (const auto& txEntry : currentBlockEntry.transactions) {
+           std::vector<TransactionExtraField> extraFields;
+           if (parseTransactionExtra(txEntry.tx.extra, extraFields)) {
+             for (const auto& field : extraFields) {
+               if (field.type() == typeid(TransactionExtraHeatCommitment)) {
+                 const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
+                 isBurnBlock = true;
+                 burnAmountInThisBlock += heatCommit.amount;
+               }
+             }
+           }
+         }
+       }
+     }
       
-      // If this is a burn block, the expected EternalFlame for reward calculation
-      // should be what it was BEFORE this block, not after
-      if (isBurnBlock) {
-        logger(DEBUGGING) << "Block " << height << " contains burn of " << burnAmountInThisBlock 
-                          << " XFG. Adjusting expected EternalFlame for validation.";
-        expectedEternalFlame = (expectedEternalFlame >= burnAmountInThisBlock) ? 
-                               (expectedEternalFlame - burnAmountInThisBlock) : 0;
-        logger(DEBUGGING) << "Adjusted expected EternalFlame for validation: " << expectedEternalFlame;
-      }
+     // If this is a burn block, the expected EternalFlame for reward calculation
+     // should be what it was BEFORE this block, not after
+     if (isBurnBlock) {
+       logger(DEBUGGING) << "Block " << height << " contains burn of " << burnAmountInThisBlock 
+                         << " XFG. Adjusting expected EternalFlame for validation.";
+       expectedEternalFlame = (expectedEternalFlame >= burnAmountInThisBlock) ? 
+                              (expectedEternalFlame - burnAmountInThisBlock) : 0;
+       logger(DEBUGGING) << "Adjusted expected EternalFlame for validation: " << expectedEternalFlame;
+     }
       
       // Fallback: if BankingIndex shows 0 but this might be a corrupted state,
       // scan the actual blockchain to calculate correct EternalFlame
-      if (expectedEternalFlame == 0 && height > 0) {
+      if (expectedEternalFlame == 0 && height > 0 && m_blocks.size() > 0) {
         uint64_t calculatedBurns = 0;
         logger(DEBUGGING) << "BankingIndex shows 0 burns, scanning blockchain for actual burns up to height " << (height - 1);
-        
+         
         // Scan blockchain up to the previous block to calculate actual burns
-        for (uint32_t h = 0; h < height && h < m_blocks.size(); h++) {
+        uint32_t scanHeight = std::min(height, static_cast<uint32_t>(m_blocks.size()));
+        for (uint32_t h = 0; h < scanHeight; h++) {
           const BlockEntry& scanBlock = m_blocks[h];
           for (const auto& tx : scanBlock.transactions) {
             std::vector<TransactionExtraField> extraFields;
@@ -1371,7 +1377,7 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
             }
           }
         }
-        
+         
         if (calculatedBurns > 0) {
           logger(WARNING) << "BankingIndex corruption detected: expected=0, actual=" << calculatedBurns << " XFG";
           expectedEternalFlame = calculatedBurns;
