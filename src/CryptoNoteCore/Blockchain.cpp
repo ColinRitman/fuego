@@ -642,11 +642,11 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
 
   // Sync Currency (ethernalXFG) with BankingIndex after blockchain load
   // This keeps Currency at correct burned total when loading from disk
+  // ALWAYS sync Currency (ethernalXFG) with BankingIndex after blockchain load
+  // This ensures consistent state regardless of previous runs or corruption
   uint64_t currentBurned = m_bankingIndex.getBurnedXfgAmount();
-  if (currentBurned > 0) {
-    const_cast<Currency&>(m_currency).addEternalFlame(currentBurned);
-    logger(DEBUGGING) << "Sync'd : " << currentBurned << " Ξthernal XFG via COLD Banking Ledger";
-  }
+  const_cast<Currency&>(m_currency).m_ethernalXFG = currentBurned;
+  logger(DEBUGGING) << "Sync'd EternalFlame: " << currentBurned << " XFG";
 
   uint64_t timestamp_diff = time(NULL) - m_blocks.back().bl.timestamp;
   if (!m_blocks.back().bl.timestamp) {
@@ -1295,6 +1295,31 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
   if (blockMajorVersion >= CryptoNote::BLOCK_MAJOR_VERSION_10) {
     // EXACT validation without tolerance for v10+
     if (minerReward != reward) {
+      // Check if this might be an EternalFlame sync issue before rejecting
+      logger(WARNING) << "Coinbase transaction reward mismatch detected, checking for EternalFlame desync";
+      uint64_t currentEternalFlame = m_currency.getEternalFlame();
+      uint64_t expectedEternalFlame = m_bankingIndex.getBurnedXfgAmount();
+      
+      // If there's a discrepancy, try to resync
+      if (expectedEternalFlame != currentEternalFlame) {
+        logger(WARNING) << "EternalFlame mismatch detected: current=" << currentEternalFlame 
+          << ", expected=" << expectedEternalFlame << ", attempting resync";
+        const_cast<Currency&>(m_currency).m_ethernalXFG = expectedEternalFlame;
+        
+        // Recalculate reward with corrected value
+        uint64_t resyncedReward = 0;
+        int64_t resyncedEmissionChange = 0;
+        if (m_currency.getBlockReward(blockMajorVersion, blocksSizeMedian, effectiveBlockSize, 
+                                    alreadyGeneratedCoins, fee, height, resyncedReward, resyncedEmissionChange)) {
+          if (minerReward == resyncedReward) {
+            logger(INFO) << "EternalFlame resync successful, block accepted";
+            return true; // Accept the block with corrected EternalFlame
+          } else {
+            logger(DEBUGGING) << "Resynced reward: " << resyncedReward << " still doesn't match miner reward: " << minerReward;
+          }
+        }
+      }
+      
       logger(ERROR, BRIGHT_RED) << "Coinbase transaction reward mismatch: "
         << m_currency.formatAmount(minerReward) << " (actual) vs "
         << m_currency.formatAmount(reward) << " (expected)";
@@ -1303,7 +1328,9 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
         << ", reward=" << reward
         << ", emissionChange=" << emissionChange
         << ", fee=" << fee
-        << ", alreadyGeneratedCoins=" << alreadyGeneratedCoins;
+        << ", alreadyGeneratedCoins=" << alreadyGeneratedCoins
+        << ", currentEternalFlame=" << currentEternalFlame
+        << ", expectedEternalFlame=" << expectedEternalFlame;
       return false;
     }
   } else {
