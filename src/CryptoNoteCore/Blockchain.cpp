@@ -645,12 +645,22 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
   // ALWAYS sync Currency (ethernalXFG) with BankingIndex after blockchain load
   // This ensures consistent state regardless of previous runs or corruption
   uint64_t currentBurned = m_bankingIndex.getBurnedXfgAmount();
+  uint64_t bankingIndexSize = m_bankingIndex.size();
+  logger(DEBUGGING) << "BankingIndex state at init: burned=" << currentBurned << " XFG, size=" << bankingIndexSize;
+  
+  // Additional debugging to understand BankingIndex contents
+  auto bankingStats = m_bankingIndex.getStats();
+  logger(DEBUGGING) << "BankingIndex stats: totalDeposits=" << bankingStats.totalDeposits 
+                    << ", ethernalXFG=" << bankingStats.ethernalXFG 
+                    << ", regularDeposits=" << bankingStats.regularDeposits;
+  
   // Reset and set EternalFlame using public methods
-  const_cast<Currency&>(m_currency).removeEternalFlame(m_currency.getEternalFlame());
+  uint64_t oldEternalFlame = m_currency.getEternalFlame();
+  const_cast<Currency&>(m_currency).removeEternalFlame(oldEternalFlame);
   if (currentBurned > 0) {
     const_cast<Currency&>(m_currency).addEternalFlame(currentBurned);
   }
-  logger(DEBUGGING) << "Sync'd EternalFlame: " << currentBurned << " XFG";
+  logger(DEBUGGING) << "Sync'd EternalFlame: " << currentBurned << " XFG (was " << oldEternalFlame << ")";
 
   uint64_t timestamp_diff = time(NULL) - m_blocks.back().bl.timestamp;
   if (!m_blocks.back().bl.timestamp) {
@@ -1303,6 +1313,74 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
       logger(WARNING) << "Coinbase transaction reward mismatch detected, checking for EternalFlame desync";
       uint64_t currentEternalFlame = m_currency.getEternalFlame();
       uint64_t expectedEternalFlame = m_bankingIndex.getBurnedXfgAmount();
+      uint64_t bankingIndexSize = m_bankingIndex.size();
+      logger(DEBUGGING) << "EternalFlame check: current=" << currentEternalFlame 
+                        << ", expected=" << expectedEternalFlame 
+                        << ", bankingIndexSize=" << bankingIndexSize
+                        << ", height=" << height
+                        << ", blocksSize=" << m_blocks.size();
+       
+      // Special handling for blocks that contain burns - check if this is a burn block
+      // and adjust expected EternalFlame to what it should be BEFORE processing this block
+      bool isBurnBlock = false;
+      uint64_t burnAmountInThisBlock = 0;
+      
+      // Parse the block's transactions to detect burns
+      for (const auto &tx : blockData.transactions) {
+        std::vector<TransactionExtraField> extraFields;
+        if (parseTransactionExtra(tx.extra, extraFields)) {
+          for (const auto& field : extraFields) {
+            if (field.type() == typeid(TransactionExtraHeatCommitment)) {
+              const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
+              isBurnBlock = true;
+              burnAmountInThisBlock += heatCommit.amount;
+            }
+          }
+        }
+      }
+      
+      // If this is a burn block, the expected EternalFlame for reward calculation
+      // should be what it was BEFORE this block, not after
+      if (isBurnBlock) {
+        logger(DEBUGGING) << "Block " << height << " contains burn of " << burnAmountInThisBlock 
+                          << " XFG. Adjusting expected EternalFlame for validation.";
+        expectedEternalFlame = (expectedEternalFlame >= burnAmountInThisBlock) ? 
+                               (expectedEternalFlame - burnAmountInThisBlock) : 0;
+        logger(DEBUGGING) << "Adjusted expected EternalFlame for validation: " << expectedEternalFlame;
+      }
+      
+      // Fallback: if BankingIndex shows 0 but this might be a corrupted state,
+      // scan the actual blockchain to calculate correct EternalFlame
+      if (expectedEternalFlame == 0 && height > 0) {
+        uint64_t calculatedBurns = 0;
+        logger(DEBUGGING) << "BankingIndex shows 0 burns, scanning blockchain for actual burns up to height " << (height - 1);
+        
+        // Scan blockchain up to the previous block to calculate actual burns
+        for (uint32_t h = 0; h < height && h < m_blocks.size(); h++) {
+          const BlockEntry& scanBlock = m_blocks[h];
+          for (const auto& tx : scanBlock.transactions) {
+            std::vector<TransactionExtraField> extraFields;
+            if (parseTransactionExtra(tx.tx.extra, extraFields)) {
+              for (const auto& field : extraFields) {
+                if (field.type() == typeid(TransactionExtraHeatCommitment)) {
+                  const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
+                  calculatedBurns += heatCommit.amount;
+                  logger(DEBUGGING) << "Found HEAT burn at height " << h << ": " << heatCommit.amount << " XFG";
+                }
+              }
+            }
+          }
+        }
+        
+        if (calculatedBurns > 0) {
+          logger(WARNING) << "BankingIndex corruption detected: expected=0, actual=" << calculatedBurns << " XFG";
+          expectedEternalFlame = calculatedBurns;
+          // Also adjust for burn in current block if this is a burn block
+          if (isBurnBlock && expectedEternalFlame >= burnAmountInThisBlock) {
+            expectedEternalFlame -= burnAmountInThisBlock;
+          }
+        }
+      }
       
       // If there's a discrepancy, try to resync
       if (expectedEternalFlame != currentEternalFlame) {
@@ -1313,7 +1391,7 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
         if (expectedEternalFlame > 0) {
           const_cast<Currency&>(m_currency).addEternalFlame(expectedEternalFlame);
         }
-        
+         
         // Recalculate reward with corrected value
         uint64_t resyncedReward = 0;
         int64_t resyncedEmissionChange = 0;
@@ -1324,6 +1402,18 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
             return true; // Accept the block with corrected EternalFlame
           } else {
             logger(DEBUGGING) << "Resynced reward: " << resyncedReward << " still doesn't match miner reward: " << minerReward;
+            // If resync failed, restore original value
+            const_cast<Currency&>(m_currency).removeEternalFlame(expectedEternalFlame);
+            if (currentEternalFlame > 0) {
+              const_cast<Currency&>(m_currency).addEternalFlame(currentEternalFlame);
+            }
+          }
+        } else {
+          logger(ERROR) << "Failed to recalculate reward after EternalFlame resync";
+          // Restore original value if recalculation failed
+          const_cast<Currency&>(m_currency).removeEternalFlame(expectedEternalFlame);
+          if (currentEternalFlame > 0) {
+            const_cast<Currency&>(m_currency).addEternalFlame(currentEternalFlame);
           }
         }
       }
@@ -2585,6 +2675,8 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
   {
     int64_t deposit = 0;
     uint64_t permanentBurns = 0;  // Track permanent burns for ethernalXFG
+    
+    logger(DEBUGGING) << "Processing block " << block.height << " for BankingIndex, current burned: " << m_bankingIndex.getBurnedXfgAmount();
 
     for (const auto &tx : block.transactions)
     {
@@ -2596,6 +2688,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
           if (field.type() == typeid(TransactionExtraHeatCommitment)) {
             const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
             permanentBurns += heatCommit.amount;
+            logger(DEBUGGING) << "Detected HEAT burn in block " << block.height << ": " << heatCommit.amount << " XFG";
 
             // Index the HEAT commitment for RPC queries
             Crypto::Hash txHash = getObjectHash(tx.tx);
@@ -2715,6 +2808,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
     // Add permanent burns to ethernalXFG if any were found
     if (permanentBurns > 0) {
       uint32_t height = static_cast<uint32_t>(m_blocks.size());
+      logger(DEBUGGING) << "Adding " << permanentBurns << " XFG to BankingIndex at height " << height;
       m_bankingIndex.addForeverDeposit(permanentBurns, height);
         // Sync Currency ethernalXFG
     const_cast<Currency&>(m_currency).addEternalFlame(permanentBurns);
@@ -2722,6 +2816,8 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
   // logging for burns
   logger(INFO) << "Burn in block " << height << ": " << m_currency.formatAmount(permanentBurns)
                    << " XFG sent into the Ether";
+    } else {
+      logger(DEBUGGING) << "No permanent burns detected in block " << block.height;
     }
   }
 
