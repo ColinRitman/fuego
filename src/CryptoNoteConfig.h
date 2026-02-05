@@ -273,6 +273,7 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
 
 	// TESTNET Seed Nodes
 	const std::initializer_list<const char *> SEED_NODES_TESTNET = {
+	   "103.101.201.136:20808",
 		"216.145.84.248:20808",
  		 "80.89.228.157:20808",
  		   "207.244.247.64:20808",
