@@ -645,7 +645,11 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
   // ALWAYS sync Currency (ethernalXFG) with BankingIndex after blockchain load
   // This ensures consistent state regardless of previous runs or corruption
   uint64_t currentBurned = m_bankingIndex.getBurnedXfgAmount();
-  const_cast<Currency&>(m_currency).m_ethernalXFG = currentBurned;
+  // Reset and set EternalFlame using public methods
+  const_cast<Currency&>(m_currency).removeEternalFlame(m_currency.getEternalFlame());
+  if (currentBurned > 0) {
+    const_cast<Currency&>(m_currency).addEternalFlame(currentBurned);
+  }
   logger(DEBUGGING) << "Sync'd EternalFlame: " << currentBurned << " XFG";
 
   uint64_t timestamp_diff = time(NULL) - m_blocks.back().bl.timestamp;
@@ -1304,7 +1308,11 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
       if (expectedEternalFlame != currentEternalFlame) {
         logger(WARNING) << "EternalFlame mismatch detected: current=" << currentEternalFlame 
           << ", expected=" << expectedEternalFlame << ", attempting resync";
-        const_cast<Currency&>(m_currency).m_ethernalXFG = expectedEternalFlame;
+        // Reset and set EternalFlame using public methods
+        const_cast<Currency&>(m_currency).removeEternalFlame(currentEternalFlame);
+        if (expectedEternalFlame > 0) {
+          const_cast<Currency&>(m_currency).addEternalFlame(expectedEternalFlame);
+        }
         
         // Recalculate reward with corrected value
         uint64_t resyncedReward = 0;
