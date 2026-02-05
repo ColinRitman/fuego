@@ -72,8 +72,8 @@ void CommitmentIndex::checkAndFlushThreshold(uint64_t current_block_height) {
   std::string current_root_hex = Common::podToHex(m_current_merkle_root);
   size_t valid_signatures = 0;
 
-  for (const auto& [key, sig] : m_signatures) {
-    if (key.second == current_root_hex && sig.is_valid) {
+  for (auto it = m_signatures.begin(); it != m_signatures.end(); ++it) {
+    if (it->first.second == current_root_hex && it->second.is_valid) {
       valid_signatures++;
     }
   }
@@ -89,13 +89,13 @@ void CommitmentIndex::checkAndFlushThreshold(uint64_t current_block_height) {
   if (consensus_pct >= 69) {
     // Flush signatures for current root
     std::vector<std::pair<uint8_t, std::string>> to_remove;
-    for (const auto& [key, sig] : m_signatures) {
-      if (key.second != current_root_hex) {
-        to_remove.push_back(key);
+    for (auto it = m_signatures.begin(); it != m_signatures.end(); ++it) {
+      if (it->first.second != current_root_hex) {
+        to_remove.push_back(it->first);
       }
     }
-    for (const auto& key : to_remove) {
-      m_signatures.erase(key);
+    for (size_t i = 0; i < to_remove.size(); ++i) {
+      m_signatures.erase(to_remove[i]);
     }
   }
 }
@@ -118,8 +118,8 @@ uint64_t CommitmentIndex::getConsensusPercentageForCurrentRoot() const {
   std::string current_root_hex = Common::podToHex(m_current_merkle_root);
   size_t valid_signatures = 0;
 
-  for (const auto& [key, sig] : m_signatures) {
-    if (key.second == current_root_hex && sig.is_valid) {
+  for (auto it = m_signatures.begin(); it != m_signatures.end(); ++it) {
+    if (it->first.second == current_root_hex && it->second.is_valid) {
       valid_signatures++;
     }
   }
@@ -138,10 +138,10 @@ std::vector<uint8_t> CommitmentIndex::getSignedElderfierIds() const {
   std::vector<uint8_t> signed_ids;
   std::set<uint8_t> seen;
 
-  for (const auto& [key, sig] : m_signatures) {
-    if (key.second == current_root_hex && sig.is_valid && seen.find(key.first) == seen.end()) {
-      signed_ids.push_back(key.first);
-      seen.insert(key.first);
+  for (auto it = m_signatures.begin(); it != m_signatures.end(); ++it) {
+    if (it->first.second == current_root_hex && it->second.is_valid && seen.find(it->first.first) == seen.end()) {
+      signed_ids.push_back(it->first.first);
+      seen.insert(it->first.first);
     }
   }
 
@@ -154,14 +154,15 @@ std::vector<uint8_t> CommitmentIndex::getPendingElderfierIds() const {
   std::set<uint8_t> signed_set;
   std::string current_root_hex = Common::podToHex(m_current_merkle_root);
 
-  for (const auto& [key, sig] : m_signatures) {
-    if (key.second == current_root_hex && sig.is_valid) {
-      signed_set.insert(key.first);
+  for (auto it = m_signatures.begin(); it != m_signatures.end(); ++it) {
+    if (it->first.second == current_root_hex && it->second.is_valid) {
+      signed_set.insert(it->first.first);
     }
   }
 
   std::vector<uint8_t> pending;
-  for (uint8_t efid : m_elderfier_ids) {
+  for (size_t i = 0; i < m_elderfier_ids.size(); ++i) {
+    uint8_t efid = m_elderfier_ids[i];
     if (signed_set.find(efid) == signed_set.end()) {
       pending.push_back(efid);
     }

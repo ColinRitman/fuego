@@ -67,8 +67,9 @@ namespace CryptoNote
   {
     // Add testnet-specific deposit commands (in addition to inherited ones)
     m_consoleHandler.setHandler("burn", boost::bind(&testnet_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
-    m_consoleHandler.setHandler("cold", boost::bind(&testnet_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
-    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 XFG deposits (0xEC tag, 4000 XFG total). Creates elderfier registration commitment.");
+    m_consoleHandler.setHandler("cold", boost::bind(&testnet_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a Certificate of Ledger Deposit (0.8, 8, 80, 800 XFG with terms 3 (3months) or 12 (1yr)");
+    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 TEST deposits (0xEC tag, 4000 TEST total). Creates elderfier registration commitment.");
+    m_consoleHandler.setHandler("list_burns", boost::bind(&testnet_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all burn transactions.");
   }
 
   //----------------------------------------------------------------------------------------------------
@@ -111,6 +112,23 @@ namespace CryptoNote
 
       uint32_t burn_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
       uint64_t fee = m_currency.minimumFee();
+
+      // Confirmation
+      success_msg_writer() << "";
+      success_msg_writer() << "Burn TEST for HEAT Summary:";
+      success_msg_writer() << "  Amount: " << m_currency.formatAmount(burn_amount) << " TEST (PERMANENT)";
+      success_msg_writer() << "  Fee: " << m_currency.formatAmount(fee) << " TEST";
+      success_msg_writer() << "  Type: HEAT (0x08) - funds will be BURNED";
+      success_msg_writer() << "";
+      success_msg_writer() << "You cool with this? (1=yes, 2=no): ";
+
+      std::string confirm;
+      std::getline(std::cin, confirm);
+
+      if (confirm != "1" && confirm != "yes" && confirm != "y") {
+        success_msg_writer() << "Cancelled.";
+        return true;
+      }
 
       // Create HEAT commitment for burn deposit (0x08 tag)
       std::vector<uint8_t> extra;
@@ -200,6 +218,24 @@ namespace CryptoNote
       }
 
       uint64_t fee = m_currency.minimumFee();
+
+      // Confirmation
+      success_msg_writer() << "";
+      success_msg_writer() << "Certificate Of Ledger Deposit Summary:";
+      success_msg_writer() << "  Amount: " << m_currency.formatAmount(cold_amount) << " TEST";
+      success_msg_writer() << "  Term: " << term_label << " (" << cold_term << " blocks)";
+      success_msg_writer() << "  Fee: " << m_currency.formatAmount(fee) << " TEST";
+      success_msg_writer() << "  Type: COLD (0xCD) off-chain yield";
+      success_msg_writer() << "";
+      success_msg_writer() << "Confirm? (1=yes, 2=no): ";
+
+      std::string confirm;
+      std::getline(std::cin, confirm);
+
+      if (confirm != "1" && confirm != "yes" && confirm != "y") {
+        success_msg_writer() << "Cancelled.";
+        return true;
+      }
 
       // Create COLD commitment for yield deposit (0xCD tag)
       std::vector<uint8_t> extra;
@@ -339,6 +375,50 @@ namespace CryptoNote
     catch (const std::exception& e)
     {
       fail_msg_writer() << "Error during ceremony: " << e.what();
+      return true;
+    }
+  }
+
+  //----------------------------------------------------------------------------------------------------
+  bool CryptoNote::testnet_wallet::list_burns(const std::vector<std::string> &args)
+  {
+    // List all HEAT burn deposits
+    try
+    {
+      success_msg_writer() << "";
+      success_msg_writer() << "=== TEST Burn Transactions ===";
+      success_msg_writer() << "";
+
+      size_t depositCount = m_wallet->getDepositCount();
+      size_t burnCount = 0;
+
+      for (size_t i = 0; i < depositCount; ++i) {
+        Deposit deposit;
+        if (m_wallet->getDeposit(i, deposit)) {
+          // Check if this is a HEAT/burn deposit (FOREVER term)
+          if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+            burnCount++;
+            std::string status = deposit.locked ? "LOCKED" : "UNLOCKED";
+            success_msg_writer() << "  [" << i << "] Amount: " << m_currency.formatAmount(deposit.amount)
+                                 << " TEST | Status: " << status
+                                 << " | Type: HEAT (0x08)";
+          }
+        }
+      }
+
+      if (burnCount == 0) {
+        success_msg_writer() << "  No burn transactions found.";
+      } else {
+        success_msg_writer() << "";
+        success_msg_writer() << "Total burn transactions: " << burnCount;
+      }
+
+      success_msg_writer() << "";
+      return true;
+    }
+    catch (const std::exception& e)
+    {
+      fail_msg_writer() << "Error listing burns: " << e.what();
       return true;
     }
   }

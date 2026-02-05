@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Elderfire Privacy Council
+// Copyright (c) 2017-2025 Elderfire Privacy Group
 // Simplified CommitmentIndex for Phase 3 Elderfier Consensus
 // Minimal implementation to achieve compilation
 
@@ -9,6 +9,7 @@
 #include <map>
 #include <mutex>
 #include <cstdint>
+#include <string>
 #include "crypto/hash.h"
 
 namespace CryptoNote {

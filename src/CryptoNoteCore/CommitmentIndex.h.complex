@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Elderfire Privacy Council
+// Copyright (c) 2017-2025 Elderfire Privacy Group
 // Copyright (c) 2012-2018 The CryptoNote developers
 //
 // This file is part of Fuego.
@@ -22,6 +22,8 @@
 #include <optional>
 #include <cstdint>
 #include <mutex>
+#include <string>
+
 #include "crypto/hash.h"
 
 namespace CryptoNote {
@@ -405,22 +407,22 @@ private:
 
 
     // --- 0xE8 Deposit Registration Tracking ---
-    
+
     struct PendingElderfierStake {
         uint64_t deposit_count = 0;      // Count of 0xE8 deposits seen from this wallet
         uint64_t total_amount = 0;       // Total XFG deposited (should reach 4000*COIN for registration)
         Crypto::PublicKey signing_pubkey; // ECDSA public key (set when we see it in tx)
     };
-    
+
     // Track pending stakes by wallet address
     std::map<std::string, PendingElderfierStake> m_pendingElderfierStakes;
-    
+
     // Helper method to extract wallet address from transaction
     std::string getWalletAddressFromTx(const Crypto::Hash& txHash);
 
     // Helper method to check if deposit is 0xE8 type
     bool isElderfierRegistrationDeposit(const CommitmentEntry& entry);
-    
+
     // Helper method to attempt elderfier registration
     bool tryRegisterElderfier(const std::string& wallet, const Crypto::PublicKey& pubkey);
 } // namespace CryptoNote

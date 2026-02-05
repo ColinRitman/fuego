@@ -39,5 +39,6 @@ namespace CryptoNote
     bool burn(const std::vector<std::string> &args);
     bool cold(const std::vector<std::string> &args);
     bool elderking_ceremony(const std::vector<std::string> &args);
+    bool list_burns(const std::vector<std::string> &args);
   };
 }

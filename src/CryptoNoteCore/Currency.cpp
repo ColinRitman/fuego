@@ -1306,6 +1306,12 @@ double Currency::getBurnPercentage() const {
     depositMinTerm(parameters::COLD_MIN_TERM);
     depositMaxTerm(parameters::COLD_MAX_TERM);
 
+    // Override deposit terms for testnet (shorter terms for testing)
+    if (m_currency.m_testnet) {
+      depositMinTerm(parameters::TESTNET_COLD_MIN_TERM);
+      depositMaxTerm(parameters::TESTNET_COLD_MAX_TERM);
+    }
+
     // Burn deposit configuration
     burnDepositMinAmount(parameters::BURN_DEPOSIT_MIN_AMOUNT);
     burnDepositStandardAmount(parameters::BURN_DEPOSIT_STANDARD_AMOUNT);
