@@ -1,17 +1,17 @@
-// Copyright (c) 2017-2025 Fuego Developers
-// Copyright (c) 2020-2025 Elderfire Privacy Group
-// Copyright (c) 2011-2017 The Cryptonote developers
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2020-2026 Elderfire Privacy Group
 //
 // This file is part of Fuego.
 //
 // Fuego is free software distributed in the hope that it
-// will be useful- but WITHOUT ANY WARRANTY; without even the
+// will be useful, but WITHOUT ANY WARRANTY; without even the
 // implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
-// PURPOSE. You are encouraged to redistribute it and/or modify it
-// under the terms of the GNU General Public License v3 or later
-// versions as published by the Free Software Foundation.
-// You should receive a copy of the GNU General Public License
-// along with Fuego. If not, see <https://www.gnu.org/licenses/>
+// PURPOSE. You can redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 
 #pragma once
@@ -39,7 +39,7 @@ struct ElderfierServiceId {
     std::string displayName; // Human-readable display name
     std::string linkedAddress; // Actual wallet address
     std::string hashedAddress; // SHA256 hash of the wallet address (for all Elderfier nodes)
-    
+
     bool isValid() const;
     std::string toString() const;
     static ElderfierServiceId createStandardAddress(const std::string& address);
@@ -49,8 +49,8 @@ struct ElderfierServiceId {
 
 // Eldernode tier levels
 enum class EldernodeTier : uint8_t {
-    ELDERFIER = 1,       // Elderfier service node (800 XFG stake required)
-    ELDARADO = 2         // Eldarado validator (800 XFG stake required)
+    ELDERFIER = 1,       // Elderfier service node (4000 XFG stake required)
+    ELDARADO = 2         // Eldarado validator (4000 XFG stake required)
 };
 
 // Note: Old stake proof system removed - now using 0x06 tag deposits for Elderfiers
@@ -74,7 +74,7 @@ struct MempoolSecurityWindow {
     std::vector<Crypto::PublicKey> votes; // Elder Council votes (for/against)
     uint32_t requiredVotes;              // Required votes for quorum
     uint32_t currentVotes;               // Current vote count
-    
+
     bool isSecurityWindowActive() const;
     bool hasQuorumReached() const;
     bool canReleaseTransaction() const;
@@ -107,7 +107,7 @@ struct ElderCouncilVote {
     uint64_t timestamp;                  // Vote timestamp
     Crypto::Hash voteHash;               // Hash of vote data
     std::vector<uint8_t> signature;      // Vote signature
-    
+
     bool isValid() const;
     Crypto::Hash calculateVoteHash() const;
     std::string toString() const;
@@ -129,7 +129,7 @@ struct ElderCouncilVotingMessage {
     std::vector<ElderCouncilVote> votes;  // Votes cast so far
     uint32_t requiredVotes;              // Required votes for quorum
     uint32_t currentVotes;               // Current vote count
-    
+
     bool isVotingActive() const;
     bool hasQuorumReached() const;
     std::string getVotingStatus() const;
@@ -146,7 +146,7 @@ struct MisbehaviorEvidence {
     std::vector<Crypto::Hash> invalidSignatureHashes; // Hashes of invalid signatures
     std::string misbehaviorType;        // Type of misbehavior (e.g., "Invalid Signatures")
     std::string evidenceDescription;     // Detailed description of evidence
-    
+
     bool isValid() const;
     std::string getSummary() const;
     std::string toString() const;
@@ -160,7 +160,7 @@ struct ElderfierMonitoringConfig {
     uint64_t mempoolBufferDuration;      // How long to hold transactions in buffer (default: 8 hours)
     uint32_t elderCouncilQuorumSize;     // Required votes for Elder Council quorum (default: 5)
     uint64_t votingWindowDuration;      // How long voting window stays open (default: 24 hours)
-    
+
     static ElderfierMonitoringConfig getDefault() {
         ElderfierMonitoringConfig config;
         config.enableBlockBasedMonitoring = true;  // Monitor each block
@@ -171,7 +171,7 @@ struct ElderfierMonitoringConfig {
         config.votingWindowDuration = 86400;         // 24 hours voting window
         return config;
     }
-    
+
     bool isValid() const {
         return elderCouncilQuorumSize > 0 && elderCouncilQuorumSize <= 20; // Max 20 votes
     }
@@ -192,16 +192,20 @@ struct ElderfierDepositData {
     bool isSlashable;
     bool isUnlocked;                 // Can be unlocked after security window
     bool isSpent;                    // True if deposit funds have been spent
-    
+
+    // Post-quantum hybrid extension (backward compatible)
+    std::string public_key_type = "Ed25519";  // "Ed25519" or "ML-DSA-65"
+    std::vector<uint8_t> pq_public_key;       // Empty for Ed25519
+
     // Security window fields
     uint64_t lastSignatureTimestamp; // Last signature timestamp
     uint64_t securityWindowEnd;      // When security window ends
     uint64_t securityWindowDuration; // Duration of security window
     bool isInSecurityWindow;         // Currently in security window
 
-    // User-Initiated Unstaking Model (Dynamigo Phase)
-    // DESIGN: Stakes held indefinitely until user explicitly requests unstaking
-    // Then 8-day (1440 blocks) countdown begins before claiming is allowed
+    // User-Initiated Unstaking Model (Dynamigo)
+    // Stake held indefinitely until user requests unstaking
+    // Then 1000 blocks countdown begins before claiming is allowed
     bool unstakingRequested;         // true = user initiated unstaking, false = still staking
     uint64_t unstakingRequestBlock;  // Block height when user called initiate-unstake (0 if not requested)
     uint64_t unstakeClaimableBlock;  // Block height = unstakingRequestBlock + 1440 when claim becomes possible (8 days)
@@ -238,18 +242,18 @@ struct ElderfierDepositData {
 namespace EldernodeFees {
     static const uint64_t LARGE_BURN_FEE = 8000000;      // 0.8 XFG for large burns (800 XFG+)
     static const uint64_t DEFAULT_BURN_FEE = 80000;       // 0.008 XFG for default burns
-    static const uint64_t ELDERFIER_STAKE_AMOUNT = 800000000000;  // 800 XFG stake required
-    static const uint64_t ELDARADO_STAKE_AMOUNT = 800000000000;  // 800 XFG stake required
+    static const uint64_t ELDERFIER_STAKE_AMOUNT = 4000000000000;  // 4000 XFG stake required
+    static const uint64_t ELDERADO_STAKE_AMOUNT  = 4000000000000;  // 4000 XFG stake required
 }
 
 // Selection multiplier mapping based on uptime duration
 namespace SelectionMultipliers {
     static const uint64_t MONTH_1_SECONDS = 2592000;    // 30 days
-    static const uint64_t MONTH_3_SECONDS = 7776000;   // 90 days  
+    static const uint64_t MONTH_3_SECONDS = 7776000;   // 90 days
     static const uint64_t MONTH_6_SECONDS = 15552000;   // 180 days
     static const uint64_t YEAR_1_SECONDS = 31536000;    // 365 days
     static const uint64_t YEAR_2_SECONDS = 63072000;    // 730 days
-    
+
     static const uint32_t UPTIME_1_MONTH_MULTIPLIER = 1;   // 1x (0-1 month)
     static const uint32_t UPTIME_3_MONTH_MULTIPLIER = 2;   // 2x (1-3 months)
     static const uint32_t UPTIME_6_MONTH_MULTIPLIER = 4;   // 4x (3-6 months)
@@ -268,7 +272,7 @@ struct EldernodeConsensusParticipant {
     std::chrono::system_clock::time_point lastSeen;
     EldernodeTier tier;
     ElderfierServiceId serviceId;  // Only used for ELDERFIER tier
-    
+
     bool operator==(const EldernodeConsensusParticipant& other) const;
     bool operator<(const EldernodeConsensusParticipant& other) const;
 };
@@ -280,7 +284,7 @@ struct ElderfierSelectionResult {
     uint64_t blockHeight;        // Block height used for selection
     uint64_t totalWeight;        // Sum of all selection multipliers
     std::vector<uint32_t> selectionWeights;  // Individual weights used in selection
-    
+
     bool isValid() const;        // Verify exactly 2 Elderfiers selected
     std::string toString() const;
 };
@@ -293,7 +297,7 @@ struct EldernodeConsensusResult {
     std::vector<Crypto::PublicKey> participatingEldernodes;
     std::vector<uint8_t> aggregatedSignature;
     uint64_t consensusTimestamp;
-    
+
     bool isValid() const;
     std::string toString() const;
 };
@@ -309,11 +313,10 @@ struct ENindexEntry {
     std::chrono::system_clock::time_point lastActivity;
     EldernodeTier tier;
     ElderfierServiceId serviceId;  // Only used for ELDERFIER tier
-    // Note: Old stake proof fields removed - now using 0x06 tag deposits for Elderfiers
-    
+
     bool operator==(const ENindexEntry& other) const;
     bool operator<(const ENindexEntry& other) const;
-    // Note: hasConstantProof and isConstantProofExpired removed - now using 0x06 tag deposits for Elderfiers
+
 };
 
 // Consensus thresholds configuration
@@ -322,7 +325,7 @@ struct ConsensusThresholds {
     uint32_t requiredAgreement; // e.g., 4/5 instead of 3/5
     uint32_t timeoutSeconds;
     uint32_t retryAttempts;
-    
+
     static ConsensusThresholds getDefault();
     bool isValid() const;
 };
@@ -333,7 +336,7 @@ struct DepositValidationResult {
     std::string errorMessage;
     uint64_t validatedAmount;
     Crypto::Hash validatedDepositHash;
-    
+
     static DepositValidationResult success(uint64_t amount, const Crypto::Hash& hash);
     static DepositValidationResult failure(const std::string& error);
 };
@@ -363,17 +366,14 @@ struct SlashingConfig {
     uint64_t getSlashingPercentage(ElderCouncilVoteType voteType = ElderCouncilVoteType::SLASH_ALL) const;
 };
 
-// Note: Old stake proof configuration removed - now using 0x06 tag deposits for Elderfiers
-
 // Elderfier service configuration
 struct ElderfierServiceConfig {
-    uint64_t minimumStakeAmount;      // 800 XFG minimum for Elderfier
+    uint64_t minimumStakeAmount;      // 4000 XFG minimum for Elderfier
     uint64_t customNameLength;        // Exactly 8 letters for custom names
     bool allowHashedAddresses;        // Whether to allow hashed addresses
     std::vector<std::string> reservedNames; // Reserved custom names
     SlashingConfig slashingConfig;    // Slashing configuration
-    // Note: constantProofConfig removed - now using 0x06 tag deposits for Elderfiers
-    
+
     static ElderfierServiceConfig getDefault();
     bool isValid() const;
     bool isCustomNameReserved(const std::string& name) const;

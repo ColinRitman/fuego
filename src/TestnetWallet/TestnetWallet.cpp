@@ -68,8 +68,13 @@ namespace CryptoNote
     // Add testnet-specific deposit commands (in addition to inherited ones)
     m_consoleHandler.setHandler("burn", boost::bind(&testnet_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
     m_consoleHandler.setHandler("cold", boost::bind(&testnet_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a Certificate of Ledger Deposit (0.8, 8, 80, 800 XFG with terms 3 (3months) or 12 (1yr)");
-    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 TEST deposits (0xEC tag, 4000 TEST total). Creates elderfier registration commitment.");
+    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 TEST deposits (0xEF tag, 4000 TEST total). Creates elderfier registration commitment.");
     m_consoleHandler.setHandler("list_burns", boost::bind(&testnet_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all burn transactions.");
+
+    // @ Alias system commands (inherited from simple_wallet)
+    m_consoleHandler.setHandler("register_alias", boost::bind(&testnet_wallet::register_alias, this, boost::arg<1>()), "register_alias <alias> - Register an xfg@ alias (8 chars: [A-Z0-9] for Elderfiers, [a-z0-9] for regular users)");
+    m_consoleHandler.setHandler("lookup_alias", boost::bind(&testnet_wallet::lookup_alias, this, boost::arg<1>()), "lookup_alias <alias_or_address> - Look up an xfg@ alias by name or wallet address");
+    m_consoleHandler.setHandler("list_aliases", boost::bind(&testnet_wallet::list_aliases, this, boost::arg<1>()), "list_aliases - List all registered xfg@ aliases on the network");
   }
 
   //----------------------------------------------------------------------------------------------------
@@ -334,7 +339,7 @@ namespace CryptoNote
         CryptoNote::TransactionExtraElderfierDeposit elderfierDeposit;
         elderfierDeposit.depositHash = commitment_hash;
         elderfierDeposit.depositAmount = amount_per_deposit;
-        elderfierDeposit.elderfierAddress = "";
+        elderfierDeposit.elderfierAddress = m_wallet->getAddress();
         elderfierDeposit.securityWindow = 28800;
         elderfierDeposit.metadata.clear();
         elderfierDeposit.signature.clear();
@@ -346,7 +351,7 @@ namespace CryptoNote
         extraString = std::string(extra.begin(), extra.end());
 
         CryptoNote::TransactionId txId = m_wallet->deposit(
-          CryptoNote::parameters::DEPOSIT_TERM_FOREVER,
+          CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING,
           amount_per_deposit,
           fee,
           extraString,

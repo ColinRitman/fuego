@@ -1,7 +1,18 @@
-// Copyright (c) 2017-2025 Fuego Developers
-// Copyright (c) 2020-2025 Elderfire Privacy Group
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2020-2026 Elderfire Privacy Group
 //
 // This file is part of Fuego.
+//
+// Fuego is free software distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+// PURPOSE. You can redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
+
 
 #include "ElderfierSignatureDaemon.h"
 #include "ICore.h"
@@ -214,25 +225,50 @@ bool ElderfierSignatureDaemon::generateAndBroadcastSignature(
   }
 }
 
+void ElderfierSignatureDaemon::setSigningKeys(const Crypto::PublicKey& pub, const Crypto::SecretKey& sec) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_signingPublicKey = pub;
+  m_signingSecretKey = sec;
+  m_hasSigningKeys = true;
+  m_logger(Logging::INFO, Logging::BRIGHT_GREEN) << "Signing keys configured for daemon";
+}
+
+void ElderfierSignatureDaemon::setElderfierPublicKey(uint8_t efid, const Crypto::PublicKey& pubkey) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_elderfierPubkeys[efid] = pubkey;
+}
+
 bool ElderfierSignatureDaemon::validateElderfierRegistration(uint8_t elderfier_id) {
   try {
-    // Check if elderfier is registered in EldernodeIndex
-    auto deposit = m_eldernodeIndex.getElderfierDeposit(Crypto::PublicKey{});  // TODO: Get actual pubkey
+    // Look up the registered pubkey for this EFiD
+    auto it = m_elderfierPubkeys.find(elderfier_id);
+    if (it == m_elderfierPubkeys.end()) {
+      m_logger(Logging::WARNING, Logging::BRIGHT_YELLOW)
+          << "No registered public key for EFiD " << static_cast<int>(elderfier_id);
+      return false;
+    }
+
+    // Validate against EldernodeIndex using the correct pubkey
+    auto deposit = m_eldernodeIndex.getElderfierDeposit(it->second);
     return deposit.isActive && !deposit.isSpent && deposit.depositAmount >= 800000000000;  // 800 XFG
-  } catch (const std::exception&) {
+  } catch (const std::exception& e) {
+    m_logger(Logging::ERROR, Logging::BRIGHT_RED)
+        << "Error validating EFiD " << static_cast<int>(elderfier_id) << ": " << e.what();
     return false;
   }
 }
 
 Crypto::Signature ElderfierSignatureDaemon::signMerkleRoot(const Crypto::Hash& merkleRoot) {
-  // Generate ephemeral keypair for this signature
-  Crypto::PublicKey pubkey;
-  Crypto::SecretKey seckey;
-  Crypto::generate_keys(pubkey, seckey);
-
-  // Sign the merkle root
   Crypto::Signature signature;
-  Crypto::generate_signature(merkleRoot, pubkey, seckey, signature);
+
+  if (!m_hasSigningKeys) {
+    m_logger(Logging::ERROR, Logging::BRIGHT_RED)
+        << "Cannot sign: no persistent signing keys configured";
+    return signature;
+  }
+
+  // Sign the merkle root with persistent keys (verifiable by any node that knows the pubkey)
+  Crypto::generate_signature(merkleRoot, m_signingPublicKey, m_signingSecretKey, signature);
   return signature;
 }
 
@@ -255,9 +291,12 @@ bool ElderfierSignatureDaemon::broadcastSignature(
     sig_msg.block_height = blockHeight;
     sig_msg.timestamp = std::time(nullptr);
     sig_msg.version = 1;
+    sig_msg.sig_algorithm = 0;  // 0 = Ed25519 (PQ-ready: 1 = ML-DSA-65 in future)
 
-    // Broadcast via P2P (relay to all peers)
-    // TODO: Integrate with actual P2P broadcast mechanism
+    // Relay to all connected peers via P2P
+    m_p2pEndpoint->externalRelayNotifyToAll(
+        COMMAND_ELDERFIER_SIGNATURE::ID, sig_msg, nullptr);
+
     m_logger(Logging::DEBUGGING, Logging::BRIGHT_GREEN)
         << "Broadcasting elderfier signature: EFiD " << static_cast<int>(elderfier_id)
         << ", height " << blockHeight;

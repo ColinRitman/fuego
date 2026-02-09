@@ -81,14 +81,12 @@ private:
   bool on_get_height(const COMMAND_RPC_GET_HEIGHT::request& req, COMMAND_RPC_GET_HEIGHT::response& res);
   bool on_get_deposits(const COMMAND_RPC_GET_DEPOSITS::request& req, COMMAND_RPC_GET_DEPOSITS::response& res);
   bool on_get_transactions(const COMMAND_RPC_GET_TRANSACTIONS::request& req, COMMAND_RPC_GET_TRANSACTIONS::response& res);
-  // TODO: Implement commitment RPC endpoints
-  // bool on_get_commitment(const COMMAND_RPC_GET_COMMITMENT::request& req, COMMAND_RPC_GET_COMMITMENT::response& res);
-  // bool on_get_commitment_stats(const COMMAND_RPC_GET_COMMITMENT_STATS::request& req, COMMAND_RPC_GET_COMMITMENT_STATS::response& res);
-  // bool on_get_commitment_merkle_root(const COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::response& res);
-  // bool on_get_commitment_merkle_proof(const COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::response& res);
-
-  // Domain-based verification (Option B MVP)
-  // bool on_check_commitment_exists(const COMMAND_RPC_CHECK_COMMITMENT_EXISTS::request& req, COMMAND_RPC_CHECK_COMMITMENT_EXISTS::response& res);
+  // Commitment Index RPC endpoints (Fuego → EVM bridge)
+  bool on_get_commitment(const COMMAND_RPC_GET_COMMITMENT::request& req, COMMAND_RPC_GET_COMMITMENT::response& res);
+  bool on_get_commitment_stats(const COMMAND_RPC_GET_COMMITMENT_STATS::request& req, COMMAND_RPC_GET_COMMITMENT_STATS::response& res);
+  bool on_get_commitment_merkle_root(const COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::response& res);
+  bool on_get_commitment_merkle_proof(const COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::response& res);
+  bool on_check_commitment_exists(const COMMAND_RPC_CHECK_COMMITMENT_EXISTS::request& req, COMMAND_RPC_CHECK_COMMITMENT_EXISTS::response& res);
 
   // Phase 4: Elderfier RPC endpoints
   bool on_get_elderfier_signatures(const COMMAND_RPC_GET_ELDERFIER_SIGNATURES::request& req,
@@ -99,6 +97,14 @@ private:
                                      COMMAND_RPC_GET_ELDERFIER_FEE_BALANCE::response& res);
   bool on_get_elderfier_network_stats(const COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::request& req,
                                        COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::response& res);
+  bool on_check_elderfier_eligibility(const COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::request& req,
+                                       COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::response& res);
+  bool on_get_alias(const COMMAND_RPC_GET_ALIAS::request& req,
+                     COMMAND_RPC_GET_ALIAS::response& res);
+  bool on_get_alias_by_address(const COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request& req,
+                                COMMAND_RPC_GET_ALIAS_BY_ADDRESS::response& res);
+  bool on_get_all_aliases(const COMMAND_RPC_GET_ALL_ALIASES::request& req,
+                           COMMAND_RPC_GET_ALL_ALIASES::response& res);
 
   bool on_get_peer_list(const COMMAND_RPC_GET_PEER_LIST::request& req, COMMAND_RPC_GET_PEER_LIST::response& res);
   bool on_prove_collateral(const COMMAND_RPC_PROVE_COLLATERAL::request& req, COMMAND_RPC_PROVE_COLLATERAL::response& res);

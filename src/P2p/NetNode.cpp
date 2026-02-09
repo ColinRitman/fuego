@@ -48,6 +48,7 @@
 #include "Serialization/SerializationOverloads.h"
 #include "Common/StringTools.h"
 #include "CryptoNoteCore/CommitmentIndex.h"
+#include "CryptoNoteCore/Core.h"
 
 using namespace Common;
 using namespace Logging;
@@ -1489,11 +1490,18 @@ namespace CryptoNote
     cached_sig.received_block_height = currentHeight;
     cached_sig.is_valid = false;  // Mark for validation by CommitmentIndex
 
-    // Get CommitmentIndex from core
+    // Forward validated signature to CommitmentIndex via core->blockchain
     try {
-      // For now, we just log the signature and relay it
-      // Full validation will be done by CommitmentIndex when it's integrated
-      logger(Logging::DEBUGGING) << "Cached elderfier signature: EFiD " << (int)arg.elderfier_id
+      // Populate PQ extension fields from P2P message
+      cached_sig.sig_algorithm = arg.sig_algorithm;
+      cached_sig.pq_signature = arg.pq_signature;
+      cached_sig.pq_public_key = arg.pq_pubkey;
+
+      // Cast ICore& to concrete core& to access get_blockchain_storage()
+      auto& concrete_core = static_cast<CryptoNote::core&>(m_payload_handler.get_core());
+      concrete_core.get_blockchain_storage().addSignatureToCache(cached_sig);
+
+      logger(Logging::DEBUGGING) << "Elderfier signature cached: EFiD " << (int)arg.elderfier_id
                                  << " at height " << arg.block_height
                                  << " for merkle root " << Common::podToHex(arg.merkle_root);
 

@@ -1,16 +1,17 @@
-// Copyright (c) 2017-2025 Fuego Developers
-// Copyright (c) 2020-2025 Elderfire Privacy Group
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2020-2026 Elderfire Privacy Group
 //
 // This file is part of Fuego.
 //
 // Fuego is free software distributed in the hope that it
-// will be useful- but WITHOUT ANY WARRANTY; without even the
+// will be useful, but WITHOUT ANY WARRANTY; without even the
 // implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
-// PURPOSE. You are encouraged to redistribute it and/or modify it
-// under the terms of the GNU General Public License v3 or later
-// versions as published by the Free Software Foundation.
-// You should receive a copy of the GNU General Public License
-// along with Fuego. If not, see <https://www.gnu.org/licenses/>
+// PURPOSE. You can redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #pragma once
 
@@ -21,6 +22,7 @@
 #include <queue>
 #include <cstdint>
 #include <vector>
+#include <map>
 #include "crypto/crypto.h"
 #include "Logging/ILogger.h"
 #include "Logging/LoggerRef.h"
@@ -53,6 +55,8 @@ public:
   void setElderfierIds(const std::vector<uint8_t>& elfIds);
   void addElderfier(uint8_t elderfier_id);
   void removeElderfier(uint8_t elderfier_id);
+  void setSigningKeys(const Crypto::PublicKey& pub, const Crypto::SecretKey& sec);
+  void setElderfierPublicKey(uint8_t efid, const Crypto::PublicKey& pubkey);
 
   // Statistics
   uint64_t getSignaturesGenerated() const;
@@ -94,6 +98,14 @@ private:
 
   // Synchronization
   mutable std::mutex m_mutex;
+
+  // Persistent signing keys (used for all elderfier signatures from this node)
+  Crypto::PublicKey m_signingPublicKey;
+  Crypto::SecretKey m_signingSecretKey;
+  bool m_hasSigningKeys = false;
+
+  // Elderfier ID -> public key mapping (for validation lookups)
+  std::map<uint8_t, Crypto::PublicKey> m_elderfierPubkeys;
 
   // Registered elderfiers to sign for
   std::vector<uint8_t> m_elderfierIds;

@@ -1378,4 +1378,26 @@ uint64_t core::getTotalFeesDistributedAllTime() const {
   return m_blockchain.getTotalFeesDistributedAllTime();
 }
 
+// Elderfier registration lifecycle proxy
+bool core::canAddressRegisterElderfier(const std::string& address) const {
+  return m_blockchain.canAddressRegisterElderfier(address);
+}
+
+// @ Alias system proxies
+bool core::aliasExists(const std::string& alias) const {
+  return m_blockchain.aliasExists(alias);
+}
+
+std::optional<AliasEntry> core::getAliasByName(const std::string& alias) const {
+  return m_blockchain.getAliasByName(alias);
+}
+
+std::optional<AliasEntry> core::getAliasByAddress(const std::string& address) const {
+  return m_blockchain.getAliasByAddress(address);
+}
+
+std::vector<AliasEntry> core::getAllAliases() const {
+  return m_blockchain.getAllAliases();
+}
+
 }

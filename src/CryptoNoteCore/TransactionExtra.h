@@ -44,8 +44,8 @@
 #define TX_EXTRA_BURN_RECEIPT               0x18  // Burn transaction receipt
 #define TX_EXTRA_DIGM_MINT                  0xA8  // DIGM coin mint by burn (Split 3 ways dev, digm treasury, burn)
 
-// 0xEC tag: Elderfier staking
-#define TX_EXTRA_ELDERFIER_DEPOSIT          0xEC  // Elderfier staking deposit (no banking fee)
+// 0xEF tag: Elderfier staking
+#define TX_EXTRA_ELDERFIER_DEPOSIT          0xEF  // Elderfier staking deposit (no banking fee)
 
 // 0x_A tags: DIGM Artist related meta/msgs/txns
 #define TX_EXTRA_DIGM_ALBUM                 0x0A  // Album metadata
@@ -67,8 +67,11 @@
 // 0x07 FUEGO MOB Custom Interest Assets   Check full compatibility -
 #define TX_EXTRA_YIELD_COMMITMENT           0x07  //  yield commitment
 
-// 0x_F tags: Elderfier system (consensus/messaging)
-#define TX_EXTRA_ELDERFIER_MESSAGE          0xEF  // Elderfier messaging/consensus
+// 0x_C tags: Elderfier system (consensus/messaging)
+#define TX_EXTRA_ELDERFIER_MESSAGE          0xEC  // Elderfier messaging/consensus
+
+// 0xEA tag: @ Alias registration (on-chain)
+#define TX_EXTRA_ELDERFIER_ALIAS            0xEA  // @ alias registration for Elderfiers and users
 
 #define TX_EXTRA_NONCE_PAYMENT_ID           0x00
 
@@ -154,12 +157,25 @@ struct TransactionExtraElderfierMessage {
   bool consensusRequired;              // Whether this message requires consensus validation
   ElderfierConsensusType consensusType; // Type of consensus required (QUORUM, PROOF, WITNESS)
   uint32_t requiredThreshold;          // Threshold required (e.g., 80 for quorum)
-  Crypto::Hash targetDepositHash;      // Target 0xE8 deposit hash (for slashing messages)
+  Crypto::Hash targetDepositHash;      // Target 0xEF deposit hash (for slashing messages)
 
   bool serialize(ISerializer& serializer);
   bool isValid() const;
   bool requiresQuorumConsensus() const; // Check if this message requires quorum
   std::string toString() const;
+};
+
+// @ Alias registration structure (0xEA)
+struct TransactionExtraAliasRegistration {
+  uint8_t version = 1;             // Schema version
+  std::string alias;               // Exactly 8 chars: [A-Z0-9] for EFiers, [a-z0-9] for regular users
+  Crypto::Hash aliasHash;          // cn_fast_hash(alias) for fast lookup
+  Crypto::Hash addressHash;        // cn_fast_hash(address) for privacy
+  std::string ownerAddress;        // Full wallet address (optional: can be empty for privacy)
+  uint8_t aliasType = 0;           // 0 = Elderfier (ALLCAPS [A-Z0-9]), 1 = Regular user (lowercase [a-z0-9])
+
+  bool serialize(ISerializer& serializer);
+  bool isValid() const;
 };
 
 // DIGM transaction extra structures will be implemented later
@@ -182,7 +198,7 @@ struct TransactionExtraColdCommitment {
 using TransactionExtraCDDepositSecret = TransactionExtraColdCommitment;
 
 
-typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraColdCommitment, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;
+typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraAliasRegistration, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraColdCommitment, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;
 
 
 
@@ -241,6 +257,10 @@ bool getElderfierMessageFromExtra(const std::vector<uint8_t>& tx_extra, Transact
 bool createElderfierQuorumMessage(const Crypto::PublicKey& senderKey, const Crypto::PublicKey& recipientKey, const Crypto::Hash& targetDepositHash, uint32_t messageType, const std::vector<uint8_t>& messageData, uint64_t timestamp, TransactionExtraElderfierMessage& message);
 bool createElderfierProofMessage(const Crypto::PublicKey& senderKey, const Crypto::PublicKey& recipientKey, uint32_t messageType, const std::vector<uint8_t>& messageData, uint64_t timestamp, TransactionExtraElderfierMessage& message);
 bool createElderfierWitnessMessage(const Crypto::PublicKey& senderKey, const Crypto::PublicKey& recipientKey, uint32_t messageType, const std::vector<uint8_t>& messageData, uint64_t timestamp, TransactionExtraElderfierMessage& message);
+
+// @ Alias registration helper functions
+bool addAliasToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraAliasRegistration& alias);
+bool getAliasFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraAliasRegistration& alias);
 
 // DIGM helper functions will be implemented later
 

@@ -229,6 +229,15 @@ namespace CryptoNote {
     uint64_t getTotalFeesInEscrow() const;
     uint64_t getTotalFeesDistributedAllTime() const;
 
+    // Elderfier registration lifecycle
+    bool canAddressRegisterElderfier(const std::string& address) const;
+
+    // @ Alias system
+    bool aliasExists(const std::string& alias) const;
+    std::optional<AliasEntry> getAliasByName(const std::string& alias) const;
+    std::optional<AliasEntry> getAliasByAddress(const std::string& address) const;
+    std::vector<AliasEntry> getAllAliases() const;
+
     // Elderfier signature cache accessors
     void addSignatureToCache(const CachedElderfierSignature& sig);
     void updateCurrentMerkleRoot(const Crypto::Hash& root);

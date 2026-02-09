@@ -1157,4 +1157,263 @@ struct COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS {
 	};
 };
 
+// ============================================================================
+// ELDERFIER ELIGIBILITY CHECK
+// ============================================================================
+
+struct COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY {
+	struct request {
+		std::string address;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(address)
+		}
+	};
+
+	struct response {
+		bool eligible;
+		std::string reason;
+		std::string status;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(eligible)
+			KV_MEMBER(reason)
+			KV_MEMBER(status)
+		}
+	};
+};
+
+// ============================================================================
+// @ ALIAS SYSTEM RPC ENDPOINTS
+// ============================================================================
+
+struct COMMAND_RPC_GET_ALIAS {
+	struct request {
+		std::string alias;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(alias)
+		}
+	};
+
+	struct response {
+		std::string alias;
+		std::string address;
+		std::string address_hash;
+		uint32_t registered_block;
+		uint8_t alias_type;
+		bool found;
+		std::string status;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(alias)
+			KV_MEMBER(address)
+			KV_MEMBER(address_hash)
+			KV_MEMBER(registered_block)
+			KV_MEMBER(alias_type)
+			KV_MEMBER(found)
+			KV_MEMBER(status)
+		}
+	};
+};
+
+struct COMMAND_RPC_GET_ALIAS_BY_ADDRESS {
+	struct request {
+		std::string address;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(address)
+		}
+	};
+
+	struct response {
+		std::string alias;
+		std::string address;
+		uint32_t registered_block;
+		uint8_t alias_type;
+		bool found;
+		std::string status;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(alias)
+			KV_MEMBER(address)
+			KV_MEMBER(registered_block)
+			KV_MEMBER(alias_type)
+			KV_MEMBER(found)
+			KV_MEMBER(status)
+		}
+	};
+};
+
+struct COMMAND_RPC_GET_ALL_ALIASES {
+	typedef EMPTY_STRUCT request;
+
+	struct alias_entry {
+		std::string alias;
+		std::string address;
+		uint32_t registered_block;
+		uint8_t alias_type;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(alias)
+			KV_MEMBER(address)
+			KV_MEMBER(registered_block)
+			KV_MEMBER(alias_type)
+		}
+	};
+
+	struct response {
+		std::vector<alias_entry> aliases;
+		uint32_t total;
+		std::string status;
+
+		void serialize(ISerializer& s) {
+			KV_MEMBER(aliases)
+			KV_MEMBER(total)
+			KV_MEMBER(status)
+		}
+	};
+};
+
+// ============================================================
+// Commitment Index RPC endpoints (Fuego → EVM bridge support)
+// Used by xfg-stark-cli to fetch commitment data + merkle proofs
+// ============================================================
+
+struct COMMAND_RPC_GET_COMMITMENT {
+  struct request {
+    std::string commitment_hash;  // Hex-encoded commitment hash (64 chars)
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(commitment_hash)
+    }
+  };
+
+  struct response {
+    bool found;
+    std::string commitment_hash;
+    std::string tx_hash;
+    uint32_t block_height;
+    uint64_t amount;
+    uint32_t term;
+    uint8_t type;               // 0=HEAT, 1=YIELD/COLD, 2=ELDERFIER_STAKING
+    uint32_t target_chain_id;
+    uint32_t leaf_index;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(found)
+      KV_MEMBER(commitment_hash)
+      KV_MEMBER(tx_hash)
+      KV_MEMBER(block_height)
+      KV_MEMBER(amount)
+      KV_MEMBER(term)
+      KV_MEMBER(type)
+      KV_MEMBER(target_chain_id)
+      KV_MEMBER(leaf_index)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_COMMITMENT_STATS {
+  typedef EMPTY_STRUCT request;
+
+  struct response {
+    uint64_t total_commitments;
+    uint64_t heat_commitments;
+    uint64_t cold_commitments;
+    uint32_t highest_block;
+    std::string merkle_root;
+    uint64_t consensus_percentage;
+    std::vector<uint8_t> signed_elderfier_ids;
+    std::vector<uint8_t> pending_elderfier_ids;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(total_commitments)
+      KV_MEMBER(heat_commitments)
+      KV_MEMBER(cold_commitments)
+      KV_MEMBER(highest_block)
+      KV_MEMBER(merkle_root)
+      KV_MEMBER(consensus_percentage)
+      KV_MEMBER(signed_elderfier_ids)
+      KV_MEMBER(pending_elderfier_ids)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT {
+  typedef EMPTY_STRUCT request;
+
+  struct response {
+    std::string merkle_root;    // Hex-encoded current merkle root
+    uint64_t total_leaves;
+    uint32_t highest_block;
+    uint64_t consensus_percentage;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(merkle_root)
+      KV_MEMBER(total_leaves)
+      KV_MEMBER(highest_block)
+      KV_MEMBER(consensus_percentage)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF {
+  struct request {
+    std::string commitment_hash;  // Hex-encoded commitment hash
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(commitment_hash)
+    }
+  };
+
+  struct response {
+    bool found;
+    std::string merkle_root;              // Current root
+    std::string leaf_hash;                // The commitment being proved
+    std::vector<std::string> proof_path;  // Sibling hashes in hex
+    std::vector<uint32_t> proof_indices;  // Left(0) or right(1) at each level
+    uint32_t leaf_index;
+    uint64_t consensus_percentage;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(found)
+      KV_MEMBER(merkle_root)
+      KV_MEMBER(leaf_hash)
+      KV_MEMBER(proof_path)
+      KV_MEMBER(proof_indices)
+      KV_MEMBER(leaf_index)
+      KV_MEMBER(consensus_percentage)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_CHECK_COMMITMENT_EXISTS {
+  struct request {
+    std::string commitment_hash;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(commitment_hash)
+    }
+  };
+
+  struct response {
+    bool exists;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(exists)
+      KV_MEMBER(status)
+    }
+  };
+};
+
 }

@@ -147,6 +147,17 @@ namespace CryptoNote
           break;
         }
 
+        case TX_EXTRA_ELDERFIER_ALIAS:
+        {
+          TransactionExtraAliasRegistration alias;
+          if (getAliasFromExtra(transactionExtra, alias)) {
+            transactionExtraFields.push_back(alias);
+          } else {
+            return false;
+          }
+          break;
+        }
+
         case TX_EXTRA_HEAT_COMMITMENT:
         {
           TransactionExtraHeatCommitment heatCommitment;
@@ -813,7 +824,7 @@ namespace CryptoNote
         return false;
       }
 
-      // For quorum consensus, target deposit hash must be specified (for 0xE8 intervention)
+      // For quorum consensus, target deposit hash must be specified (for 0xEF intervention)
       if (consensusType == ElderfierConsensusType::QUORUM && targetDepositHash == Crypto::Hash()) {
         return false;
       }
@@ -856,7 +867,7 @@ namespace CryptoNote
 
   // Elderfier Message helper functions (messaging/monitoring)
 
-  // Create Elderfier message with Quorum consensus (for 0xE8 deposit slashing)
+  // Create Elderfier message with Quorum consensus (for 0xEF deposit slashing)
   bool createElderfierQuorumMessage(const Crypto::PublicKey& senderKey,
                                    const Crypto::PublicKey& recipientKey,
                                    const Crypto::Hash& targetDepositHash,
@@ -877,8 +888,18 @@ namespace CryptoNote
     message.requiredThreshold = 80; // >80% agreement required
     message.targetDepositHash = targetDepositHash;
 
-    // Generate signature (placeholder - would use actual crypto)
-    message.signature = std::vector<uint8_t>(64, 0xAA); // Placeholder signature
+    // Generate deterministic signature binding: H(senderKey || messageData || targetDepositHash)
+    // Actual Ed25519 signing happens at the wallet layer before broadcast
+    Crypto::Hash sig_hash;
+    std::vector<uint8_t> sig_preimage;
+    sig_preimage.insert(sig_preimage.end(), message.senderKey.data,
+                        message.senderKey.data + sizeof(message.senderKey.data));
+    sig_preimage.insert(sig_preimage.end(), messageData.begin(), messageData.end());
+    sig_preimage.insert(sig_preimage.end(), targetDepositHash.data,
+                        targetDepositHash.data + sizeof(targetDepositHash.data));
+    Crypto::cn_fast_hash(sig_preimage.data(), sig_preimage.size(), sig_hash);
+    message.signature.assign(sig_hash.data, sig_hash.data + 32);
+    message.signature.resize(64, 0);  // Pad to 64 bytes (sig placeholder until wallet signs)
 
     return message.isValid();
   }
@@ -903,8 +924,17 @@ namespace CryptoNote
     message.requiredThreshold = 100; // Proof must be cryptographically valid
     message.targetDepositHash = Crypto::Hash(); // Not targeting a deposit
 
-    // Generate signature (placeholder)
-    message.signature = std::vector<uint8_t>(64, 0xBB);
+    // Generate deterministic signature binding: H(senderKey || messageData || "PROOF")
+    Crypto::Hash sig_hash;
+    std::vector<uint8_t> sig_preimage;
+    sig_preimage.insert(sig_preimage.end(), message.senderKey.data,
+                        message.senderKey.data + sizeof(message.senderKey.data));
+    sig_preimage.insert(sig_preimage.end(), messageData.begin(), messageData.end());
+    const char proof_tag[] = "PROOF";
+    sig_preimage.insert(sig_preimage.end(), proof_tag, proof_tag + 5);
+    Crypto::cn_fast_hash(sig_preimage.data(), sig_preimage.size(), sig_hash);
+    message.signature.assign(sig_hash.data, sig_hash.data + 32);
+    message.signature.resize(64, 0);
 
     return message.isValid();
   }
@@ -929,8 +959,17 @@ namespace CryptoNote
     message.requiredThreshold = 50; // Simple majority for witness consensus
     message.targetDepositHash = Crypto::Hash(); // Not targeting a deposit
 
-    // Generate signature (placeholder)
-    message.signature = std::vector<uint8_t>(64, 0xCC);
+    // Generate deterministic signature binding: H(senderKey || messageData || "WITNESS")
+    Crypto::Hash sig_hash;
+    std::vector<uint8_t> sig_preimage;
+    sig_preimage.insert(sig_preimage.end(), message.senderKey.data,
+                        message.senderKey.data + sizeof(message.senderKey.data));
+    sig_preimage.insert(sig_preimage.end(), messageData.begin(), messageData.end());
+    const char witness_tag[] = "WITNESS";
+    sig_preimage.insert(sig_preimage.end(), witness_tag, witness_tag + 7);
+    Crypto::cn_fast_hash(sig_preimage.data(), sig_preimage.size(), sig_hash);
+    message.signature.assign(sig_hash.data, sig_hash.data + 32);
+    message.signature.resize(64, 0);
 
     return message.isValid();
   }
@@ -1823,6 +1862,89 @@ namespace CryptoNote
       case 5: return 1825;  // 5 years
       default: return 0;
     }
+  }
+
+  // ============================================================================
+  // @ ALIAS REGISTRATION (0xEA)
+  // ============================================================================
+
+  bool TransactionExtraAliasRegistration::serialize(ISerializer& s) {
+    s(version, "version");
+    s(alias, "alias");
+    s(aliasHash, "aliasHash");
+    s(addressHash, "addressHash");
+    s(ownerAddress, "ownerAddress");
+    s(aliasType, "aliasType");
+    return true;
+  }
+
+  bool TransactionExtraAliasRegistration::isValid() const {
+    if (alias.length() != 8) {
+      return false;
+    }
+
+    if (aliasType == 0) {
+      // Elderfier alias: [A-Z0-9] only
+      for (char c : alias) {
+        bool isUpper = (c >= 'A' && c <= 'Z');
+        bool isDigit = (c >= '0' && c <= '9');
+        if (!isUpper && !isDigit) return false;
+      }
+    } else if (aliasType == 1) {
+      // Regular user alias: [a-z0-9] only
+      for (char c : alias) {
+        bool isLower = (c >= 'a' && c <= 'z');
+        bool isDigit = (c >= '0' && c <= '9');
+        if (!isLower && !isDigit) return false;
+      }
+    } else {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool addAliasToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraAliasRegistration& alias) {
+    if (!alias.isValid()) {
+      return false;
+    }
+
+    // Write tag
+    tx_extra.push_back(TX_EXTRA_ELDERFIER_ALIAS);
+
+    // Serialize the alias registration
+    BinaryArray ba;
+    bool r = toBinaryArray(alias, ba);
+    if (!r) return false;
+
+    // Write size + data
+    Tools::write_varint(tx_extra, ba.size());
+    tx_extra.insert(tx_extra.end(), ba.begin(), ba.end());
+
+    return true;
+  }
+
+  bool getAliasFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraAliasRegistration& alias) {
+    // Find the 0xEA tag in extra
+    for (size_t i = 0; i < tx_extra.size(); ++i) {
+      if (tx_extra[i] == TX_EXTRA_ELDERFIER_ALIAS) {
+        // Read size
+        size_t offset = i + 1;
+        if (offset >= tx_extra.size()) return false;
+
+        uint64_t size = 0;
+        int bytes_read = Tools::read_varint(tx_extra.data() + offset, tx_extra.size() - offset, size);
+        if (bytes_read <= 0) return false;
+        offset += bytes_read;
+
+        if (offset + size > tx_extra.size()) return false;
+
+        // Deserialize
+        BinaryArray ba(tx_extra.begin() + offset, tx_extra.begin() + offset + size);
+        return fromBinaryArray(alias, ba);
+      }
+    }
+    return false;
   }
 
 } // namespace CryptoNote

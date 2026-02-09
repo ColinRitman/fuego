@@ -536,7 +536,7 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // TODO: Re-enable burn and cold commands in next release
   // m_consoleHandler.setHandler("burn", boost::bind(&simple_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
   // m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
-  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 XFG deposits (0xEC tag, 4000 XFG total). Creates elderfier registration commitment.");
+  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 XFG deposits (0xEF tag, 4000 XFG total). Creates elderfier registration commitment.");
   m_consoleHandler.setHandler("withdraw_deposit", boost::bind(&simple_wallet::withdraw_deposit, this, boost::arg<1>()), "withdraw_deposit <id> - Withdraw a deposit");
   m_consoleHandler.setHandler("list_deposits", boost::bind(&simple_wallet::list_deposits, this, boost::arg<1>()), "list_deposits - List all deposits");
   m_consoleHandler.setHandler("deposit_info", boost::bind(&simple_wallet::deposit_info, this, boost::arg<1>()), "deposit_info <id> - Get detailed info for deposit");
@@ -546,6 +546,11 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // But users MUST generate STARK proofs from deposits for L2 claims
   // DISABLED: m_consoleHandler.setHandler("create_cold_secret", ...);
   m_consoleHandler.setHandler("generate_proof", boost::bind(&simple_wallet::generate_proof, this, boost::arg<1>()), "generate_proof <tx_hash> - Generate STARK proof for deposit transaction (for L2 claims)");
+
+  // @ Alias system commands
+  m_consoleHandler.setHandler("register_alias", boost::bind(&simple_wallet::register_alias, this, boost::arg<1>()), "register_alias <alias> - Register an @ alias (8 chars: [A-Z0-9] for Elderfiers, [a-z0-9] for regular users)");
+  m_consoleHandler.setHandler("lookup_alias", boost::bind(&simple_wallet::lookup_alias, this, boost::arg<1>()), "lookup_alias <alias_or_address> - Look up an @ alias by name or wallet address");
+  m_consoleHandler.setHandler("list_aliases", boost::bind(&simple_wallet::list_aliases, this, boost::arg<1>()), "list_aliases - List all registered @ aliases on the network");
 }
 
 bool simple_wallet::show_dust(const std::vector<std::string>& args) {
@@ -1575,7 +1580,7 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
 //----------------------------------------------------------------------------------------------------
 bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
 {
-  // Elderfier registration: batch 5x 800 XFG deposits with 0xEC tag (total 4000 XFG)
+  // Elderfier registration: batch 5x 800 XFG deposits with 0xEF tag (total 4000 XFG)
   // This is the ceremonial registration process for becoming an Elderfier
   if (args.size() != 0)
   {
@@ -1605,7 +1610,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "│  📊 STAKING REQUIREMENTS:                                  │";
     success_msg_writer() << "│     • Exactly 5 deposits of 800 XFG each                   │";
     success_msg_writer() << "│     • Total commitment: 4,000 XFG                          │";
-    success_msg_writer() << "│     • Tagged with 0xEC (Elderfier staking tag)             │";
+    success_msg_writer() << "│     • Tagged with 0xEF (Elderfier staking tag)             │";
     success_msg_writer() << "│     • No banking fees applied to your deposits             │";
     success_msg_writer() << "│     • Network transaction fees: ~0.00005 XFG per deposit   │";
     success_msg_writer() << "│                                                            │";
@@ -1702,7 +1707,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
 
-    // Create 5 deposits of 800 XFG each with 0xEC tag
+    // Create 5 deposits of 800 XFG each with 0xEF tag
     uint64_t amount_per_deposit = 800 * CryptoNote::parameters::COIN;  // 800 XFG
 
     std::vector<CryptoNote::TransactionId> txIds;
@@ -1712,7 +1717,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       success_msg_writer() << "⚡ Ritual " << (i + 1) << " of 5: Forming Elderfire Stake ⚡";
       success_msg_writer() << "  Creating 800 XFG commitment...";
 
-      // Create elderfier deposit with 0xEC tag
+      // Create elderfier deposit with 0xEF tag
       std::vector<uint8_t> extra;
       std::string extraString = "";
 
@@ -1722,11 +1727,11 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       Crypto::generate_keys(public_key, secret_key);
       Crypto::Hash commitment_hash = Crypto::cn_fast_hash(public_key.data, sizeof(public_key.data));
 
-      // Create 0xEC elderfier deposit extra field
+      // Create 0xEF elderfier deposit extra field
       CryptoNote::TransactionExtraElderfierDeposit elderfierDeposit;
       elderfierDeposit.depositHash = commitment_hash;
       elderfierDeposit.depositAmount = amount_per_deposit;
-      elderfierDeposit.elderfierAddress = "";  // Optional: can be set to node address later
+      elderfierDeposit.elderfierAddress = m_wallet->getAddress();  // Wallet address for registration tracking
       elderfierDeposit.securityWindow = 28800;  // 8 hours default security window
       elderfierDeposit.metadata.clear();
       elderfierDeposit.signature.clear();
@@ -1736,10 +1741,10 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
 
       // Send the transaction - use standard deposit mechanism
-      // Note: For 0xEC deposits, we don't use the normal "term" system
-      // Using DEPOSIT_TERM_FOREVER as placeholder since term is not used for elderfier deposits
+      // Note: For 0xEF deposits, we don't use the normal "term" system
+      // Elderfier staking: term=8 (short lock, unstakeable on demand with review window)
       CryptoNote::TransactionId txId = m_wallet->deposit(
-        CryptoNote::parameters::DEPOSIT_TERM_FOREVER,
+        CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING,
         amount_per_deposit,
         fee,
         extraString,
@@ -1991,7 +1996,7 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
         typeDescription = "Off-chain yield deposit - locked for specified term";
         break;
       case CryptoNote::Deposit::Type::ELDERFIER:
-        depositType = "ELDERFIER Stake (0xEC)";
+        depositType = "ELDERFIER Stake (0xEF)";
         typeDescription = "Staking deposit for elderfier - unstakeable with 8-day hold window";
         break;
       default:
@@ -2002,6 +2007,8 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
     // Display term (user-defined unlock time, independent of deposit type)
     if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
       success_msg_writer() << "Term:          FOREVER";
+    } else if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING) {
+      success_msg_writer() << "Term:          Elderfier Staking (unstakeable on demand, " << CryptoNote::parameters::ELDERFIER_STAKING_REVIEW_WINDOW << "-block review)";
     } else if (deposit.term == CryptoNote::parameters::COLD_MIN_TERM) {
       success_msg_writer() << "Term:          3 months (16,000 blocks)";
     } else if (deposit.term == CryptoNote::parameters::COLD_MAX_TERM) {
@@ -2902,6 +2909,301 @@ bool simple_wallet::print_address(const std::vector<std::string> &args) {
 //----------------------------------------------------------------------------------------------------
 bool simple_wallet::process_command(const std::vector<std::string> &args) {
   return m_consoleHandler.runCommand(args);
+}
+
+//----------------------------------------------------------------------------------------------------
+// @ ALIAS SYSTEM COMMANDS
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::register_alias(const std::vector<std::string> &args) {
+  if (args.size() != 1) {
+    fail_msg_writer() << "Usage: register_alias <alias>";
+    fail_msg_writer() << "  Alias must be exactly 8 characters:";
+    fail_msg_writer() << "  [A-Z0-9] for Elderfiers, [a-z0-9] for regular users";
+    return true;
+  }
+
+  std::string alias = args[0];
+
+  // Validate length
+  if (alias.length() != 8) {
+    fail_msg_writer() << "Alias must be exactly 8 characters. Got " << alias.length() << ".";
+    return true;
+  }
+
+  // Determine alias type: all uppercase+digits = Elderfier (type 0), all lowercase+digits = Regular (type 1)
+  bool allUpper = true, allLower = true;
+  for (char c : alias) {
+    if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) allUpper = false;
+    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) allLower = false;
+  }
+
+  if (!allUpper && !allLower) {
+    fail_msg_writer() << "Invalid alias format. Use:";
+    fail_msg_writer() << "  [A-Z0-9] for Elderfier aliases (e.g., FIRENODE)";
+    fail_msg_writer() << "  [a-z0-9] for regular user aliases (e.g., firenode)";
+    return true;
+  }
+
+  uint8_t aliasType = allUpper ? 0 : 1;
+
+  // Elderfier aliases (type 0) require active Elderfier registration
+  if (aliasType == 0) {
+    try {
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::request eligReq;
+      COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::response eligRes;
+      eligReq.address = m_wallet->getAddress();
+      invokeJsonCommand(httpClient, "/check_elderfier_eligibility", eligReq, eligRes);
+
+      // If the address CAN register (i.e., is NOT already registered), it's not an active Elderfier
+      if (eligRes.eligible) {
+        fail_msg_writer() << "UPPERCASE aliases are reserved for active Elderfiers.";
+        fail_msg_writer() << "Your address is not registered as an Elderfier.";
+        fail_msg_writer() << "Use lowercase alias [a-z0-9] or run 'elderking_ceremony' first.";
+        return true;
+      }
+    } catch (const ConnectException&) {
+      printConnectionError();
+      return true;
+    } catch (const std::exception& e) {
+      fail_msg_writer() << "Failed to check Elderfier eligibility: " << e.what();
+      return true;
+    }
+  }
+
+  // Check if alias is already taken
+  try {
+    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+    COMMAND_RPC_GET_ALIAS::request checkReq;
+    COMMAND_RPC_GET_ALIAS::response checkRes;
+    checkReq.alias = alias;
+    invokeJsonCommand(httpClient, "/get_alias", checkReq, checkRes);
+
+    if (checkRes.found) {
+      fail_msg_writer() << "Alias @" << alias << " is already registered.";
+      return true;
+    }
+  } catch (const ConnectException&) {
+    printConnectionError();
+    return true;
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Failed to check alias availability: " << e.what();
+    return true;
+  }
+
+  // Check if address already has an alias
+  try {
+    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+    COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request addrReq;
+    COMMAND_RPC_GET_ALIAS_BY_ADDRESS::response addrRes;
+    addrReq.address = m_wallet->getAddress();
+    invokeJsonCommand(httpClient, "/get_alias_by_address", addrReq, addrRes);
+
+    if (addrRes.found) {
+      fail_msg_writer() << "Your address already has alias @" << addrRes.alias;
+      fail_msg_writer() << "Each address can only have one alias.";
+      return true;
+    }
+  } catch (const ConnectException&) {
+    printConnectionError();
+    return true;
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Failed to check address alias: " << e.what();
+    return true;
+  }
+
+  if (aliasType == 0) {
+    success_msg_writer() << "";
+    success_msg_writer() << "Registering Elderfier alias @" << alias << " (FREE for active Elderfiers)";
+    success_msg_writer() << "  Type: Elderfier [A-Z0-9]";
+    success_msg_writer() << "  This will send a small self-transfer to embed the alias on-chain.";
+    success_msg_writer() << "";
+  } else {
+    success_msg_writer() << "";
+    success_msg_writer() << "Registering alias @" << alias;
+    success_msg_writer() << "  Type: Regular [a-z0-9]";
+    success_msg_writer() << "  Fee: 1 XFG sent to Fuego Developer Fund";
+    success_msg_writer() << "";
+  }
+
+  try {
+    // Build the 0xEA alias registration extra
+    std::string walletAddress = m_wallet->getAddress();
+
+    CryptoNote::TransactionExtraAliasRegistration aliasReg;
+    aliasReg.version = 1;
+    aliasReg.alias = alias;
+    aliasReg.aliasHash = Crypto::cn_fast_hash(alias.data(), alias.size());
+    aliasReg.addressHash = Crypto::cn_fast_hash(walletAddress.data(), walletAddress.size());
+    aliasReg.ownerAddress = walletAddress;
+    aliasReg.aliasType = aliasType;
+
+    if (!aliasReg.isValid()) {
+      fail_msg_writer() << "Invalid alias registration data.";
+      return true;
+    }
+
+    // Serialize alias registration into transaction extra
+    std::vector<uint8_t> extra;
+    if (!CryptoNote::addAliasToExtra(extra, aliasReg)) {
+      fail_msg_writer() << "Failed to build alias transaction extra.";
+      return true;
+    }
+
+    std::string extraString(extra.begin(), extra.end());
+
+    CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+    WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
+    std::vector<CryptoNote::WalletLegacyTransfer> transfers;
+
+    if (aliasType == 0) {
+      // Elderfier alias: FREE — send minimum amount to self
+      CryptoNote::WalletLegacyTransfer selfTransfer;
+      selfTransfer.address = walletAddress;
+      selfTransfer.amount = m_currency.minimumFee();
+      transfers.push_back(selfTransfer);
+    } else {
+      // Regular alias: 1 XFG fee to Fuego Developer Fund
+      CryptoNote::WalletLegacyTransfer devFundTransfer;
+      devFundTransfer.address = CryptoNote::FUEGO_DEV_FUND_ADDRESS;
+      devFundTransfer.amount = CryptoNote::parameters::ALIAS_REGISTRATION_FEE;
+      transfers.push_back(devFundTransfer);
+    }
+
+    std::vector<CryptoNote::TransactionMessage> messages;
+    uint64_t fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+    uint64_t mixIn = 0;
+    uint64_t unlockTimestamp = 0;
+    uint64_t ttl = 0;
+    Crypto::SecretKey transactionSK;
+
+    CryptoNote::TransactionId tx = m_wallet->sendTransaction(transactionSK, transfers, fee, extraString, mixIn, unlockTimestamp, messages, ttl);
+
+    if (tx == WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+      fail_msg_writer() << "Failed to create alias registration transaction.";
+      return true;
+    }
+
+    std::error_code sendError = sent.wait(tx);
+    removeGuard.removeObserver();
+
+    if (sendError) {
+      fail_msg_writer() << "Alias registration failed: " << sendError.message();
+      return true;
+    }
+
+    CryptoNote::WalletLegacyTransaction txInfo;
+    m_wallet->getTransaction(tx, txInfo);
+    success_msg_writer(true) << "";
+    success_msg_writer(true) << "@ Alias registered successfully!";
+    success_msg_writer(true) << "  Alias: @" << alias;
+    success_msg_writer(true) << "  TX Hash: " << Common::podToHex(txInfo.hash);
+    success_msg_writer(true) << "  The alias will be active after the transaction is confirmed.";
+
+    try {
+      CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file);
+    } catch (const std::exception& e) {
+      fail_msg_writer() << e.what();
+      return true;
+    }
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Alias registration error: " << e.what();
+  }
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::lookup_alias(const std::vector<std::string> &args) {
+  if (args.size() != 1) {
+    fail_msg_writer() << "Usage: lookup_alias <alias_or_address>";
+    return true;
+  }
+
+  std::string query = args[0];
+
+  try {
+    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+
+    // If query looks like an address (long string), look up by address
+    if (query.length() > 20) {
+      COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request req;
+      COMMAND_RPC_GET_ALIAS_BY_ADDRESS::response res;
+      req.address = query;
+      invokeJsonCommand(httpClient, "/get_alias_by_address", req, res);
+
+      if (res.found) {
+        success_msg_writer() << "@ Alias found:";
+        success_msg_writer() << "  Alias:    @" << res.alias;
+        success_msg_writer() << "  Address:  " << res.address;
+        success_msg_writer() << "  Type:     " << (res.alias_type == 0 ? "Elderfier" : "Regular");
+        success_msg_writer() << "  Block:    " << res.registered_block;
+      } else {
+        fail_msg_writer() << "No alias registered for that address.";
+      }
+    } else {
+      // Look up by alias name
+      COMMAND_RPC_GET_ALIAS::request req;
+      COMMAND_RPC_GET_ALIAS::response res;
+      req.alias = query;
+      invokeJsonCommand(httpClient, "/get_alias", req, res);
+
+      if (res.found) {
+        success_msg_writer() << "@ Alias found:";
+        success_msg_writer() << "  Alias:    @" << res.alias;
+        success_msg_writer() << "  Address:  " << res.address;
+        success_msg_writer() << "  Type:     " << (res.alias_type == 0 ? "Elderfier" : "Regular");
+        success_msg_writer() << "  Block:    " << res.registered_block;
+      } else {
+        fail_msg_writer() << "Alias @" << query << " not found.";
+      }
+    }
+  } catch (const ConnectException&) {
+    printConnectionError();
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Failed to look up alias: " << e.what();
+  }
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::list_aliases(const std::vector<std::string> &args) {
+  try {
+    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+
+    COMMAND_RPC_GET_ALL_ALIASES::request req;
+    COMMAND_RPC_GET_ALL_ALIASES::response res;
+    invokeJsonCommand(httpClient, "/get_all_aliases", req, res);
+
+    if (res.aliases.empty()) {
+      success_msg_writer() << "No aliases registered on the network yet.";
+      return true;
+    }
+
+    success_msg_writer() << "";
+    success_msg_writer() << "Registered @ Aliases (" << res.total << " total):";
+    success_msg_writer() << "────────────────────────────────────────────────";
+
+    for (const auto& entry : res.aliases) {
+      std::string typeStr = (entry.alias_type == 0) ? "EFier" : "User ";
+      success_msg_writer() << "  @" << entry.alias
+                           << "  [" << typeStr << "]"
+                           << "  Block: " << entry.registered_block
+                           << "  Addr: " << entry.address.substr(0, 12) << "...";
+    }
+
+    success_msg_writer() << "────────────────────────────────────────────────";
+    success_msg_writer() << "Total: " << res.total << " aliases";
+
+  } catch (const ConnectException&) {
+    printConnectionError();
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Failed to list aliases: " << e.what();
+  }
+
+  return true;
 }
 
 //----------------------------------------------------------------------------------------------------

@@ -125,6 +125,11 @@ namespace CryptoNote
     // Users should NOT manually create commitments (they're auto-embedded in tx_extra)
     // DISABLED: bool create_cold_secret(const std::vector<std::string> &args);
 
+    // @ Alias system commands
+    bool register_alias(const std::vector<std::string> &args);
+    bool lookup_alias(const std::vector<std::string> &args);
+    bool list_aliases(const std::vector<std::string> &args);
+
     // USER-FACING: Proof generation from deposits
     // Users MUST generate STARK proofs from their deposit transactions for L2 claims
     bool generate_proof(const std::vector<std::string> &args);

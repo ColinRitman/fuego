@@ -59,6 +59,9 @@ namespace CryptoNote
 		const uint64_t BURN_FEE_TIER_2 = UINT64_C(800000);  /* 0.08 XFG / (800Kħ) for 80 XFG burns */
 		const uint64_t BURN_FEE_TIER_3 = UINT64_C(8000000);  /* 0.8 XFG / (8 Milliħeat) for 800 XFG burns */
 
+		// Fire Alias registration fee: 1 XFG for regular users, free for Elderfiers
+		const uint64_t ALIAS_REGISTRATION_FEE = COIN;  /* 1 XFG sent to Fuego Developer Fund */
+
 		const uint64_t DEFAULT_DUST_THRESHOLD = UINT64_C(10000); /* < 0.001 XFG ( under 1Kħ is dust) */
 		const uint64_t DEFAULT_DUST_THRESHOLD_1KH = UINT64_C(1000); /* < 0.0001 XFG ( under 1Kħ is dust) */
 
@@ -142,6 +145,8 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
       const uint32_t DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
        const uint32_t DEPOSIT_TERM_YIELD = COLD_MIN_TERM;     // 16k blocks (3 mo) for Fuego Untraceable Custom Interest Assets (FuCIA) deposits
         const uint32_t DEPOSIT_TERM_BURN = DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
+        const uint32_t DEPOSIT_TERM_ELDERFIER_STAKING = 8;  // 0xEF deposits: term=8 (8-block minimum lock), then unstakeable on demand, 1000-block review
+        const uint32_t ELDERFIER_STAKING_REVIEW_WINDOW = 1000;  // 1000 blocks (~5.5 days) for review before unstaking completes
 
         const uint32_t DEPOSIT_TERM_MIN = 16000;  // New 3-month term, slightly <90 days of Fuego blocks (180 blks per day)
         const uint32_t DEPOSIT_TERM_MAX   = 65000;   // ~1-year using 360(+1)days/yr (65k blocks)
@@ -202,6 +207,9 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
  		const char MINER_CONFIG_FILE_NAME[] = "miner_conf.json";
 
 	} // namespace parameters
+
+	// Fuego Developer Fund wallet — receives alias registration fees
+	const char FUEGO_DEV_FUND_ADDRESS[] = "fireVHx639SLMhzmBoJ8drTXbVyv2eRG6A8aMLc1taTiRNwk8pnwXpBDUSjH1dT5fg7yVVZrKkvm31CmigAMdVDg7sgxJmAUNp";
 
     const char CRYPTONOTE_NAME[] = "fuego";
 	const char GENESIS_COINBASE_TX_HEX[] = "013c01ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101bd4e0bf284c04d004fd016a21405046e8267ef81328cabf3017c4c24b273b25a";
@@ -306,6 +314,8 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
 
 	const uint32_t TESTNET_DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
+    const uint32_t TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING = 0;  // 0xEF deposits: term=0 (unstakeable on demand), 10-block review window
+    const uint32_t TESTNET_ELDERFIER_STAKING_REVIEW_WINDOW = 10;  // 10 blocks (fast review for testing)
  	const uint32_t TESTNET_DEPOSIT_MIN_TERM_v1 = 5480;  //blocks
  	const uint32_t TESTNET_DEPOSIT_MAX_TERM_v1 = 5480;
  	const uint32_t TESTNET_DEPOSIT_MIN_TERM = 2;  //blocks		 /* one month=5480

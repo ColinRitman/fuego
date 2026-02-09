@@ -306,11 +306,16 @@ namespace CryptoNote
     struct request
     {
       Crypto::Hash merkle_root;              // Current merkle root hash
-      Crypto::Signature signature;           // ECDSA signature of merkle root
+      Crypto::Signature signature;           // Ed25519 signature of merkle root
       uint8_t elderfier_id;                  // Elderfier ID (0-255) - privacy preserving
       uint64_t block_height;                // Block height when signed
       uint64_t timestamp;                   // Signature generation timestamp
       uint32_t version;                     // Message version (1)
+
+      // Post-quantum hybrid extension (backward compatible - old nodes ignore)
+      uint8_t sig_algorithm = 0;            // 0=Ed25519, 1=ML-DSA-65
+      std::vector<uint8_t> pq_signature;    // Empty for Ed25519, 3293 bytes for ML-DSA-65
+      std::vector<uint8_t> pq_pubkey;       // Empty for Ed25519, 1952 bytes for ML-DSA-65
 
       void serialize(ISerializer& s) {
         KV_MEMBER(merkle_root)
@@ -319,6 +324,9 @@ namespace CryptoNote
         KV_MEMBER(block_height)
         KV_MEMBER(timestamp)
         KV_MEMBER(version)
+        KV_MEMBER(sig_algorithm)
+        KV_MEMBER(pq_signature)
+        KV_MEMBER(pq_pubkey)
       }
     };
 

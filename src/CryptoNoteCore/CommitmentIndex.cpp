@@ -1,11 +1,26 @@
-// Copyright (c) 2017-2025 Elderfire Privacy Council
-// Simplified CommitmentIndex for Phase 3 Elderfier Consensus
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2020-2026 Elderfire Privacy Group
+//
+// This file is part of Fuego.
+//
+// Fuego is free software distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+// PURPOSE. You can redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "CommitmentIndex.h"
 #include "Serialization/ISerializer.h"
 #include "Common/StringTools.h"
 #include "TransactionExtra.h"
+#include "crypto/hash.h"
 #include <set>
+#include <algorithm>
+#include <cstring>
 
 namespace CryptoNote {
 
@@ -28,15 +43,49 @@ CommitmentIndex::~CommitmentIndex() {
 void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
   std::lock_guard<std::mutex> lock(m_mutex);
 
-  // Track 0xEC deposits for elderfier registration
+  std::string commitHex = Common::podToHex(entry.commitment);
+
+  // Skip duplicate commitments
+  if (m_commitments.find(commitHex) != m_commitments.end()) {
+    return;
+  }
+
+  // Store the commitment
+  m_commitments[commitHex] = entry;
+  m_merkle_leaves.push_back(entry.commitment);
+  m_heightIndex[entry.blockHeight].push_back(commitHex);
+
+  // Update type counters
+  switch (entry.type) {
+    case CommitmentEntry::Type::HEAT:
+      m_heat_count++;
+      break;
+    case CommitmentEntry::Type::COLD:
+      m_cold_count++;
+      break;
+    case CommitmentEntry::Type::ELDERFIER_STAKING:
+      m_elderfier_stake_count++;
+      break;
+  }
+
+  // Update highest block height
+  if (entry.blockHeight > m_current_block_height) {
+    m_current_block_height = entry.blockHeight;
+  }
+
+  // Recompute merkle root after adding new leaf
+  m_current_merkle_root = computeMerkleRootInternal();
+
+  // Track 0xEF deposits for elderfier registration
   if (isElderfierRegistrationDeposit(entry)) {
-    std::string wallet = getWalletAddressFromTx(entry.txHash);
+    // Use senderAddress from the CommitmentEntry (populated from TransactionExtraElderfierDeposit)
+    const std::string& wallet = entry.senderAddress;
     if (!wallet.empty()) {
       m_pendingElderfierStakes[wallet].deposit_count++;
       m_pendingElderfierStakes[wallet].total_amount += entry.amount;
 
-      // Auto-register when 5 deposits of 4000 XFG total are confirmed
-      const uint64_t REGISTRATION_AMOUNT = 4000 * 100000;  // 4000 XFG in atomic units
+      // Auto-register when five 800 XFG deposits for 4000 XFG total are confirmed
+      const uint64_t REGISTRATION_AMOUNT = 4000 * 10000000;  // 4000 XFG in atomic units
       if (m_pendingElderfierStakes[wallet].deposit_count == 5 &&
           m_pendingElderfierStakes[wallet].total_amount >= REGISTRATION_AMOUNT) {
         tryRegisterElderfier(wallet, m_pendingElderfierStakes[wallet].signing_pubkey);
@@ -85,7 +134,8 @@ void CommitmentIndex::checkAndFlushThreshold(uint64_t current_block_height) {
   uint64_t total_elderfiers = m_elderfier_ids.size();
   uint64_t consensus_pct = (valid_signatures * 100) / total_elderfiers;
 
-  // TODO: Implement fee distribution and signature cache flushing at 69% threshold
+  // At 69% threshold: flush stale signatures (for non-current roots)
+  // Fee distribution happens in finalizeEpoch() at epoch boundaries
   if (consensus_pct >= 69) {
     // Flush signatures for current root
     std::vector<std::pair<uint8_t, std::string>> to_remove;
@@ -172,83 +222,181 @@ std::vector<uint8_t> CommitmentIndex::getPendingElderfierIds() const {
 }
 
 bool CommitmentIndex::isElderfierRegistrationDeposit(const CommitmentEntry& entry) {
-  // Check for stake deposits (which can be used for elderfier registration)
-  // with 0xEC tag
-  return entry.type == CommitmentEntry::Type::YIELD && entry.targetChainId == 0xEC;
+  // Check for 0xEF deposits (used for elderfier registration)
+  return entry.type == CommitmentEntry::Type::ELDERFIER_STAKING;
 }
 
 std::string CommitmentIndex::getWalletAddressFromTx(const Crypto::Hash& txHash) {
-  // NOTE: This is a placeholder that requires Core reference to look up transactions
-  // In full implementation, we would:
-  // 1. Query transaction from blockchain using Core::getTransaction()
-  // 2. Extract transaction extra field
-  // 3. Parse for TransactionExtraElderfierDeposit
-  // 4. Return elderfierAddress field
-  //
-  // For now, return empty string - the actual wallet address is obtained from
-  // the transaction inputs (which contain the sender's wallet address in signatures)
-  // This can only be determined during block validation when we have full context
-
-  // TODO: Implement with Core reference:
-  //   TransactionExtraElderfierDeposit deposit;
-  //   if (getElderfierDepositFromExtra(tx.extra, deposit)) {
-  //     return deposit.elderfierAddress;
-  //   }
-
-  return "";  // Placeholder - requires Core integration
+  // Look up the commitment entry by txHash to retrieve the senderAddress
+  // that was populated from TransactionExtraElderfierDeposit::elderfierAddress
+  // during addCommitment() from Blockchain::pushBlock()
+  std::string txHex = Common::podToHex(txHash);
+  for (const auto& pair : m_commitments) {
+    if (Common::podToHex(pair.second.txHash) == txHex && !pair.second.senderAddress.empty()) {
+      return pair.second.senderAddress;
+    }
+  }
+  return "";
 }
 
 bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Crypto::PublicKey& pubkey) {
-  // When 5 deposits of 800 XFG each (4000 XFG total) are confirmed:
-  // 1. Create ElderfierDepositData with:
-  //    - elderfierPublicKey = pubkey
-  //    - elderfierAddress = wallet
-  //    - depositAmount = 4000 * 100000 (in atomic units)
-  //    - depositTimestamp = current block height
-  //    - serviceId = STANDARD_ADDRESS
-  //
-  // 2. Call IEldernodeIndexManager::addElderfierDeposit(deposit)
-  // 3. Call IEldernodeIndexManager::addElderfierToENindex(deposit)
-  // 4. Assign EFiD (0-255) from manager's internal counter
-  // 5. Add EFiD to m_elderfier_ids list
-  // 6. Return true on success
-  //
-  // NOTE: This requires Core reference in CommitmentIndex constructor
-  //       and proper integration with Blockchain/Core lifecycle
+  // Check if this address can register (not already registered, not void)
+  // Note: caller already holds m_mutex
 
-  // TODO: Implement with EldernodeIndexManager:
-  //   ElderfierDepositData deposit;
-  //   deposit.elderfierPublicKey = pubkey;
-  //   deposit.elderfierAddress = wallet;
-  //   deposit.depositAmount = REGISTRATION_AMOUNT;
-  //   deposit.depositTimestamp = m_current_block_height;
-  //   deposit.serviceId.type = ElderfierServiceId::Type::STANDARD_ADDRESS;
-  //   deposit.serviceId.address = wallet;
-  //
-  //   if (m_eldernodeManager->addElderfierDeposit(deposit) &&
-  //       m_eldernodeManager->addElderfierToENindex(deposit)) {
-  //     uint8_t efid = getNextEFiD();
-  //     m_elderfier_ids.push_back(efid);
-  //     return true;
-  //   }
+  // Check active registrations
+  if (m_elderfierRegistrations.find(wallet) != m_elderfierRegistrations.end()) {
+    return false;  // Already registered
+  }
 
-  return true;  // Placeholder - requires Core/EldernodeIndexManager integration
+  // Check void registrations
+  for (const auto& vr : m_voidRegistrations) {
+    if (vr.first == wallet) {
+      return false;  // Address permanently VOID
+    }
+  }
+
+  // Assign next available EFiD (0-255)
+  if (m_elderfier_ids.size() >= 256) {
+    return false;  // Maximum 256 Elderfiers reached
+  }
+
+  // Find next unused EFiD
+  std::set<uint8_t> used_ids(m_elderfier_ids.begin(), m_elderfier_ids.end());
+  uint8_t efid = 0;
+  while (used_ids.count(efid) > 0 && efid < 255) {
+    efid++;
+  }
+  if (used_ids.count(efid) > 0) {
+    return false;  // All EFiDs exhausted
+  }
+
+  // Register the Elderfier
+  ElderfierRegistration reg;
+  reg.address = wallet;
+  reg.elderfier_id = efid;
+  reg.status = ElderfierStatus::ACTIVE;
+  reg.unstaking_start_block = 0;
+  reg.unstaking_review_window = 0;
+
+  m_elderfierRegistrations[wallet] = reg;
+  m_elderfier_ids.push_back(efid);
+  m_elderfierAddresses[efid] = wallet;
+
+  return true;
 }
 
-// Legacy commitment methods (for backward compatibility)
+// ============================================================================
+// COMMITMENT STORAGE AND MERKLE TREE
+// ============================================================================
+
 Crypto::Hash CommitmentIndex::computeMerkleRoot() const {
   std::lock_guard<std::mutex> lock(m_mutex);
   return m_current_merkle_root;
 }
 
+Crypto::Hash CommitmentIndex::computeMerkleRootInternal() const {
+  // Build binary merkle tree from leaves (caller must hold m_mutex)
+  if (m_merkle_leaves.empty()) {
+    return Crypto::Hash();
+  }
+
+  std::vector<Crypto::Hash> level = m_merkle_leaves;
+
+  while (level.size() > 1) {
+    std::vector<Crypto::Hash> next_level;
+
+    for (size_t i = 0; i < level.size(); i += 2) {
+      if (i + 1 < level.size()) {
+        // Hash pair: H(left || right)
+        uint8_t combined[64];
+        memcpy(combined, level[i].data, 32);
+        memcpy(combined + 32, level[i + 1].data, 32);
+        Crypto::Hash parent;
+        Crypto::cn_fast_hash(combined, 64, parent);
+        next_level.push_back(parent);
+      } else {
+        // Odd leaf: promote to next level (duplicate hash with itself)
+        uint8_t combined[64];
+        memcpy(combined, level[i].data, 32);
+        memcpy(combined + 32, level[i].data, 32);
+        Crypto::Hash parent;
+        Crypto::cn_fast_hash(combined, 64, parent);
+        next_level.push_back(parent);
+      }
+    }
+
+    level = next_level;
+  }
+
+  return level[0];
+}
+
 std::vector<Crypto::Hash> CommitmentIndex::getMerkleProof(const Crypto::Hash& commitment) const {
   std::lock_guard<std::mutex> lock(m_mutex);
-  return {};  // TODO: Implement if needed
+
+  if (m_merkle_leaves.empty()) {
+    return {};
+  }
+
+  // Find leaf index
+  size_t leaf_idx = SIZE_MAX;
+  for (size_t i = 0; i < m_merkle_leaves.size(); ++i) {
+    if (m_merkle_leaves[i] == commitment) {
+      leaf_idx = i;
+      break;
+    }
+  }
+
+  if (leaf_idx == SIZE_MAX) {
+    return {};  // Commitment not found
+  }
+
+  // Build proof by walking up the merkle tree
+  std::vector<Crypto::Hash> proof;
+  std::vector<Crypto::Hash> level = m_merkle_leaves;
+  size_t idx = leaf_idx;
+
+  while (level.size() > 1) {
+    // Find sibling
+    size_t sibling_idx;
+    if (idx % 2 == 0) {
+      sibling_idx = (idx + 1 < level.size()) ? idx + 1 : idx;  // Right sibling, or self if odd
+    } else {
+      sibling_idx = idx - 1;  // Left sibling
+    }
+    proof.push_back(level[sibling_idx]);
+
+    // Compute next level
+    std::vector<Crypto::Hash> next_level;
+    for (size_t i = 0; i < level.size(); i += 2) {
+      uint8_t combined[64];
+      memcpy(combined, level[i].data, 32);
+      if (i + 1 < level.size()) {
+        memcpy(combined + 32, level[i + 1].data, 32);
+      } else {
+        memcpy(combined + 32, level[i].data, 32);  // Duplicate for odd
+      }
+      Crypto::Hash parent;
+      Crypto::cn_fast_hash(combined, 64, parent);
+      next_level.push_back(parent);
+    }
+
+    idx = idx / 2;
+    level = next_level;
+  }
+
+  return proof;
 }
 
 size_t CommitmentIndex::getLeafIndex(const Crypto::Hash& commitment) const {
   std::lock_guard<std::mutex> lock(m_mutex);
-  return 0;  // TODO: Implement if needed
+
+  for (size_t i = 0; i < m_merkle_leaves.size(); ++i) {
+    if (m_merkle_leaves[i] == commitment) {
+      return i;
+    }
+  }
+  return SIZE_MAX;  // Not found
 }
 
 CommitmentIndex::Height CommitmentIndex::highestBlock() const {
@@ -258,45 +406,103 @@ CommitmentIndex::Height CommitmentIndex::highestBlock() const {
 
 size_t CommitmentIndex::rollbackToHeight(Height h) {
   std::lock_guard<std::mutex> lock(m_mutex);
-  // TODO: Implement rollback if needed
-  return 0;
+
+  size_t removed = 0;
+
+  // Find all commitments above height h and remove them
+  auto height_it = m_heightIndex.upper_bound(h);
+  while (height_it != m_heightIndex.end()) {
+    for (const auto& commitHex : height_it->second) {
+      auto it = m_commitments.find(commitHex);
+      if (it != m_commitments.end()) {
+        // Decrement type counters
+        switch (it->second.type) {
+          case CommitmentEntry::Type::HEAT: m_heat_count--; break;
+          case CommitmentEntry::Type::COLD: m_cold_count--; break;
+          case CommitmentEntry::Type::ELDERFIER_STAKING: m_elderfier_stake_count--; break;
+        }
+        m_commitments.erase(it);
+        removed++;
+      }
+    }
+    height_it = m_heightIndex.erase(height_it);
+  }
+
+  // Rebuild merkle leaves from remaining commitments (ordered by block height)
+  m_merkle_leaves.clear();
+  for (const auto& height_pair : m_heightIndex) {
+    for (const auto& commitHex : height_pair.second) {
+      auto it = m_commitments.find(commitHex);
+      if (it != m_commitments.end()) {
+        m_merkle_leaves.push_back(it->second.commitment);
+      }
+    }
+  }
+
+  // Update block height and merkle root
+  if (!m_heightIndex.empty()) {
+    m_current_block_height = m_heightIndex.rbegin()->first;
+  } else {
+    m_current_block_height = 0;
+  }
+  m_current_merkle_root = computeMerkleRootInternal();
+
+  return removed;
 }
 
 void CommitmentIndex::clear() {
   std::lock_guard<std::mutex> lock(m_mutex);
+  m_commitments.clear();
+  m_merkle_leaves.clear();
+  m_heightIndex.clear();
+  m_heat_count = 0;
+  m_cold_count = 0;
+  m_elderfier_stake_count = 0;
   m_signatures.clear();
   m_root_first_seen_block.clear();
   m_pendingElderfierStakes.clear();
   m_elderfier_ids.clear();
+  m_aliases.clear();
+  m_addressToAlias.clear();
+  m_elderfierRegistrations.clear();
+  m_voidRegistrations.clear();
+  m_epochHistory.clear();
+  m_currentEpochTotalFees = 0;
+  m_current_merkle_root = Crypto::Hash();
+  m_current_block_height = 0;
 }
 
 CommitmentEntry CommitmentIndex::getByCommitment(const Crypto::Hash& commitment) const {
   std::lock_guard<std::mutex> lock(m_mutex);
-  // TODO: Implement if needed
+
+  std::string commitHex = Common::podToHex(commitment);
+  auto it = m_commitments.find(commitHex);
+  if (it != m_commitments.end()) {
+    return it->second;
+  }
   return CommitmentEntry();
 }
 
 bool CommitmentIndex::hasCommitment(const Crypto::Hash& commitment) const {
   std::lock_guard<std::mutex> lock(m_mutex);
-  // TODO: Implement if needed
-  return false;
+
+  std::string commitHex = Common::podToHex(commitment);
+  return m_commitments.find(commitHex) != m_commitments.end();
 }
 
 size_t CommitmentIndex::size() const {
   std::lock_guard<std::mutex> lock(m_mutex);
-  return m_signatures.size();
+  return m_commitments.size();
 }
 
 size_t CommitmentIndex::heatCount() const {
   std::lock_guard<std::mutex> lock(m_mutex);
-  // TODO: Implement if needed
-  return 0;
+  return m_heat_count;
 }
 
 size_t CommitmentIndex::coldCount() const {
   std::lock_guard<std::mutex> lock(m_mutex);
-  // TODO: Implement if needed
-  return 0;
+  return m_cold_count;
 }
 
 // ============================================================================
@@ -440,6 +646,247 @@ uint64_t CommitmentIndex::getTotalFeesDistributedAllTime() const {
   }
 
   return total;
+}
+
+// ============================================================================
+// ELDERFIER REGISTRATION LIFECYCLE MANAGEMENT
+// ============================================================================
+
+bool CommitmentIndex::isAddressRegisteredAsElderfier(const std::string& address, uint8_t efid) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  auto it = m_elderfierRegistrations.find(address);
+  if (it == m_elderfierRegistrations.end()) {
+    return false;
+  }
+
+  return it->second.elderfier_id == efid &&
+         it->second.status == ElderfierStatus::ACTIVE;
+}
+
+bool CommitmentIndex::canAddressRegisterNewElderfier(const std::string& address) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  // Check if any registration (active or unstaking) exists for this address
+  if (m_elderfierRegistrations.find(address) != m_elderfierRegistrations.end()) {
+    return false;  // Already registered (active or unstaking)
+  }
+
+  // Check void set - any pair with this address means permanently locked out
+  for (const auto& vr : m_voidRegistrations) {
+    if (vr.first == address) {
+      return false;  // Address permanently VOID — cannot re-register
+    }
+  }
+
+  return true;
+}
+
+bool CommitmentIndex::initiateElderfierUnstaking(const std::string& address, uint8_t efid,
+                                                  uint32_t currentBlock, uint32_t reviewWindow) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  auto it = m_elderfierRegistrations.find(address);
+  if (it == m_elderfierRegistrations.end()) {
+    return false;
+  }
+
+  if (it->second.elderfier_id != efid) {
+    return false;
+  }
+
+  if (it->second.status != ElderfierStatus::ACTIVE) {
+    return false;  // Can only unstake from ACTIVE state
+  }
+
+  it->second.status = ElderfierStatus::UNSTAKING;
+  it->second.unstaking_start_block = currentBlock;
+  it->second.unstaking_review_window = reviewWindow;
+  return true;
+}
+
+bool CommitmentIndex::completeElderfierUnstaking(const std::string& address, uint8_t efid,
+                                                  uint32_t currentBlock) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  auto it = m_elderfierRegistrations.find(address);
+  if (it == m_elderfierRegistrations.end()) {
+    return false;
+  }
+
+  if (it->second.elderfier_id != efid) {
+    return false;
+  }
+
+  if (!it->second.canCompleteUnstaking(currentBlock)) {
+    return false;  // Review window not elapsed yet
+  }
+
+  // Move to VOID status permanently
+  m_voidRegistrations.insert(std::make_pair(address, efid));
+
+  // Remove EFiD from active list
+  auto eid_it = std::find(m_elderfier_ids.begin(), m_elderfier_ids.end(), efid);
+  if (eid_it != m_elderfier_ids.end()) {
+    m_elderfier_ids.erase(eid_it);
+  }
+
+  // Remove from registrations map (void set now tracks it permanently)
+  m_elderfierRegistrations.erase(it);
+  return true;
+}
+
+ElderfierStatus CommitmentIndex::getElderfierStatus(const std::string& address, uint8_t efid) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  // Check active registrations first
+  auto it = m_elderfierRegistrations.find(address);
+  if (it != m_elderfierRegistrations.end() && it->second.elderfier_id == efid) {
+    return it->second.status;
+  }
+
+  // Check void set
+  if (m_voidRegistrations.count(std::make_pair(address, efid)) > 0) {
+    return ElderfierStatus::VOID;
+  }
+
+  // Not found at all — return VOID as the default "not registered" state
+  return ElderfierStatus::VOID;
+}
+
+bool CommitmentIndex::isElderfierInReviewWindow(const std::string& address, uint8_t efid,
+                                                 uint32_t currentBlock) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  auto it = m_elderfierRegistrations.find(address);
+  if (it == m_elderfierRegistrations.end() || it->second.elderfier_id != efid) {
+    return false;
+  }
+
+  return it->second.isInReviewWindow(currentBlock);
+}
+
+bool CommitmentIndex::isAddressBlacklisted(const std::string& address, uint8_t efid) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  return m_voidRegistrations.count(std::make_pair(address, efid)) > 0;
+}
+
+std::vector<ElderfierRegistration> CommitmentIndex::getElderfierRegistrationsByAddress(
+    const std::string& address) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::vector<ElderfierRegistration> results;
+
+  auto it = m_elderfierRegistrations.find(address);
+  if (it != m_elderfierRegistrations.end()) {
+    results.push_back(it->second);
+  }
+
+  return results;
+}
+
+// ============================================================================
+// @ ALIAS SYSTEM
+// ============================================================================
+
+bool CommitmentIndex::registerAlias(const AliasEntry& entry) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  // Check alias does not already exist
+  if (m_aliases.find(entry.alias) != m_aliases.end()) {
+    return false;  // Alias already taken
+  }
+
+  // Check address does not already have an alias
+  if (m_addressToAlias.find(entry.ownerAddress) != m_addressToAlias.end()) {
+    return false;  // Address already has an alias
+  }
+
+  // Validate format based on alias type
+  if (entry.alias.length() != 8) {
+    return false;  // Must be exactly 8 characters
+  }
+
+  if (entry.aliasType == 0) {
+    // Elderfier alias: [A-Z0-9] only (ALLCAPS)
+    for (char c : entry.alias) {
+      bool isUpper = (c >= 'A' && c <= 'Z');
+      bool isDigit = (c >= '0' && c <= '9');
+      if (!isUpper && !isDigit) {
+        return false;
+      }
+    }
+
+    // Must be an active elderfier to register CAPS alias
+    auto reg_it = m_elderfierRegistrations.find(entry.ownerAddress);
+    if (reg_it == m_elderfierRegistrations.end() ||
+        reg_it->second.status != ElderfierStatus::ACTIVE) {
+      return false;  // Not an active elderfier
+    }
+  } else if (entry.aliasType == 1) {
+    // Regular user alias: [a-z0-9] only (lowercase)
+    for (char c : entry.alias) {
+      bool isLower = (c >= 'a' && c <= 'z');
+      bool isDigit = (c >= '0' && c <= '9');
+      if (!isLower && !isDigit) {
+        return false;
+      }
+    }
+  } else {
+    return false;  // Unknown alias type
+  }
+
+  // Register the alias
+  m_aliases[entry.alias] = entry;
+  m_addressToAlias[entry.ownerAddress] = entry.alias;
+  return true;
+}
+
+bool CommitmentIndex::aliasExists(const std::string& alias) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_aliases.find(alias) != m_aliases.end();
+}
+
+bool CommitmentIndex::addressHasAlias(const std::string& address) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_addressToAlias.find(address) != m_addressToAlias.end();
+}
+
+std::optional<AliasEntry> CommitmentIndex::getAliasByName(const std::string& alias) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  auto it = m_aliases.find(alias);
+  if (it != m_aliases.end()) {
+    return it->second;
+  }
+  return std::nullopt;
+}
+
+std::optional<AliasEntry> CommitmentIndex::getAliasByAddress(const std::string& address) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  auto alias_it = m_addressToAlias.find(address);
+  if (alias_it == m_addressToAlias.end()) {
+    return std::nullopt;
+  }
+
+  auto entry_it = m_aliases.find(alias_it->second);
+  if (entry_it != m_aliases.end()) {
+    return entry_it->second;
+  }
+  return std::nullopt;
+}
+
+std::vector<AliasEntry> CommitmentIndex::getAllAliases() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::vector<AliasEntry> result;
+  result.reserve(m_aliases.size());
+  for (const auto& pair : m_aliases) {
+    result.push_back(pair.second);
+  }
+  return result;
 }
 
 }  // namespace CryptoNote

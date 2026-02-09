@@ -192,6 +192,15 @@ namespace CryptoNote {
     uint64_t getTotalFeesInEscrow() const;
     uint64_t getTotalFeesDistributedAllTime() const;
 
+    // Elderfier registration lifecycle proxies
+    bool canAddressRegisterElderfier(const std::string& address) const;
+
+    // @ Alias system proxies
+    bool aliasExists(const std::string& alias) const;
+    std::optional<AliasEntry> getAliasByName(const std::string& alias) const;
+    std::optional<AliasEntry> getAliasByAddress(const std::string& address) const;
+    std::vector<AliasEntry> getAllAliases() const;
+
     bool is_key_image_spent(const Crypto::KeyImage &key_im);
 
   private:

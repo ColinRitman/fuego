@@ -571,7 +571,7 @@ namespace CryptoNote
       // ALL deposits MUST have a commitment tag in tx_extra:
       // - 0x08 (HEAT) for FOREVER/burn deposits
       // - 0xCD (COLD) for term deposits
-      // - 0xEC (ELDERFIER) for staking deposits
+      // - 0xEF (ELDERFIER) for staking deposits
       // A deposit without proper commitment is USELESS and must FAIL.
 
       std::vector<uint8_t> generatedExtra;
@@ -640,7 +640,7 @@ namespace CryptoNote
 
       // Final safety check - deposit MUST have valid commitment
       if (!hasValidCommitment) {
-        throw std::runtime_error("Deposit transaction rejected - no valid commitment tag (0x08/0xCD/0xEC) in tx_extra");
+        throw std::runtime_error("Deposit transaction rejected - no valid commitment tag (0x08/0xCD/0xEF) in tx_extra");
       }
 
       transactionInfo.hash = transaction->getTransactionHash();

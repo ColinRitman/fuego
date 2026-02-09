@@ -506,6 +506,33 @@ std::vector<uint8_t> Blockchain::getPendingElderfierIds() const {
   return m_commitmentIndex.getPendingElderfierIds();
 }
 
+// Elderfier registration lifecycle proxy
+bool Blockchain::canAddressRegisterElderfier(const std::string& address) const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.canAddressRegisterNewElderfier(address);
+}
+
+// @ Alias system proxies
+bool Blockchain::aliasExists(const std::string& alias) const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.aliasExists(alias);
+}
+
+std::optional<AliasEntry> Blockchain::getAliasByName(const std::string& alias) const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getAliasByName(alias);
+}
+
+std::optional<AliasEntry> Blockchain::getAliasByAddress(const std::string& address) const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getAliasByAddress(address);
+}
+
+std::vector<AliasEntry> Blockchain::getAllAliases() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getAllAliases();
+}
+
 bool Blockchain::init(const std::string& config_folder, bool load_existing) {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
   if (!config_folder.empty() && !Tools::create_directories_if_necessary(config_folder)) {
@@ -2686,7 +2713,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
 
     for (const auto &tx : block.transactions)
     {
-      // Parse transaction extra to detect burn types (0X08 0xE8)
+      // Parse transaction extra to detect burn types (0X08 0xEF)
       std::vector<TransactionExtraField> extraFields;
       if (parseTransactionExtra(tx.tx.extra, extraFields)) {
         for (const auto& field : extraFields) {
@@ -2730,7 +2757,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             entry.blockHeight = block.height;
             entry.amount = coldCommit.amount;
             entry.term = coldCommit.term;
-            entry.type = CommitmentEntry::Type::YIELD;
+            entry.type = CommitmentEntry::Type::COLD;
             entry.targetChainId = coldCommit.claimChainCode;
             m_commitmentIndex.addCommitment(entry);
 
@@ -2744,17 +2771,31 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
               logger(DEBUGGING) << "COLD fee extracted: " << coldFee << " satoshi (0.1% of " << coldCommit.amount << ")";
             }
           }
-          // Note: TX_EXTRA_ELDERFIER_DEPOSIT (0xEC) is NOT added to ethernalXFG initially
+          // Note: TX_EXTRA_ELDERFIER_DEPOSIT (0xEF) is NOT added to ethernalXFG initially
           // because it represents slashable staking. However, if the deposit is later
           // slashed via an Elderfier message with quorum consensus, the slashed
           // portion WILL be added to ethernalXFG as it becomes a permanent burn.
           else if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
             const auto& elderfierDeposit = boost::get<TransactionExtraElderfierDeposit>(field);
-            // Use large burn amount for logging (800 XFG)
-            logger(DEBUGGING) << "Detected ElderFyre StayKing Deposit: " << parameters::BURN_DEPOSIT_LARGE_AMOUNT
-                             << " XFG (slashable, NOT added to ethernalXFG unless slashed)";
+
+            // Index the 0xEF staking deposit into CommitmentIndex for registration tracking
+            Crypto::Hash txHash = getObjectHash(tx.tx);
+            CommitmentEntry entry;
+            entry.commitment = elderfierDeposit.depositHash;
+            entry.txHash = txHash;
+            entry.blockHeight = block.height;
+            entry.amount = elderfierDeposit.depositAmount;
+            entry.term = 0xFFFFFFFF;  // Staking is locked until explicit unstaking
+            entry.type = CommitmentEntry::Type::ELDERFIER_STAKING;
+            entry.targetChainId = 0;  // No cross-chain claim for staking
+            entry.senderAddress = elderfierDeposit.elderfierAddress;
+            m_commitmentIndex.addCommitment(entry);
+
+            logger(DEBUGGING) << "Elderfier staking deposit indexed: " << Common::podToHex(elderfierDeposit.depositHash)
+                             << " amount=" << elderfierDeposit.depositAmount
+                             << " (slashable, NOT added to ethernalXFG unless slashed)";
           }
-          // Check for Elderfier messages (0xEF) - may contain slashing decisions
+          // Check for Elderfier messages (0xEC) - may contain slashing decisions
           else if (field.type() == typeid(TransactionExtraElderfierMessage)) {
             const auto& elderfierMsg = boost::get<TransactionExtraElderfierMessage>(field);
 
@@ -2778,6 +2819,29 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
                                << " XFG (" << static_cast<int>(slashingPercentage)
                                << "% of deposit) permanently burned & added to Ethernal Flame";
                 }
+              }
+            }
+          }
+          // Check for @ Alias Registration (0xEA)
+          else if (field.type() == typeid(TransactionExtraAliasRegistration)) {
+            const auto& aliasReg = boost::get<TransactionExtraAliasRegistration>(field);
+
+            if (aliasReg.isValid()) {
+              AliasEntry aliasEntry;
+              aliasEntry.alias = aliasReg.alias;
+              aliasEntry.ownerAddress = aliasReg.ownerAddress;
+              aliasEntry.aliasHash = aliasReg.aliasHash;
+              aliasEntry.addressHash = aliasReg.addressHash;
+              aliasEntry.aliasType = aliasReg.aliasType;
+              aliasEntry.registeredBlock = block.height;
+
+              if (m_commitmentIndex.registerAlias(aliasEntry)) {
+                logger(INFO) << "@ Alias registered in block " << block.height
+                             << ": @" << aliasReg.alias
+                             << " (type=" << static_cast<int>(aliasReg.aliasType) << ")";
+              } else {
+                logger(WARNING) << "@ Alias registration rejected in block " << block.height
+                                << ": @" << aliasReg.alias << " (duplicate or invalid)";
               }
             }
           }
