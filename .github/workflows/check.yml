@@ -296,17 +296,13 @@ jobs:
           mkdir "$build_folder"
           cd "$build_folder"
 
-          # Properly configure CMake for macOS with correct paths
+          # CMake configuration for macOS
           cmake -S .. -B . \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_FLAGS="-mmacosx-version-min=10.12" \
-            -DCMAKE_CXX_FLAGS="-mmacosx-version-min=10.12 -I$(brew --prefix)/include -stdlib=libc++" \
+            -DCMAKE_CXX_FLAGS="-mmacosx-version-min=10.12 -stdlib=libc++" \
             -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch_flag }} \
-            -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
-            -DBOOST_ROOT="$(brew --prefix boost@1.85)" \
-            -DBoost_NO_SYSTEM_PATHS=ON \
-            -DICU_ROOT="$(brew --prefix icu4c)" \
-            -DCMAKE_EXE_LINKER_FLAGS="-L$(brew --prefix boost@1.85)/lib -L$(brew --prefix icu4c)/lib"
+            -DBOOST_ROOT="$(brew --prefix boost@1.85)"
 
           make -j$(sysctl -n hw.ncpu)
           mkdir "$release_name"
