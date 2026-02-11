@@ -18,6 +18,7 @@
 #include "Common/StringTools.h"
 #include "TransactionExtra.h"
 #include "crypto/hash.h"
+#include "CryptoNoteConfig.h"
 #include <set>
 #include <algorithm>
 #include <cstring>
@@ -85,7 +86,7 @@ void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
       m_pendingElderfierStakes[wallet].total_amount += entry.amount;
 
       // Auto-register when five 800 XFG deposits for 4000 XFG total are confirmed
-      const uint64_t REGISTRATION_AMOUNT = 4000 * 10000000;  // 4000 XFG in atomic units
+      const uint64_t REGISTRATION_AMOUNT = CryptoNote::parameters::ELDERKING_CEREMONY_AMOUNT;  // 4000 XFG in atomic units
       if (m_pendingElderfierStakes[wallet].deposit_count == 5 &&
           m_pendingElderfierStakes[wallet].total_amount >= REGISTRATION_AMOUNT) {
         tryRegisterElderfier(wallet, m_pendingElderfierStakes[wallet].signing_pubkey);

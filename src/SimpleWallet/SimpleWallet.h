@@ -75,6 +75,11 @@ namespace CryptoNote
       return msg;
     }
 
+    // @ Alias system commands
+    bool register_alias(const std::vector<std::string> &args);
+    bool lookup_alias(const std::vector<std::string> &args);
+    bool list_aliases(const std::vector<std::string> &args);
+
   private:
 
     void handle_command_line(const boost::program_options::variables_map& vm);
@@ -121,17 +126,10 @@ namespace CryptoNote
     bool list_deposits(const std::vector<std::string> &args);
     bool deposit_info(const std::vector<std::string> &args);
 
-    // INTERNAL ONLY: COLD deposit secret generation
-    // Users should NOT manually create commitments (they're auto-embedded in tx_extra)
-    // DISABLED: bool create_cold_secret(const std::vector<std::string> &args);
-
-    // @ Alias system commands
-    bool register_alias(const std::vector<std::string> &args);
-    bool lookup_alias(const std::vector<std::string> &args);
-    bool list_aliases(const std::vector<std::string> &args);
+    // bool create_cold_secret(const std::vector<std::string> &args);
 
     // USER-FACING: Proof generation from deposits
-    // Users MUST generate STARK proofs from their deposit transactions for L2 claims
+    // Users generate STARKs from deposit transactions for L2 claims
     bool generate_proof(const std::vector<std::string> &args);
 
     bool ask_wallet_create_if_needed();

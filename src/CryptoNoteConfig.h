@@ -60,10 +60,13 @@ namespace CryptoNote
 		const uint64_t BURN_FEE_TIER_3 = UINT64_C(8000000);  /* 0.8 XFG / (8 Milliħeat) for 800 XFG burns */
 
 		// Fire Alias registration fee: 1 XFG for regular users, free for Elderfiers
-		const uint64_t ALIAS_REGISTRATION_FEE = COIN;  /* 1 XFG sent to Fuego Developer Fund */
+		const uint64_t ALIAS_REGISTRATION_FEE = COIN;  /* 1 XFG sent to Fuego Development Fund */
 
-		const uint64_t DEFAULT_DUST_THRESHOLD = UINT64_C(10000); /* < 0.001 XFG ( under 1Kħ is dust) */
-		const uint64_t DEFAULT_DUST_THRESHOLD_1KH = UINT64_C(1000); /* < 0.0001 XFG ( under 1Kħ is dust) */
+		// Elderking ceremony amount: 4000 XFG required for Elderking ceremony
+		const uint64_t ELDERKING_CEREMONY_AMOUNT = UINT64_C(4000) * COIN;  /* 4000 XFG in atomic units */
+
+		const uint64_t DEFAULT_DUST_THRESHOLD_20KH = UINT64_C(20000); /* < 0.002 XFG ( under 20 Kħ is dust) */
+		const uint64_t DEFAULT_DUST_THRESHOLD = UINT64_C(1000); /* < 0.0001 XFG ( under 1 Kħ is dust) v10 */
 
 		const size_t   CRYPTONOTE_COIN_VERSION                       = 1;
 		const size_t   CRYPTONOTE_DISPLAY_DECIMAL_POINT 	         = 7;

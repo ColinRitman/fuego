@@ -351,7 +351,7 @@ namespace CryptoNote
         extraString = std::string(extra.begin(), extra.end());
 
         CryptoNote::TransactionId txId = m_wallet->deposit(
-          CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING,
+          CryptoNote::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING,
           amount_per_deposit,
           fee,
           extraString,

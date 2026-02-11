@@ -302,6 +302,11 @@ namespace CryptoNote
       return addDepositReceiptToExtra(extra, t);
     }
 
+    bool operator()(const TransactionExtraAliasRegistration &t)
+    {
+      return addAliasToExtra(extra, t);
+    }
+
   };
 
   bool writeTransactionExtra(std::vector<uint8_t> &tx_extra, const std::vector<TransactionExtraField> &tx_extra_fields)
@@ -1918,7 +1923,7 @@ namespace CryptoNote
     if (!r) return false;
 
     // Write size + data
-    Tools::write_varint(tx_extra, ba.size());
+    Tools::write_varint(std::back_inserter(tx_extra), ba.size());
     tx_extra.insert(tx_extra.end(), ba.begin(), ba.end());
 
     return true;
@@ -1933,7 +1938,9 @@ namespace CryptoNote
         if (offset >= tx_extra.size()) return false;
 
         uint64_t size = 0;
-        int bytes_read = Tools::read_varint(tx_extra.data() + offset, tx_extra.size() - offset, size);
+        auto begin = tx_extra.begin() + offset;
+        auto end = tx_extra.end();
+        int bytes_read = Tools::read_varint<64, std::vector<uint8_t>::const_iterator, uint64_t>(std::move(begin), std::move(end), size);
         if (bytes_read <= 0) return false;
         offset += bytes_read;
 

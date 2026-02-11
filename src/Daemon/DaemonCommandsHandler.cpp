@@ -339,10 +339,10 @@ std::cout << "**************************************************"<< std::endl;
 std::cout << "Network Hashrate: " << get_mining_speed(hashrate) << ", Difficulty: " << difficulty << std::endl;
 std::cout << "Block Major version: " << (int)majorVersion << ", " << "Alt Blocks: " << alt_blocks_count << std::endl;
 const auto &currency = m_core.currency();
-std::cout << "Total active (unlocked)" << (m_core.currency().isTestnet() ? " TEST:" : " XFG:") << currency.formatAmount(amountOfActiveCoins) << " (" << currency.formatAmount(calculatePercent(currency, amountOfActiveCoins, totalCoinsInNetwork)) << "%)" << std::endl;
-std::cout << "Total Ethereal (burned)" << (m_core.currency().isTestnet() ? " TEST:" : " XFG:") << currency.formatAmount(totalCoinsEthereal) << " (" << currency.formatAmount(calculatePercent(currency, totalCoinsEthereal, totalCoinsInNetwork)) << "%)" << std::endl;
-std::cout << "Total" << (m_core.currency().isTestnet() ? " TEST " : " XFG ") << "locked in COLD Banking : " << currency.formatAmount(totalCoinsOnDeposits) << " (" << currency.formatAmount(calculatePercent(currency, totalCoinsOnDeposits, totalCoinsInNetwork)) << "%)" << std::endl;
-std::cout << "Current amount of" << (m_core.currency().isTestnet() ? " TEST " : " XFG ") << "in Network :  " << currency.formatAmount(totalCoinsInNetwork) << (m_core.currency().isTestnet() ? "TEST" : "XFG") << std::endl;
+std::cout << "Total active (unlocked) : " << currency.formatAmount(amountOfActiveCoins) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (" << currency.formatAmount(calculatePercent(currency, amountOfActiveCoins, totalCoinsInNetwork)) << "%)" << std::endl;
+std::cout << "Total Ethereal (burned) : " << currency.formatAmount(totalCoinsEthereal) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (destroyed & reborn thru future coinbase rewards)" << std::endl;
+std::cout << "Currently locked in COLD Banking : " << currency.formatAmount(totalCoinsOnDeposits) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (" << currency.formatAmount(calculatePercent(currency, totalCoinsOnDeposits, totalCoinsInNetwork)) << "%)" << std::endl;
+std::cout << "All " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " in Network :  " << currency.formatAmount(totalCoinsInNetwork) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << std::endl;
 std::cout << "**************************************************"<< std::endl;
   return true;
 }

@@ -35,56 +35,36 @@ namespace CryptoNote {
   /************************************************************************/
   //-----------------------------------------------------------------------------------------------
   uint64_t getPenalizedAmount(uint64_t amount, size_t medianSize, size_t currentBlockSize) {
-    static_assert(sizeof(size_t) >= sizeof(uint32_t), "size_t is too small");
-    assert(medianSize <= std::numeric_limits<uint32_t>::max());
-    assert(currentBlockSize <= std::numeric_limits<uint32_t>::max());
+      static_assert(sizeof(size_t) >= sizeof(uint32_t), "size_t is too small");
+      assert(currentBlockSize <= 2 * medianSize);
+      assert(medianSize <= std::numeric_limits<uint32_t>::max());
+      assert(currentBlockSize <= std::numeric_limits<uint32_t>::max());
 
-    if (amount == 0) {
-      return 0;
-    }
-
-    // For blocks over the limit, apply reasonable penalty
-    if (currentBlockSize > 2 * medianSize) {
-      // For slightly oversized blocks (like our problematic block), be lenient
-      uint64_t overflow = currentBlockSize - 2 * medianSize;
-      uint64_t baseLimit = 2 * medianSize;
-      
-      // If overflow is small relative to base limit, apply minimal penalty
-      if (overflow < baseLimit / 100) { // Less than 1% overflow
-        return amount * 99 / 100; // 99% of original reward
-      } else if (overflow < baseLimit / 10) { // Less than 10% overflow
-        return amount * 90 / 100; // 90% of original reward
-      } else {
-        // For larger overflows, apply more significant penalty
-        return amount * 50 / 100; // 50% of original reward
+      if (amount == 0) {
+        return 0;
       }
-    }
 
-    // For blocks under the median size, no penalty
-    if (currentBlockSize <= medianSize) {
-      return amount;
-    }
+      if (currentBlockSize <= medianSize) {
+        return amount;
+      }
 
-    // For blocks between median and 2*median, apply linear penalty
-    // This is more reasonable for small overflows
-    uint64_t overflow = currentBlockSize - medianSize;
-    uint64_t maxOverflow = medianSize; // Maximum overflow is medianSize (to reach 2*median)
-    
-    // Linear penalty: penalty = amount * (overflow / maxOverflow)
-    // So reward = amount * (1 - overflow/maxOverflow)
-    uint64_t productHi, productLo;
-    productLo = mul128(amount, overflow, &productHi);
-    
-    uint64_t tempHi, tempLo;
-    div128_32(productHi, productLo, static_cast<uint32_t>(maxOverflow), &tempHi, &tempLo);
-    
-    // Safety check to prevent underflow
-    if (tempHi > 0 || tempLo > amount) {
-      return 0;
+      uint64_t productHi;
+      //uint64_t productLo = mul128(amount, currentBlockSize * (UINT64_C(2) * medianSize - currentBlockSize), &productHi);
+      //BUGFIX by Monero Project: 32-bit saturation bug (e.g. ARM7), the result was being treated as 32-bit by default
+      uint64_t multiplicand = UINT64_C(2) * medianSize - currentBlockSize;
+      multiplicand *= currentBlockSize;
+      uint64_t productLo = mul128(amount, multiplicand, &productHi);
+
+      uint64_t penalizedAmountHi;
+      uint64_t penalizedAmountLo;
+      div128_32(productHi, productLo, static_cast<uint32_t>(medianSize), &penalizedAmountHi, &penalizedAmountLo);
+      div128_32(penalizedAmountHi, penalizedAmountLo, static_cast<uint32_t>(medianSize), &penalizedAmountHi, &penalizedAmountLo);
+
+      assert(0 == penalizedAmountHi);
+      assert(penalizedAmountLo < amount);
+
+      return penalizedAmountLo;
     }
-    
-    return amount - tempLo;
-  }
   //-----------------------------------------------------------------------
   std::string getAccountAddressAsStr(uint64_t prefix, const AccountPublicAddress& adr) {
     BinaryArray ba;

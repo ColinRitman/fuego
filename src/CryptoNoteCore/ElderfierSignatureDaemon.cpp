@@ -19,6 +19,8 @@
 #include "EldernodeIndexManager.h"
 #include "CommitmentIndex.h"
 #include "P2p/P2pProtocolDefinitions.h"
+#include "P2p/NetNodeCommon.h"
+#include "P2p/LevinProtocol.h"
 #include "crypto/crypto.h"
 #include "Common/StringTools.h"
 #include <chrono>
@@ -294,8 +296,9 @@ bool ElderfierSignatureDaemon::broadcastSignature(
     sig_msg.sig_algorithm = 0;  // 0 = Ed25519 (PQ-ready: 1 = ML-DSA-65 in future)
 
     // Relay to all connected peers via P2P
+    auto buf = LevinProtocol::encode(sig_msg);
     m_p2pEndpoint->externalRelayNotifyToAll(
-        COMMAND_ELDERFIER_SIGNATURE::ID, sig_msg, nullptr);
+        COMMAND_ELDERFIER_SIGNATURE::ID, buf, nullptr);
 
     m_logger(Logging::DEBUGGING, Logging::BRIGHT_GREEN)
         << "Broadcasting elderfier signature: EFiD " << static_cast<int>(elderfier_id)
