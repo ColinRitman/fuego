@@ -340,9 +340,11 @@ std::cout << "Network Hashrate: " << get_mining_speed(hashrate) << ", Difficulty
 std::cout << "Block Major version: " << (int)majorVersion << ", " << "Alt Blocks: " << alt_blocks_count << std::endl;
 const auto &currency = m_core.currency();
 std::cout << "Total active (unlocked) : " << currency.formatAmount(amountOfActiveCoins) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (" << currency.formatAmount(calculatePercent(currency, amountOfActiveCoins, totalCoinsInNetwork)) << "%)" << std::endl;
-std::cout << "Total Ethereal (burned) : " << currency.formatAmount(totalCoinsEthereal) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (destroyed & reborn thru future coinbase rewards)" << std::endl;
-std::cout << "Currently locked in COLD Banking : " << currency.formatAmount(totalCoinsOnDeposits) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (" << currency.formatAmount(calculatePercent(currency, totalCoinsOnDeposits, totalCoinsInNetwork)) << "%)" << std::endl;
-std::cout << "All " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " in Network :  " << currency.formatAmount(totalCoinsInNetwork) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << std::endl;
+std::cout << "Total Ethereal (burned) : " << (totalCoinsEthereal >= 1000000 ? currency.formatAmount(totalCoinsEthereal) : "0.0") << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (reborn as coinbase rewards)" << std::endl;
+std::cout << "Currently locked in COLD Banking : " << (totalCoinsOnDeposits >= 1000000 ? currency.formatAmount(totalCoinsOnDeposits) : "0.0") << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (" << currency.formatAmount(calculatePercent(currency, totalCoinsOnDeposits, totalCoinsInNetwork)) << "%)" << std::endl;
+std::cout << "All " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " ever minted :  " << currency.formatAmount(totalCoinsInNetwork) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << std::endl;
+uint64_t actualTotalSupply = (totalCoinsInNetwork > totalCoinsEthereal) ? (totalCoinsInNetwork - totalCoinsEthereal) : 0;
+std::cout << "Actual Total Supply (minus burns): " << currency.formatAmount(actualTotalSupply) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << std::endl;
 std::cout << "**************************************************"<< std::endl;
   return true;
 }
