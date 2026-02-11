@@ -87,6 +87,16 @@ if(APPLE OR FREEBSD)
 
     # Add macOS specific definitions for Boost.Asio
     add_definitions(-D_DARWIN_C_SOURCE -D__BSD_VISIBLE=1)
+
+    # Fix header search paths for macOS
+    if(APPLE)
+        # Add Homebrew include paths for macOS
+        include_directories(SYSTEM /opt/homebrew/include)
+        include_directories(SYSTEM /usr/local/include)
+
+        # Ensure proper C++ standard library is used
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+    endif()
 endif()
 
 if(MSVC)
@@ -96,7 +106,10 @@ elseif(APPLE)
    include_directories(src/Platform/OSX)
    include_directories(src/Platform/Posix)
    # Add additional system include directories for macOS
-   include_directories(SYSTEM /usr/include /usr/local/include /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include)
+   include_directories(SYSTEM /opt/homebrew/include)
+   include_directories(SYSTEM /usr/local/include)
+   include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include)
+   include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include)
 else()
    include_directories(src/Platform/Linux)
    include_directories(src/Platform/Posix)
@@ -117,23 +130,46 @@ if(MINGW)
   include_directories(SYSTEM src/platform/mingw)
 endif()
 
-# Required components based on karbo's CMakeLists.txt
+# Required components
 find_package(Boost REQUIRED COMPONENTS system filesystem thread date_time chrono regex serialization program_options coroutine context atomic)
 include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
 message(STATUS "Boost Found: ${Boost_INCLUDE_DIRS}")
 message(STATUS "Found Boost Version: ${Boost_VERSION}")
 
+# Additional fixes for macOS Boost linking
+if(APPLE)
+    # Ensure we're using the correct Boost libraries path
+    if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
+        link_directories("/opt/homebrew/opt/boost@1.85/lib")
+    endif()
+    if(EXISTS "/usr/local/opt/boost@1.85/lib")
+        link_directories("/usr/local/opt/boost@1.85/lib")
+    endif()
+endif()
+
 # Platform-specific Boost library handling
 if(MINGW)
   set(Boost_LIBRARIES "${Boost_LIBRARIES};ws2_32;mswsock;iphlpapi;bcrypt")
-elseif(APPLE OR OPENBSD OR ANDROID)
+elseif(APPLE)
+  # Ensure proper linking on macOS
+  if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
+      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
+  elseif(EXISTS "/usr/local/opt/boost@1.85/lib")
+      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/boost@1.85/lib -Wl,-rpath,/usr/local/opt/boost@1.85/lib")
+  endif()
+elseif(OPENBSD OR ANDROID)
   set(Boost_LIBRARIES "${Boost_LIBRARIES}")
 elseif(NOT MSVC)
   set(Boost_LIBRARIES "${Boost_LIBRARIES};rt")
 endif()
 
-if(APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
+# Ensure Boost linking for all macOS architectures
+if(APPLE)
+    if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
+    elseif(EXISTS "/usr/local/opt/boost@1.85/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/boost@1.85/lib -Wl,-rpath,/usr/local/opt/boost@1.85/lib")
+    endif()
 endif()
 
 # --------------------------
@@ -229,9 +265,20 @@ endif()
 
 message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
-# Configure runtime path for Boost libraries on macOS arm64
-if(APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
+# Configure runtime path for Boost libraries on macOS
+if(APPLE)
+    if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
+    elseif(EXISTS "/usr/local/opt/boost@1.85/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/boost@1.85/lib -Wl,-rpath,/usr/local/opt/boost@1.85/lib")
+    endif()
+
+    # Also add ICU library paths
+    if(EXISTS "/opt/homebrew/opt/icu4c/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/icu4c/lib -Wl,-rpath,/opt/homebrew/opt/icu4c/lib")
+    elseif(EXISTS "/usr/local/opt/icu4c/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/icu4c/lib -Wl,-rpath,/usr/local/opt/icu4c/lib")
+    endif()
 endif()
 
 # --------------------------
@@ -241,7 +288,14 @@ if(ANDROID)
     message(STATUS "Android build detected: skipping ICU discovery")
 else()
     if(APPLE)
-        list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/icu4c" "/usr/local/opt/icu4c")
+        # Ensure proper ICU paths for macOS
+        if(EXISTS "/opt/homebrew/opt/icu4c")
+            list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/icu4c")
+            set(ICU_ROOT "/opt/homebrew/opt/icu4c")
+        elseif(EXISTS "/usr/local/opt/icu4c")
+            list(APPEND CMAKE_PREFIX_PATH "/usr/local/opt/icu4c")
+            set(ICU_ROOT "/usr/local/opt/icu4c")
+        endif()
     endif()
 
     # Special handling for vcpkg on Windows
@@ -262,7 +316,27 @@ else()
         message(STATUS "Found ICU includes: ${ICU_INCLUDE_DIRS}")
         message(STATUS "Found ICU libraries: ${ICU_LIBRARIES}")
         message(STATUS "ICU version: ${ICU_VERSION}")
-        include_directories(${ICU_INCLUDE_DIRS})
+        include_directories(SYSTEM ${ICU_INCLUDE_DIRS})
+
+        # On macOS, ensure we have the correct ICU library paths
+        if(APPLE)
+            # Add ICU library directories
+            if(EXISTS "/opt/homebrew/opt/icu4c/lib")
+                link_directories("/opt/homebrew/opt/icu4c/lib")
+            elseif(EXISTS "/usr/local/opt/icu4c/lib")
+                link_directories("/usr/local/opt/icu4c/lib")
+            endif()
+
+            if(ICU_DATA_LIBRARY)
+                message(STATUS "ICU Data Library: ${ICU_DATA_LIBRARY}")
+            endif()
+            if(ICU_I18N_LIBRARY)
+                message(STATUS "ICU I18N Library: ${ICU_I18N_LIBRARY}")
+            endif()
+            if(ICU_UC_LIBRARY)
+                message(STATUS "ICU UC Library: ${ICU_UC_LIBRARY}")
+            endif()
+        endif()
     else()
         if(WIN32)
             message(FATAL_ERROR "ICU not found! Make sure it's installed via vcpkg.")
@@ -270,32 +344,6 @@ else()
             message(FATAL_ERROR "ICU not found, install via Homebrew: brew install icu4c")
         endif()
     endif()
-
-    # On macOS, ensure we have the correct ICU library paths
-    if(APPLE)
-        if(ICU_DATA_LIBRARY)
-            message(STATUS "ICU Data Library: ${ICU_DATA_LIBRARY}")
-        endif()
-        if(ICU_I18N_LIBRARY)
-            message(STATUS "ICU I18N Library: ${ICU_I18N_LIBRARY}")
-        endif()
-        if(ICU_UC_LIBRARY)
-            message(STATUS "ICU UC Library: ${ICU_UC_LIBRARY}")
-        endif()
-    endif()
-endif()
-
-# --------------------------
-# Boost linking for executables (macOS)
-# --------------------------
-if(APPLE AND Boost_FOUND)
-    message(STATUS "Linking Boost libraries to executables")
-    foreach(exec_target Daemon SimpleWallet PaymentGateService Optimizer TestnetDaemon testnet-wallet-cli)
-        if(TARGET ${exec_target})
-            message(STATUS "Linking Boost to ${exec_target}")
-            target_link_libraries(${exec_target} PRIVATE ${Boost_LIBRARIES})
-        endif()
-    endforeach()
 endif()
 
 # --------------------------
@@ -315,7 +363,16 @@ endif()
 # Compiler flags
 # --------------------------
 if(APPLE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations -Wno-deprecated -Wno-deprecated-builtins")
+    # Enhanced compiler flags for macOS to ensure proper header search
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations -Wno-deprecated -Wno-deprecated-builtins -stdlib=libc++")
+
+    # Ensure proper include paths
+    if(EXISTS "/opt/homebrew/include")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I/opt/homebrew/include")
+    endif()
+    if(EXISTS "/usr/local/include")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -I/usr/local/include")
+    endif()
 endif()
 
 # --------------------------
@@ -343,6 +400,15 @@ if(APPLE AND ICU_FOUND)
         if(TARGET ${exec_target})
             message(STATUS "Linking ICU to ${exec_target}")
             target_link_libraries(${exec_target} PRIVATE ${ICU_LIBRARIES})
+
+            # Ensure proper rpath for ICU libraries on macOS
+            if(EXISTS "/opt/homebrew/opt/icu4c/lib")
+                set_target_properties(${exec_target} PROPERTIES
+                    LINK_FLAGS "-L/opt/homebrew/opt/icu4c/lib -Wl,-rpath,/opt/homebrew/opt/icu4c/lib")
+            elseif(EXISTS "/usr/local/opt/icu4c/lib")
+                set_target_properties(${exec_target} PROPERTIES
+                    LINK_FLAGS "-L/usr/local/opt/icu4c/lib -Wl,-rpath,/usr/local/opt/icu4c/lib")
+            endif()
         endif()
     endforeach()
 

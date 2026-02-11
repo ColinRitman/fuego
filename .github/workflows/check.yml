@@ -260,12 +260,15 @@ jobs:
       - name: Install dependencies
         run: |
           set -e
-          brew install gcc cmake ninja jsoncpp openssl boost@1.85
+          brew install cmake jsoncpp boost@1.85 icu4c
 
           # Set environment to use Boost 1.85 from Homebrew
           BOOST_PREFIX=$(brew --prefix boost@1.85)
+          ICU_PREFIX=$(brew --prefix icu4c)
           echo "BOOST_ROOT=$BOOST_PREFIX" >> $GITHUB_ENV
+          echo "ICU_ROOT=$ICU_PREFIX" >> $GITHUB_ENV
           echo "Boost 1.85 installed from Homebrew at $BOOST_PREFIX"
+          echo "ICU installed from Homebrew at $ICU_PREFIX"
 
           # Verify repository structure
           echo "=== Verifying repository structure ==="
@@ -292,7 +295,19 @@ jobs:
           release_name=fuego-cli-macos-${{ matrix.arch }}-dev"$xfg_ver"
           mkdir "$build_folder"
           cd "$build_folder"
-          cmake -S .. -B . -DCMAKE_C_FLAGS="-mmacosx-version-min=10.12" -DCMAKE_CXX_FLAGS="-mmacosx-version-min=10.12" -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch_flag }} -DBOOST_ROOT=/usr/local -DBoost_NO_SYSTEM_PATHS=ON
+
+          # Properly configure CMake for macOS with correct paths
+          cmake -S .. -B . \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_FLAGS="-mmacosx-version-min=10.12" \
+            -DCMAKE_CXX_FLAGS="-mmacosx-version-min=10.12 -I$(brew --prefix)/include -stdlib=libc++" \
+            -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch_flag }} \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)" \
+            -DBOOST_ROOT="$(brew --prefix boost@1.85)" \
+            -DBoost_NO_SYSTEM_PATHS=ON \
+            -DICU_ROOT="$(brew --prefix icu4c)" \
+            -DCMAKE_EXE_LINKER_FLAGS="-L$(brew --prefix boost@1.85)/lib -L$(brew --prefix icu4c)/lib"
+
           make -j$(sysctl -n hw.ncpu)
           mkdir "$release_name"
           exeFiles=()

@@ -105,6 +105,18 @@ target_link_libraries(BlockchainExplorer PUBLIC ${JSONCPP_LIBRARIES} ${Boost_LIB
 add_library(Common STATIC ${Common})
 # System target already defined at line 81 - removing duplicate definition
 
+if(NOT TARGET System)
+  add_library(System STATIC ${SYSTEM_SOURCES})
+
+  # Fix ucontext compilation issues on macOS
+  if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+      # Define _XOPEN_SOURCE for ucontext functions on macOS
+      target_compile_definitions(System PRIVATE _XOPEN_SOURCE=700)
+      target_compile_definitions(System PRIVATE __MAC_OS_X_VERSION_MIN_REQUIRED=101200)
+      message(STATUS "macOS detected, added ucontext compatibility definitions for System library")
+  endif()
+endif()
+
 
 add_library(CryptoNoteCore STATIC ${CryptoNoteCore})
 if(MSVC)
@@ -136,7 +148,7 @@ add_dependencies(CryptoNoteCore version)
 
 # Always try to enable AES-NI for GCC/Clang on non-Android x86_64 systems
 if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT ANDROID)
-    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64")
+    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES STREQUAL "arm64"))
         # Apple Silicon: skip AES/SSE flags, use software AES
         target_compile_definitions(Crypto PRIVATE NO_AES)
         message(STATUS "Apple Silicon detected, using software AES for Crypto library")
@@ -210,7 +222,6 @@ add_library(Serialization STATIC ${Serialization})
 target_link_libraries(Serialization PUBLIC Common)
 # Link jsoncpp for any potential JSON serialization
 target_link_libraries(Serialization PUBLIC ${JSONCPP_LIBRARIES})
-add_library(System STATIC ${SYSTEM_SOURCES})
 
 # Fix ucontext compilation issues on macOS
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
@@ -388,8 +399,35 @@ target_link_libraries(SimpleWallet PRIVATE
 # Suppress deprecation warnings for Rpc target
 if(APPLE)
   target_compile_options(Rpc PRIVATE -Wno-deprecated-declarations -Wno-deprecated -Wno-deprecated-builtins -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -Wno-deprecated-copy -Wno-deprecated-copy-dtor -Wno-system-headers -w)
+  target_include_directories(Rpc SYSTEM PRIVATE /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1)
   target_include_directories(Rpc SYSTEM PRIVATE /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1)
+  target_include_directories(Rpc SYSTEM PRIVATE /opt/homebrew/include)
+  target_include_directories(Rpc SYSTEM PRIVATE /usr/local/include)
   target_include_directories(Rpc SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/external/parallel_hashmap)
+
+  # Ensure proper C++ standard library linking
+  target_link_libraries(Rpc PRIVATE -stdlib=libc++)
+endif()
+
+# Ensure all targets use proper C++ standard library on macOS
+if(APPLE)
+  target_link_libraries(BlockchainExplorer PRIVATE -stdlib=libc++)
+  target_link_libraries(Common PRIVATE -stdlib=libc++)
+  target_link_libraries(Crypto PRIVATE -stdlib=libc++)
+  target_link_libraries(CryptoNoteCore PRIVATE -stdlib=libc++)
+  target_link_libraries(Http PRIVATE -stdlib=libc++)
+  target_link_libraries(InProcessNode PRIVATE -stdlib=libc++)
+  target_link_libraries(Logging PRIVATE -stdlib=libc++)
+  target_link_libraries(NodeRpcProxy PRIVATE -stdlib=libc++)
+  target_link_libraries(Rpc PRIVATE -stdlib=libc++)
+  target_link_libraries(P2P PRIVATE -stdlib=libc++)
+  target_link_libraries(Serialization PRIVATE -stdlib=libc++)
+  target_link_libraries(System PRIVATE -stdlib=libc++)
+  target_link_libraries(Transfers PRIVATE -stdlib=libc++)
+  target_link_libraries(Wallet PRIVATE -stdlib=libc++)
+  target_link_libraries(PaymentGate PRIVATE -stdlib=libc++)
+  target_link_libraries(JsonRpcServer PRIVATE -stdlib=libc++)
+  target_link_libraries(SimpleWalletLib PRIVATE -stdlib=libc++)
 endif()
 
 # --------------------------
