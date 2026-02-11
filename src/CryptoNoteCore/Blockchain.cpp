@@ -674,13 +674,13 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
   uint64_t currentBurned = m_bankingIndex.getBurnedXfgAmount();
   uint64_t bankingIndexSize = m_bankingIndex.size();
   logger(DEBUGGING) << "BankingIndex state at init: burned=" << currentBurned << " XFG, size=" << bankingIndexSize;
-  
+
   // Additional debugging to understand BankingIndex contents
   auto bankingStats = m_bankingIndex.getStats();
-  logger(DEBUGGING) << "BankingIndex stats: totalDeposits=" << bankingStats.totalDeposits 
-                    << ", ethernalXFG=" << bankingStats.ethernalXFG 
+  logger(DEBUGGING) << "BankingIndex stats: totalDeposits=" << bankingStats.totalDeposits
+                    << ", ethernalXFG=" << bankingStats.ethernalXFG
                     << ", regularDeposits=" << bankingStats.regularDeposits;
-  
+
   // Reset and set EternalFlame using public methods
   uint64_t oldEternalFlame = m_currency.getEternalFlame();
   const_cast<Currency&>(m_currency).removeEternalFlame(oldEternalFlame);
@@ -1294,205 +1294,91 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
   for (auto& o : b.baseTransaction.outputs) {
     minerReward += o.amount;
   }
-  logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Actual miner reward: " << minerReward;
-  logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Block height: " << height;
 
-  // Calculate reward directly without historical block size adjustments
+  // For blocks in the checkpoint zone, the checkpoint hash already guarantees the block
+  // is valid. Skip reward validation since the penalty calculation depends on a moving
+  // median that may differ during re-sync vs original validation. Accept the miner's
+  // actual reward as the true emission.
+  if (m_checkpoints.is_in_checkpoint_zone(height)) {
+    reward = minerReward;
+    emissionChange = minerReward - fee;
+    logger(DEBUGGING) << "Checkpoint zone block at height " << height
+      << ", accepting miner reward: " << m_currency.formatAmount(minerReward);
+    return true;
+  }
+
   std::vector<size_t> lastBlocksSizes;
   get_last_n_blocks_sizes(lastBlocksSizes, m_currency.rewardBlocksWindow());
   size_t blocksSizeMedian = Common::medianValue(lastBlocksSizes);
 
   auto blockMajorVersion = getBlockMajorVersionForHeight(height);
-  logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Block major version: " << (int)blockMajorVersion;
 
-  // For historical blocks, use more lenient block size checking
-  size_t effectiveBlockSize = cumulativeBlockSize;
-  logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Original block size: " << cumulativeBlockSize << ", median: " << blocksSizeMedian;
-
-  if (height >= 170000 && height <= 180000) {
-    // Special handling for blocks around height 174026
-    size_t maxHistoricalSize = 3 * 1024 * 1024; // 3MB for blocks 170k-180k
-    if (cumulativeBlockSize > maxHistoricalSize) {
-      effectiveBlockSize = maxHistoricalSize;
-    }
-    logger(DEBUGGING) << "HISTORICAL_BLOCK_SIZE: height=" << height
-      << ", original=" << cumulativeBlockSize
-      << ", effective=" << effectiveBlockSize
-      << ", median=" << blocksSizeMedian;
-  } else {
-    logger(DEBUGGING) << "EXACT_REWARD: Not in historical range 170k-180k, height=" << height;
-  }
-
-  if (!m_currency.getBlockReward(blockMajorVersion, blocksSizeMedian, effectiveBlockSize, alreadyGeneratedCoins, fee, height, reward, emissionChange)) {
+  if (!m_currency.getBlockReward(blockMajorVersion, blocksSizeMedian, cumulativeBlockSize, alreadyGeneratedCoins, fee, height, reward, emissionChange)) {
     logger(DEBUGGING) << "block size " << cumulativeBlockSize << " is bigger than what is currently allowed on Fuego's blockchain";
-    logger(DEBUGGING) << "EXACT_REWARD: getBlockReward failed with effectiveBlockSize=" << effectiveBlockSize;
     return false;
   }
-  logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Expected reward: " << reward;
-  logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Validation: actual=" << minerReward << " vs expected=" << reward;
 
-  // For block major version 10+, enforce EXACT reward validation (miners use same formula)
-  // For earlier versions, allow small tolerance due to potential formula differences
   if (blockMajorVersion >= CryptoNote::BLOCK_MAJOR_VERSION_10) {
-    // EXACT validation without tolerance for v10+
+    // v10+: exact reward validation — miners use the same Osavvirsak formula
     if (minerReward != reward) {
-      // Check if this might be an EternalFlame sync issue before rejecting
-      logger(WARNING) << "Coinbase transaction reward mismatch detected, checking for EternalFlame desync";
+      // EternalFlame desync check: Currency's m_ethernalXFG may be out of sync
+      // with BankingIndex (the authoritative source for burned amounts).
       uint64_t currentEternalFlame = m_currency.getEternalFlame();
       uint64_t expectedEternalFlame = m_bankingIndex.getBurnedXfgAmount();
-      uint64_t bankingIndexSize = m_bankingIndex.size();
-      logger(DEBUGGING) << "EternalFlame check: current=" << currentEternalFlame 
-                        << ", expected=" << expectedEternalFlame 
-                        << ", bankingIndexSize=" << bankingIndexSize
-                        << ", height=" << height
-                        << ", blocksSize=" << m_blocks.size();
-        
-     // check if its a burn block - adjust expected EternalFlame to what it should be before processing this block
-     bool isBurnBlock = false;
-     uint64_t burnAmountInThisBlock = 0;
-      
-     // parse txns in block to detect burns
-     // use m_blocks to get txns  (Block param is only txn hashes)
-     if (height < m_blocks.size()) {
-       const BlockEntry& currentBlockEntry = m_blocks[height];
-       if (currentBlockEntry.height == height) {
-         for (const auto& txEntry : currentBlockEntry.transactions) {
-           std::vector<TransactionExtraField> extraFields;
-           if (parseTransactionExtra(txEntry.tx.extra, extraFields)) {
-             for (const auto& field : extraFields) {
-               if (field.type() == typeid(TransactionExtraHeatCommitment)) {
-                 const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
-                 isBurnBlock = true;
-                 burnAmountInThisBlock += heatCommit.amount;
-               }
-             }
-           }
-         }
-       }
-     }
-      
-     // If this is a burn block, the expected EternalFlame for reward calculation
-     // should be what it was BEFORE this block, not after
-     if (isBurnBlock) {
-       logger(DEBUGGING) << "Block " << height << " contains burn of " << burnAmountInThisBlock 
-                         << " XFG. Adjusting expected EternalFlame for validation.";
-       expectedEternalFlame = (expectedEternalFlame >= burnAmountInThisBlock) ? 
-                              (expectedEternalFlame - burnAmountInThisBlock) : 0;
-       logger(DEBUGGING) << "Adjusted expected EternalFlame for validation: " << expectedEternalFlame;
-     }
-      
-      // Fallback: if BankingIndex shows 0 but this might be a corrupted state,
-      // scan the actual blockchain to calculate correct EternalFlame
-      if (expectedEternalFlame == 0 && height > 0 && m_blocks.size() > 0) {
-        uint64_t calculatedBurns = 0;
-        logger(DEBUGGING) << "BankingIndex shows 0 burns, scanning blockchain for actual burns up to height " << (height - 1);
-         
-        // Scan blockchain up to the previous block to calculate actual burns
-        uint32_t scanHeight = std::min(height, static_cast<uint32_t>(m_blocks.size()));
-        for (uint32_t h = 0; h < scanHeight; h++) {
-          const BlockEntry& scanBlock = m_blocks[h];
-          for (const auto& tx : scanBlock.transactions) {
-            std::vector<TransactionExtraField> extraFields;
-            if (parseTransactionExtra(tx.tx.extra, extraFields)) {
-              for (const auto& field : extraFields) {
-                if (field.type() == typeid(TransactionExtraHeatCommitment)) {
-                  const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
-                  calculatedBurns += heatCommit.amount;
-                  logger(DEBUGGING) << "Found HEAT burn at height " << h << ": " << heatCommit.amount << " XFG";
-                }
-              }
-            }
-          }
-        }
-         
-        if (calculatedBurns > 0) {
-          logger(WARNING) << "BankingIndex corruption detected: expected=0, actual=" << calculatedBurns << " XFG";
-          expectedEternalFlame = calculatedBurns;
-          // Also adjust for burn in current block if this is a burn block
-          if (isBurnBlock && expectedEternalFlame >= burnAmountInThisBlock) {
-            expectedEternalFlame -= burnAmountInThisBlock;
-          }
-        }
-      }
-      
-      // If there's a discrepancy, try to resync
+
+      // pushToBankingIndex hasn't run yet at this point, so expectedEternalFlame
+      // from BankingIndex already excludes burns in the current block.
       if (expectedEternalFlame != currentEternalFlame) {
-        logger(WARNING) << "EternalFlame mismatch detected: current=" << currentEternalFlame 
-          << ", expected=" << expectedEternalFlame << ", attempting resync";
-        // Reset and set EternalFlame using public methods
+        logger(WARNING) << "EternalFlame desync at height " << height
+          << ": Currency=" << currentEternalFlame
+          << ", BankingIndex=" << expectedEternalFlame
+          << ", resyncing";
+
+        // Correct Currency to match BankingIndex (authoritative source)
         const_cast<Currency&>(m_currency).removeEternalFlame(currentEternalFlame);
-        if (expectedEternalFlame > 0) {
-          const_cast<Currency&>(m_currency).addEternalFlame(expectedEternalFlame);
-        }
-         
-        // Recalculate reward with corrected value
+        const_cast<Currency&>(m_currency).addEternalFlame(expectedEternalFlame);
+
+        // Recalculate reward with corrected EternalFlame
         uint64_t resyncedReward = 0;
         int64_t resyncedEmissionChange = 0;
-        if (m_currency.getBlockReward(blockMajorVersion, blocksSizeMedian, effectiveBlockSize, 
-                                    alreadyGeneratedCoins, fee, height, resyncedReward, resyncedEmissionChange)) {
+        if (m_currency.getBlockReward(blockMajorVersion, blocksSizeMedian, cumulativeBlockSize,
+                                      alreadyGeneratedCoins, fee, height, resyncedReward, resyncedEmissionChange)) {
           if (minerReward == resyncedReward) {
-            logger(INFO) << "EternalFlame resync successful, block accepted";
-            return true; // Accept the block with corrected EternalFlame
-          } else {
-            logger(DEBUGGING) << "Resynced reward: " << resyncedReward << " still doesn't match miner reward: " << minerReward;
-            // If resync failed, restore original value
-            const_cast<Currency&>(m_currency).removeEternalFlame(expectedEternalFlame);
-            if (currentEternalFlame > 0) {
-              const_cast<Currency&>(m_currency).addEternalFlame(currentEternalFlame);
-            }
-          }
-        } else {
-          logger(ERROR) << "Failed to recalculate reward after EternalFlame resync";
-          // Restore original value if recalculation failed
-          const_cast<Currency&>(m_currency).removeEternalFlame(expectedEternalFlame);
-          if (currentEternalFlame > 0) {
-            const_cast<Currency&>(m_currency).addEternalFlame(currentEternalFlame);
+            logger(INFO) << "EternalFlame resync resolved mismatch at height " << height;
+            reward = resyncedReward;
+            emissionChange = resyncedEmissionChange;
+            return true;
           }
         }
+
+        // Resync didn't fix it — restore original so we don't corrupt state
+        const_cast<Currency&>(m_currency).removeEternalFlame(expectedEternalFlame);
+        const_cast<Currency&>(m_currency).addEternalFlame(currentEternalFlame);
       }
-      
-      logger(ERROR, BRIGHT_RED) << "Coinbase transaction reward mismatch: "
+
+      logger(ERROR, BRIGHT_RED) << "Coinbase transaction reward mismatch at height " << height << ": "
         << m_currency.formatAmount(minerReward) << " (actual) vs "
-        << m_currency.formatAmount(reward) << " (expected)";
-      logger(DEBUGGING, BRIGHT_BLUE) << "EXACT_REWARD: Detailed debug: height=" << height
-        << ", minerReward=" << minerReward
-        << ", reward=" << reward
-        << ", emissionChange=" << emissionChange
-        << ", fee=" << fee
-        << ", alreadyGeneratedCoins=" << alreadyGeneratedCoins
-        << ", currentEternalFlame=" << currentEternalFlame
-        << ", expectedEternalFlame=" << expectedEternalFlame;
+        << m_currency.formatAmount(reward) << " (expected)"
+        << " [eternalFlame=" << m_currency.formatAmount(currentEternalFlame) << "]";
       return false;
     }
   } else {
-    // For pre-v10 blocks, allow small tolerance for historical compatibility
-    // Tolerance: 0.01% of expected reward to account for minor formula differences
-    uint64_t tolerance = reward / 10000;  // 0.01% tolerance
-    if (tolerance < 1000) tolerance = 1000;  // Minimum 0.00001 XFG tolerance
-
-    int64_t diff = static_cast<int64_t>(minerReward) - static_cast<int64_t>(reward);
-    uint64_t absDiff = (diff < 0) ? static_cast<uint64_t>(-diff) : static_cast<uint64_t>(diff);
-
-    if (absDiff > tolerance) {
-      // Special handling for specific problematic blocks that were accepted historically
-      if (height == 17927 || height == 299344 || height == 299345) {
-        logger(INFO, BRIGHT_YELLOW) << "Allowing historical block at height " << height << " with reward mismatch: "
-          << m_currency.formatAmount(minerReward) << " (actual) vs "
-          << m_currency.formatAmount(reward) << " (expected)";
-        return true;
-      }
-
-      logger(ERROR, BRIGHT_RED) << "Coinbase transaction reward mismatch (pre-v10): "
+    // Pre-v10: only reject if miner claims MORE than the calculated reward.
+    // Miners may legitimately claim less (underspend just reduces emission).
+    // This matches standard CryptoNote validation and handles edge cases where
+    // the penalty calculation produces slightly different results during re-sync
+    // due to median differences.
+    if (minerReward > reward) {
+      logger(ERROR, BRIGHT_RED) << "Coinbase transaction spends too much at height " << height << ": "
         << m_currency.formatAmount(minerReward) << " (actual) vs "
-        << m_currency.formatAmount(reward) << " (expected)"
-        << " [diff=" << m_currency.formatAmount(absDiff) << ", tolerance=" << m_currency.formatAmount(tolerance) << "]";
+        << m_currency.formatAmount(reward) << " (expected)";
       return false;
-    } else if (minerReward != reward) {
-      // Log warning for small mismatches that are within tolerance
-      logger(DEBUGGING, BRIGHT_YELLOW) << "Pre-v10 block reward within tolerance: "
-        << m_currency.formatAmount(minerReward) << " (actual) vs "
-        << m_currency.formatAmount(reward) << " (expected)"
-        << " [diff=" << m_currency.formatAmount(absDiff) << "]";
+    }
+
+    if (minerReward != reward) {
+      // Miner underspent — use actual miner reward for emission tracking
+      reward = minerReward;
+      emissionChange = minerReward - fee;
     }
   }
 
@@ -2708,7 +2594,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
   {
     int64_t deposit = 0;
     uint64_t permanentBurns = 0;  // Track permanent burns for ethernalXFG
-    
+
     logger(DEBUGGING) << "Processing block " << block.height << " for BankingIndex, current burned: " << m_bankingIndex.getBurnedXfgAmount();
 
     for (const auto &tx : block.transactions)
@@ -2875,19 +2761,13 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
     // Push deposit tracking
     m_bankingIndex.pushBlock(deposit, interest);
 
-    // Add permanent burns to ethernalXFG if any were found
+    // Add permanent burns to EternalFlame if any were found
     if (permanentBurns > 0) {
       uint32_t height = static_cast<uint32_t>(m_blocks.size());
-      logger(DEBUGGING) << "Adding " << permanentBurns << " XFG to BankingIndex at height " << height;
       m_bankingIndex.addForeverDeposit(permanentBurns, height);
-        // Sync Currency ethernalXFG
-    const_cast<Currency&>(m_currency).addEternalFlame(permanentBurns);
-
-  // logging for burns
-  logger(INFO) << "Burn in block " << height << ": " << m_currency.formatAmount(permanentBurns)
-                   << " XFG sent into the Ether";
-    } else {
-      logger(DEBUGGING) << "No permanent burns detected in block " << block.height;
+      const_cast<Currency&>(m_currency).addEternalFlame(permanentBurns);
+      logger(INFO) << "Burn in block " << height << ": "
+                   << m_currency.formatAmount(permanentBurns) << " XFG sent into the Ether";
     }
   }
 
@@ -3473,14 +3353,14 @@ bool Blockchain::isInCheckpointZone(const uint32_t height) {
 void Blockchain::checkElderfierConsensusThreshold() {
     // Called after each block is added to check if elderfier consensus threshold is met
     // This triggers fee distribution and cache flushing when ≥69% elderfiers have signed
-    
+
     try {
         uint64_t currentBlockHeight = m_blockIndex.size();
-        
+
         // Check and flush signature cache if threshold met
         // This is called every block - the method internally checks if threshold is met
         m_commitmentIndex.checkAndFlushThreshold(currentBlockHeight);
-        
+
     } catch (const std::exception& e) {
         logger(WARNING, YELLOW) << "Exception in checkElderfierConsensusThreshold: " << e.what();
     } catch (...) {

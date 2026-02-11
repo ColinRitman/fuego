@@ -231,10 +231,6 @@ void Currency::addEternalFlame(uint64_t amount) {
 void Currency::removeEternalFlame(uint64_t amount) {
   m_ethernalXFG -= amount;
 }
-void Currency::getEternalFlame(uint64_t& amount) const {
-  amount = m_ethernalXFG;
-}
-
 double Currency::getBurnPercentage() const {
   if (m_moneySupply == 0) {
     return 0.0;
@@ -244,54 +240,37 @@ double Currency::getBurnPercentage() const {
 
 	bool Currency::getBlockReward(uint8_t blockMajorVersion, size_t medianSize, size_t currentBlockSize, uint64_t alreadyGeneratedCoins,
 		uint64_t fee, uint32_t height, uint64_t& reward, int64_t& emissionChange) const {
-		unsigned int m_emissionSpeedFactor = emissionSpeedFactor(blockMajorVersion);
+		unsigned int selectedEmissionSpeedFactor = emissionSpeedFactor(blockMajorVersion);
 
-    assert(m_emissionSpeedFactor > 0 && m_emissionSpeedFactor <= 8 * sizeof(uint64_t));
+    assert(selectedEmissionSpeedFactor > 0 && selectedEmissionSpeedFactor <= 8 * sizeof(uint64_t));
 
-    // Calculate emission while accounting for burns
-    uint64_t Osavvirsak = alreadyGeneratedCoins - getEternalFlame();
-    Osavvirsak = std::max(Osavvirsak, static_cast<uint64_t>(0));  // Prevent negative values
-
-    assert(Osavvirsak <= m_moneySupply);
-    assert(m_emissionSpeedFactor > 0 && m_emissionSpeedFactor <= 8 * sizeof(uint64_t));
     // Only use burn-adjusted reward formula for v10+ blocks (when burns were introduced)
     uint64_t baseReward;
     if (blockMajorVersion >= BLOCK_MAJOR_VERSION_10 && getEternalFlame() > 0) {
-        baseReward = (m_moneySupply - Osavvirsak) >> m_emissionSpeedFactor;
+        // Osavvirsak = coins in circulation (minted minus burned)
+        // This makes burned coins available for re-emission
+        uint64_t eternalFlame = getEternalFlame();
+        uint64_t Osavvirsak = (alreadyGeneratedCoins > eternalFlame) ?
+                              (alreadyGeneratedCoins - eternalFlame) : 0;
+        assert(Osavvirsak <= m_moneySupply);
+        baseReward = (m_moneySupply - Osavvirsak) >> selectedEmissionSpeedFactor;
     } else {
-        baseReward = (m_moneySupply - alreadyGeneratedCoins) >> m_emissionSpeedFactor;
-    }
-    logger(DEBUGGING) << "getBlockReward baseReward calculation: m_moneySupply=" << m_moneySupply
-      << ", alreadyGeneratedCoins=" << alreadyGeneratedCoins
-      << ", Osavvirsak=" << Osavvirsak
-      << ", baseReward=" << baseReward;
-
-    // Debug output for reward calculation analysis
-    static uint32_t lastDebugHeight = 0;
-    if (height > 900000 && height % 10000 == 0 && height != lastDebugHeight) {
-        lastDebugHeight = height;
-        logger(INFO) << "BLOCK " << height << ": XFG minted=" << alreadyGeneratedCoins
-                     << ", Ethereal XFG=" << getEternalFlame()
-                     << ", Osavvirsak=" << Osavvirsak
-                     << ", Base Reward=" << baseReward;
+        assert(alreadyGeneratedCoins <= m_moneySupply);
+        baseReward = (m_moneySupply - alreadyGeneratedCoins) >> selectedEmissionSpeedFactor;
     }
 
     size_t blockGrantedFullRewardZone = blockGrantedFullRewardZoneByBlockVersion(blockMajorVersion);
-    size_t originalMedianSize = medianSize;
-    logger(DEBUGGING) << "DEBUG: medianSize before max: " << medianSize << ", blockGrantedFullRewardZone: " << blockGrantedFullRewardZone;
     medianSize = std::max(medianSize, blockGrantedFullRewardZone);
-    logger(DEBUGGING) << "DEBUG: medianSize after max: " << medianSize;
 
-    // Simple 2x median validation - but allow penalty function to handle oversized blocks
     if (currentBlockSize > UINT64_C(2) * medianSize) {
-      // For blocks significantly over the limit, the penalty function will return minimal reward
-      logger(DEBUGGING) << "Block size exceeds 2x median, penalty will be applied: " << currentBlockSize << " > " << 2 * medianSize;
+      logger(DEBUGGING) << "Block cumulative size is too big: " << currentBlockSize << ", expected less than " << 2 * medianSize;
+      return false;
     }
 
-		uint64_t penalizedBaseReward = getPenalizedAmount(baseReward, medianSize, currentBlockSize);
-		uint64_t penalizedFee = blockMajorVersion >= BLOCK_MAJOR_VERSION_2 ? getPenalizedAmount(fee, medianSize, currentBlockSize) : fee;
+		uint64_t penalizedBaseReward = getPenalizedAmount(baseReward, medianSize, currentBlockSize, blockMajorVersion);
+		uint64_t penalizedFee = blockMajorVersion >= BLOCK_MAJOR_VERSION_2 ? getPenalizedAmount(fee, medianSize, currentBlockSize, blockMajorVersion) : fee;
 		if (cryptonoteCoinVersion() == 1) {
-			penalizedFee = getPenalizedAmount(fee, medianSize, currentBlockSize);
+			penalizedFee = getPenalizedAmount(fee, medianSize, currentBlockSize, blockMajorVersion);
 		}
 
     emissionChange = penalizedBaseReward - (fee - penalizedFee);

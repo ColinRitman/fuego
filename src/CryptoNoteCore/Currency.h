@@ -274,7 +274,6 @@ public:
   uint64_t getBaseMoneySupply() const { return m_baseMoneySupply; }
   void addEternalFlame(uint64_t amount);
   void removeEternalFlame(uint64_t amount);
-  void getEternalFlame(uint64_t& amount) const;
   uint64_t getEternalFlame() const { return m_ethernalXFG; }
   double getBurnPercentage() const;
 
