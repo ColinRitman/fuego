@@ -174,7 +174,7 @@ jobs:
         id: build
         run: |
           set -e
-          sudo apt-get update && sudo apt-get install -y libboost-all-dev
+          sudo apt-get update && sudo apt-get install -y libboost-all-dev libjsoncpp-dev
           build_folder="build/debug"
           xfg_ver=${GITHUB_SHA::7}
           xfg_ver_folder=$(echo $xfg_ver | sed 's/\.//g')
@@ -213,7 +213,7 @@ jobs:
         id: build
         run: |
           set -e
-          sudo apt-get update && sudo apt-get install -y libboost-all-dev
+          sudo apt-get update && sudo apt-get install -y libboost-all-dev libjsoncpp-dev
           build_folder="build/debug"
           xfg_ver=${GITHUB_SHA::7}
           xfg_ver_folder=$(echo $xfg_ver | sed 's/\.//g')

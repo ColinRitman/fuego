@@ -62,7 +62,8 @@ namespace
   const command_line::arg_descriptor<std::string> arg_enable_cors = { "enable-cors", "Adds header 'Access-Control-Allow-Origin' to the daemon's RPC responses. Uses the value as domain. Use * for all", "" };
   const command_line::arg_descriptor<int>         arg_log_level   = {"log-level", "", 2}; // info level
   const command_line::arg_descriptor<bool>        arg_console     = {"no-console", "Disable daemon console commands"};
-  const command_line::arg_descriptor<bool>        arg_print_genesis_tx = { "print-genesis-tx", "Prints genesis' block tx hex to insert it to config and exits" };
+    const command_line::arg_descriptor<bool>        arg_print_genesis_tx = { "print-genesis-tx", "Prints genesis' block tx hex to insert it to config and exits" };
+    const command_line::arg_descriptor<bool>        arg_generate_new_genesis = { "generate-new-genesis", "Generates a new genesis block for testnet" };
 }
 
 bool command_line_preprocessor(const boost::program_options::variables_map& vm, LoggerRef& logger);
@@ -74,6 +75,22 @@ void print_genesis_tx_hex() {
   std::string tx_hex = Common::toHex(txb);
 
   std::cout << "const char GENESIS_COINBASE_TX_HEX[] = \"" << tx_hex << "\";" << std::endl;
+
+  return;
+}
+
+void generate_new_testnet_genesis() {
+  Logging::ConsoleLogger logger;
+  CryptoNote::CurrencyBuilder currencyBuilder(logger);
+  currencyBuilder.testnet(true);
+  
+  // Generate new genesis transaction
+  CryptoNote::Transaction tx = currencyBuilder.generateGenesisTransaction();
+  CryptoNote::BinaryArray txb = CryptoNote::toBinaryArray(tx);
+  std::string tx_hex = Common::toHex(txb);
+
+  std::cout << "New TESTNET genesis transaction:" << std::endl;
+  std::cout << "const char GENESIS_COINBASE_TX_HEX_TESTNET[] = \"" << tx_hex << "\";" << std::endl;
 
   return;
 }
@@ -130,9 +147,10 @@ int main(int argc, char* argv[])
    command_line::add_arg(desc_cmd_sett, arg_enable_cors);
 
    command_line::add_arg(desc_cmd_sett, arg_print_genesis_tx);
-   //command_line::add_arg(desc_cmd_sett, arg_genesis_block_reward_address);
+      command_line::add_arg(desc_cmd_sett, arg_generate_new_genesis);
+      //command_line::add_arg(desc_cmd_sett, arg_genesis_block_reward_address);
 
-   RpcServerConfig::initOptions(desc_cmd_sett);
+      RpcServerConfig::initOptions(desc_cmd_sett);
    CoreConfig::initOptions(desc_cmd_sett);
    NetNodeConfig::initOptions(desc_cmd_sett);
    MinerConfig::initOptions(desc_cmd_sett);
@@ -152,11 +170,17 @@ int main(int argc, char* argv[])
      }
 
      if (command_line::get_arg(vm, arg_print_genesis_tx))
-     {
-       //print_genesis_tx_hex(vm);
-       print_genesis_tx_hex();
-       return false;
-     }
+          {
+            //print_genesis_tx_hex(vm);
+            print_genesis_tx_hex();
+            return false;
+          }
+
+          if (command_line::get_arg(vm, arg_generate_new_genesis))
+          {
+            generate_new_testnet_genesis();
+            return false;
+          }
 
      std::string data_dir = command_line::get_arg(vm, command_line::arg_data_dir);
      std::string config = command_line::get_arg(vm, arg_config_file);
