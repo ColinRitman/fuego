@@ -328,19 +328,19 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
 //__________________________________________________________________________________________________________________________
                                      	// TESTNET DMWDA parameters
 //--------------------------------------------------------------------------------------------------------------------------
- 		const uint32_t TESTNET_DMWDA_SHORT_WINDOW                            = 15;   // Rapid response window
- 		const uint32_t TESTNET_DMWDA_MEDIUM_WINDOW                           = 45;   // Stability window
- 		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 120;  // Trend analysis window
- 		const uint32_t TESTNET_DMWDA_EMERGENCY_WINDOW                        = 5;    // Emergency response window
+ 		const uint32_t TESTNET_DMWDA_SHORT_WINDOW                            = 8;   // Rapid response window
+ 		const uint32_t TESTNET_DMWDA_MEDIUM_WINDOW                           = 33;   // Stability window
+ 		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 90;  // Trend analysis window
+ 		const uint32_t TESTNET_DMWDA_EMERGENCY_WINDOW                        = 3;    // Emergency response window
  		const double   TESTNET_DMWDA_MIN_ADJUSTMENT                          = 0.5;  // Minimum difficulty adjustment (50%)
- 		const double   TESTNET_DMWDA_MAX_ADJUSTMENT                          = 4.0;  // Maximum difficulty adjustment (400%)
+ 		const double   TESTNET_DMWDA_MAX_ADJUSTMENT                          = 2.0;  // Maximum difficulty adjustment (400%)
  		const double   TESTNET_DMWDA_EMERGENCY_THRESHOLD                     = 0.1;  // Emergency threshold (10%)
- 		const double   TESTNET_DMWDA_SMOOTHING_FACTOR                        = 0.3;  // Smoothing factor for oscillations prevention
- 		const double   TESTNET_DMWDA_CONFIDENCE_MIN                          = 0.1;  // Minimum confidence score
+ 		const double   TESTNET_DMWDA_SMOOTHING_FACTOR                        = 0.8;  // Smoothing factor for oscillations prevention
+ 		const double   TESTNET_DMWDA_CONFIDENCE_MIN                          = 0.2;  // Minimum confidence score
  		const double   TESTNET_DMWDA_CONFIDENCE_MAX                          = 1.0;  // Maximum confidence score
  	    const double   TESTNET_DMWDA_DEFAULT_CONFIDENCE                      = 0.5;  // Default confidence score
 
-	const double   TESTNET_DMWDA_WEIGHT_SHORT                            = 0.4;  // Weight for short window
+	const double   TESTNET_DMWDA_WEIGHT_SHORT                            = 0.5;  // Weight for short window
  	const double   TESTNET_DMWDA_WEIGHT_MEDIUM                           = 0.4;  // Weight for medium window
  	const double   TESTNET_DMWDA_WEIGHT_LONG                             = 0.2;  // Weight for long window
  	const double   TESTNET_DMWDA_ADJUSTMENT_RANGE                        = 0.3;  // Adjustment range for confidence-based bounds
@@ -350,7 +350,7 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
  	const double   TESTNET_DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.05; // 5% of target time threshold for fast blocks
 
  	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
-	const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 10.0; // Hash rate change threshold for anomaly detection
+	const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 8.0; // Hash rate change threshold for anomaly detection
 
  	// -------------------------------------- TESTNET CONFIGS ---------------------------------------------------------
 

@@ -1120,7 +1120,7 @@ double Currency::getBurnPercentage() const {
 		// Ensure vectors have the same size and minimum required data
 		assert(timestamps.size() == cumulativeDifficulties.size());
 		if (timestamps.size() != cumulativeDifficulties.size() || timestamps.size() < 3) {
-			return 10000; // Minimum difficulty for insufficient data
+			return 100000; // Minimum difficulty for insufficient data
 		}
 
 		// Use DMWDA (Dynamic Multi-Window Difficulty Adjustment) for BMV10+
@@ -1136,7 +1136,7 @@ double Currency::getBurnPercentage() const {
 		uint64_t calculatedDifficulty = dmwda.calculateNextDifficulty(height, timestamps, difficulties, isTestnet());
 
 		// Final safety check: enforce minimum difficulty
-		return std::max(static_cast<uint64_t>(10000), calculatedDifficulty);
+		return std::max(static_cast<uint64_t>(100000), calculatedDifficulty);
 	}
 
 
