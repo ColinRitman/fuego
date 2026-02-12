@@ -116,13 +116,15 @@ namespace CryptoNote
       }
 
       uint32_t burn_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
-      uint64_t fee = m_currency.minimumFee();
+      // Fee = minimum fee + 0.1% banking fee (for Elderfier rewards)
+      uint64_t banking_fee = (burn_amount * m_currency.minimumFeeBanking()) / m_currency.coin();
+      uint64_t fee = m_currency.minimumFee() + banking_fee;
 
       // Confirmation
       success_msg_writer() << "";
       success_msg_writer() << "Burn TEST for HEAT Summary:";
       success_msg_writer() << "  Amount: " << m_currency.formatAmount(burn_amount) << " TEST (PERMANENT)";
-      success_msg_writer() << "  Fee: " << m_currency.formatAmount(fee) << " TEST";
+      success_msg_writer() << "  Fee: " << m_currency.formatAmount(fee) << " TEST (includes " << m_currency.formatAmount(banking_fee) << " banking fee)";
       success_msg_writer() << "  Type: HEAT (0x08) - funds will be BURNED";
       success_msg_writer() << "";
       success_msg_writer() << "You cool with this? (1=yes, 2=no): ";
@@ -222,14 +224,16 @@ namespace CryptoNote
         return true;
       }
 
-      uint64_t fee = m_currency.minimumFee();
+      // Fee = minimum fee + 0.1% banking fee (for Elderfier rewards)
+      uint64_t banking_fee = (cold_amount * m_currency.minimumFeeBanking()) / m_currency.coin();
+      uint64_t fee = m_currency.minimumFee() + banking_fee;
 
       // Confirmation
       success_msg_writer() << "";
       success_msg_writer() << "Certificate Of Ledger Deposit Summary:";
       success_msg_writer() << "  Amount: " << m_currency.formatAmount(cold_amount) << " TEST";
       success_msg_writer() << "  Term: " << term_label << " (" << cold_term << " blocks)";
-      success_msg_writer() << "  Fee: " << m_currency.formatAmount(fee) << " TEST";
+      success_msg_writer() << "  Fee: " << m_currency.formatAmount(fee) << " TEST (includes " << m_currency.formatAmount(banking_fee) << " banking fee)";
       success_msg_writer() << "  Type: COLD (0xCD) off-chain yield";
       success_msg_writer() << "";
       success_msg_writer() << "Confirm? (1=yes, 2=no): ";

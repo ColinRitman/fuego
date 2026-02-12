@@ -13,143 +13,110 @@ jobs:
     name: Windows
     runs-on: windows-2022
     env:
-      BOOST_ROOT: ""
+      BOOST_ROOT: C:\thirdparties\boost-1.83.0
     steps:
-      - name: Cache vcpkg (Windows)
-        uses: actions/cache@v4
-        with:
-          path: C:\vcpkg\installed
-          key: ${{ runner.os }}-vcpkg-check-${{ hashFiles('**/CMakeLists.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-check-
-            ${{ runner.os }}-vcpkg-
-
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Prepare version
-        shell: pwsh
-        id: setup
+      - name: Add msbuild to PATH
+        uses: microsoft/setup-msbuild@v1.1
+
+      - name: Download and Install Boost 1.83
         run: |
-          $os="windows"
-          $xfg_version="${{ github.sha }}".SubString(0,7)
-          $release_name="xfg-cli-$os-dev-$xfg_version"
-          echo "release_name=${release_name}" >> $env:GITHUB_OUTPUT
-      - name: Install msbuild
-        uses: microsoft/setup-msbuild@v1.3
-
-      - name: Install Boost via Chocolatey
-        shell: pwsh
-        run: |
-          Write-Host "Installing Boost 1.85.0 via Chocolatey..."
-          choco install boost-msvc-14.3 --version=1.85.0 -y
-
-          Write-Host "Locating Boost installation..."
-          $boostPath = "C:\local\boost_1_85_0"
-
-          if (Test-Path $boostPath) {
-            Write-Host "Found Boost at: $boostPath"
-            echo "BOOST_ROOT=$boostPath" >> $env:GITHUB_ENV
-          }
-          else {
-            Write-Error "Boost installation not found at $boostPath!"
-            Write-Host "Searching for Boost in C:\local..."
-            Get-ChildItem "C:\local" -Directory -Filter "boost_*" -ErrorAction SilentlyContinue
-            exit 1
-          }
-      - name: Verify Boost Installation
-        shell: pwsh
-        run: |
-          Write-Host "Verifying Boost installation..."
-          Write-Host "BOOST_ROOT: $env:BOOST_ROOT"
-
-          if (-not (Test-Path $env:BOOST_ROOT)) {
-            Write-Error "BOOST_ROOT path does not exist: $env:BOOST_ROOT"
-            exit 1
-          }
-
-          Write-Host "✓ BOOST_ROOT exists"
-          Write-Host "Contents:"
-          Get-ChildItem $env:BOOST_ROOT | Select-Object -First 10
-
-          if (Test-Path "$env:BOOST_ROOT\boost") {
-            Write-Host "✓ boost subdirectory found"
-          } else {
-            Write-Warning "boost subdirectory not found!"
-          }
-
-          # Show repository structure (informational only)
-          Write-Host "Source directory contents:"
-          Get-ChildItem src | Select-Object -First 15
+          $Url = "https://sourceforge.net/projects/boost/files/boost-binaries/1.83.0/boost_1_83_0-msvc-14.3-64.exe"
+          $OutputPath = "C:\Users\runneradmin\AppData\Local\Temp\boost-installer.exe"
+          curl -L $Url -o $OutputPath
+          Start-Process -Wait -FilePath $OutputPath "/SILENT","/SP-","/SUPPRESSMSGBOXES","/DIR=C:\thirdparties\boost-1.83.0"
 
       - name: Build
-        shell: pwsh
+        shell: powershell
         id: build
         run: |
-          $ErrorActionPreference = "Stop"
           $build_folder = "build"
           $sha = "${{ github.sha }}"
           $xfg_ver = $sha.SubString(0,7)
-          $release_name="fuego-cli-win64-v$xfg_ver"
-
-          Write-Host "Creating build folder..."
-          # Initialize vcpkg
-          if (-not (Test-Path "C:/vcpkg/vcpkg.exe")) {
-            Write-Host "Initializing vcpkg..."
-            git clone https://github.com/Microsoft/vcpkg.git C:/vcpkg
-            cd C:/vcpkg
-            .\bootstrap-vcpkg.bat
-            .\vcpkg integrate install
-            cd ..
-          }
-
-          # Install jsoncpp, Boost, and ICU via vcpkg for consistency
-          Write-Host "Installing jsoncpp, Boost, and ICU via vcpkg..."
-          C:/vcpkg/vcpkg.exe install --triplet x64-windows jsoncpp boost-date-time boost-filesystem boost-program-options boost-regex boost-system boost-thread icu
-          if ($LASTEXITCODE -ne 0) { throw "vcpkg installation failed" }
-
-          # Verify ICU installation
-          Write-Host "Verifying ICU installation..."
-          C:/vcpkg/vcpkg.exe list | findstr icu
-          $icuPath = Get-ChildItem "C:/vcpkg/installed/x64-windows" -Filter "*icu*" -Directory
-          if ($icuPath) {
-            Write-Host "Found ICU at: $($icuPath.FullName)"
-            Get-ChildItem "$($icuPath.FullName)/lib" -Filter "icu*.dll" | Select-Object -First 5
-          } else {
-            Write-Warning "ICU not found in vcpkg installation"
-          }
-
-          # Configure CMake with vcpkg toolchain and explicit source/build directories
-          Write-Host "Configuring CMake with vcpkg toolchain..."
-          cmake -S . -B "$build_folder" `
-            -G "Visual Studio 17 2022" -A x64 `
-            -DBUILD_TESTS=ON `
-            -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" `
-            -DCMAKE_POLICY_DEFAULT_CMP0167=OLD `
-            -DICU_ROOT="C:/vcpkg/installed/x64-windows" `
-            -DICU_INCLUDE_DIR="C:/vcpkg/installed/x64-windows/include" `
-            -DICU_LIBRARY="C:/vcpkg/installed/x64-windows/lib/icuuc.lib" `
-            -DICU_I18N_LIBRARY="C:/vcpkg/installed/x64-windows/lib/icuin.lib" `
-            -DICU_DATA_LIBRARY="C:/vcpkg/installed/x64-windows/lib/icudt.lib"
-          if ($LASTEXITCODE -ne 0) { throw "CMake configuration failed" }
+          $release_name = "fuego-cli-win64-$xfg_ver"
+          mkdir "$build_folder"
           cd "$build_folder"
-          msbuild fuegoX.sln /p:Configuration=Release /m /v:minimal
-          if ($LASTEXITCODE -ne 0) { throw "Build failed" }
+          cmake -G "Visual Studio 17 2022" -A x64 `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBOOST_ROOT="$env:BOOST_ROOT" `
+            -DBOOST_INCLUDE_DIRS="$env:BOOST_ROOT/include" `
+            ..
+          msbuild fuegoX.sln /p:Configuration=Release /m
           cd src\Release
           Compress-Archive -Path *.exe -DestinationPath "$release_name.zip"
           $sha256 = (Get-FileHash "$release_name.zip").Hash
           $asset_path = "./$build_folder/src/Release/$release_name.zip"
-          mkdir "$release_name" -Force
+          mkdir "$release_name"
           cp *.exe "$release_name/"
           echo "sha256=${sha256}" >> $env:GITHUB_OUTPUT
           echo "release_name=${release_name}.zip" >> $env:GITHUB_OUTPUT
           echo "asset_path=${asset_path}" >> $env:GITHUB_OUTPUT
-          echo "xfg_version=${xfg_version}" >> $env:GITHUB_OUTPUT
+          echo "xfg_ver=${xfg_ver}" >> $env:GITHUB_OUTPUT
           echo "artifact_path=$build_folder/src/Release/$release_name" >> $env:GITHUB_OUTPUT
+
       - name: Upload To GH Artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.build.outputs.release_name }}
           path: ${{ steps.build.outputs.artifact_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-mingw:
+    name: MinGW
+    runs-on: windows-2022
+    steps:
+      - uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          install: >-
+            git
+            base-devel
+            mingw-w64-x86_64-toolchain
+            mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-boost
+            mingw-w64-x86_64-openssl
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare version
+        shell: powershell
+        id: setup
+        run: |
+          $xfg_ver="${{ github.sha }}".SubString(0,7)
+          $release_name="fuego-cli-win64-mingw-$xfg_ver"
+          echo "release_name=${release_name}" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        shell: msys2 {0}
+        id: build
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_BUILD_TYPE=Release -DSTATIC=ON
+          cmake --build . --config Release
+
+      - name: Prepare release
+        shell: msys2 {0}
+        run: |
+          mkdir build/fuego
+          mv build/src/fuegod.exe build/fuego/ || true
+          mv build/src/fuegoXd.exe build/fuego/ || true
+          mv build/src/simplewallet.exe build/fuego/ || true
+          mv build/src/walletd.exe build/fuego/ || true
+          mv build/src/optimizer.exe build/fuego/ || true
+          mv build/src/miner.exe build/fuego/ || true
+
+      - name: Upload To GH Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.setup.outputs.release_name }}
+          path: build/fuego
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
