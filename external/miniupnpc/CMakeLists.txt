@@ -25,7 +25,7 @@ if (NO_GETADDRINFO)
 endif ()
 
 if (NOT WIN32)
-  target_compile_definitions(miniupnpc-private INTERFACE 
+  target_compile_definitions(miniupnpc-private INTERFACE
     MINIUPNPC_SET_SOCKET_TIMEOUT
     _BSD_SOURCE _DEFAULT_SOURCE)
   if (NOT CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND NOT CMAKE_SYSTEM_NAME STREQUAL "FreeBSD")
@@ -38,6 +38,8 @@ endif ()
 
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
   target_compile_definitions(miniupnpc-private INTERFACE _DARWIN_C_SOURCE)
+  # Ensure proper system headers are included on macOS
+  target_compile_definitions(miniupnpc-private INTERFACE _DARWIN_C_SOURCE=1)
 endif ()
 
 # Set compiler specific build flags
@@ -50,6 +52,9 @@ endif ()
 if (MSVC)
   target_compile_definitions(miniupnpc-private INTERFACE _CRT_SECURE_NO_WARNINGS)
 endif()
+
+# Ensure system headers are available on all platforms
+target_compile_definitions(miniupnpc-private INTERFACE _GNU_SOURCE)
 
 configure_file (${CMAKE_CURRENT_SOURCE_DIR}/miniupnpcstrings.h.cmake ${CMAKE_CURRENT_BINARY_DIR}/miniupnpcstrings.h)
 target_include_directories(miniupnpc-private INTERFACE ${CMAKE_CURRENT_BINARY_DIR})

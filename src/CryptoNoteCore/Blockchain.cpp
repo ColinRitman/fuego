@@ -2624,11 +2624,11 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             logger(DEBUGGING) << "HEAT commitment indexed: " << Common::podToHex(heatCommit.commitment)
                              << " amount=" << heatCommit.amount;
 
-            // PHASE 5: Extract 0.1% banking fee for elderfier distribution (HEAT burns)
+            // Extract 0.1% banking fee for elderfier distribution (HEAT burns)
             uint64_t heatFee = (heatCommit.amount * 1) / 1000;  // 0.1% = 1/1000
             if (heatFee > 0) {
               m_commitmentIndex.addElderfierFee(heatFee);
-              logger(DEBUGGING) << "HEAT fee extracted: " << heatFee << " satoshi (0.1% of " << heatCommit.amount << ")";
+              logger(DEBUGGING) << "HEAT fee extracted: " << heatFee << " heat (0.1% of " << heatCommit.amount << ")";
             }
           }
           // Check for COLD commitment (0xCD) - term deposit
@@ -2650,11 +2650,11 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             logger(DEBUGGING) << "COLD commitment indexed: " << Common::podToHex(coldCommit.commitment)
                              << " amount=" << coldCommit.amount << " term=" << coldCommit.term;
 
-            // PHASE 5: Extract 0.1% banking fee for elderfier distribution (COLD deposits)
+            // Extract 0.1% banking fee for elderfier distribution (COLD deposits)
             uint64_t coldFee = (coldCommit.amount * 1) / 1000;  // 0.1% = 1/1000
             if (coldFee > 0) {
               m_commitmentIndex.addElderfierFee(coldFee);
-              logger(DEBUGGING) << "COLD fee extracted: " << coldFee << " satoshi (0.1% of " << coldCommit.amount << ")";
+              logger(DEBUGGING) << "COLD fee extracted: " << coldFee << " heat (0.1% of " << coldCommit.amount << ")";
             }
           }
           // Note: TX_EXTRA_ELDERFIER_DEPOSIT (0xEF) is NOT added to ethernalXFG initially
@@ -2701,7 +2701,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
                 if (slashedAmount > 0) {
                   permanentBurns += slashedAmount;
 
-                  logger(INFO) << "ElderFyre Slashing: " << slashedAmount
+                  logger(INFO) << "ElderFier Stake Slashing: " << slashedAmount
                                << " XFG (" << static_cast<int>(slashingPercentage)
                                << "% of deposit) permanently burned & added to Ethernal Flame";
                 }

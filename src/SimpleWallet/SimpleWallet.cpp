@@ -1275,7 +1275,7 @@ bool simple_wallet::create_cold_secret(const std::vector<std::string> &args) {
    success_msg_writer() << "Term: " << term_blocks << " blocks";
    success_msg_writer() << "Chain Code: " << static_cast<int>(chain_code);
    success_msg_writer() << "";
-   success_msg_writer() << "PRIVACY: No ETH address stored on-chain.";
+   success_msg_writer() << "For privacy, your ETH address is added during zkSTARK generation & is never on-chain.";
    success_msg_writer() << "IMPORTANT: Save the secret key! You will need it when generating";
    success_msg_writer() << "           the STARK proof with xfg-stark-cli.";
 
@@ -1396,7 +1396,7 @@ bool simple_wallet::burn(const std::vector<std::string> &args)
     fail_msg_writer() << "Usage: burn <amount>";
     fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
     fail_msg_writer() << "";
-    fail_msg_writer() << "Creates a HEAT burn deposit with term automatically set to FOREVER.";
+    fail_msg_writer() << "Creates an XFG burn with deposit term of FOREVER to mint equivalent amount of HEAT.";
     fail_msg_writer() << "ETH address is provided later when generating STARK proof.";
     return true;
   }
@@ -1445,7 +1445,7 @@ bool simple_wallet::burn(const std::vector<std::string> &args)
     std::string term_label = "HEAT burn (forever)";
 
     // Confirm with user
-    success_msg_writer() << "Creating HEAT burn deposit:";
+    success_msg_writer() << "Creating XFG burn in exchange for minting HEAT tokens:";
     success_msg_writer() << "  Amount: " << m_currency.formatAmount(burn_amount) << " (" << amount_label << ")";
     success_msg_writer() << "  Term: " << term_label << " (" << burn_term << " blocks)";
     success_msg_writer() << "";
@@ -1462,7 +1462,7 @@ bool simple_wallet::burn(const std::vector<std::string> &args)
       return true;
     }
 
-    success_msg_writer() << "HEAT burn deposit transaction sent! ID: " << txId;
+    success_msg_writer() << "XFG burn transaction sent! ID: " << txId;
     return true;
   }
   catch (const std::exception& e)
@@ -1482,7 +1482,7 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
     fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
     fail_msg_writer() << "Valid term codes: 3 (3 months), 12 (1 year)";
     fail_msg_writer() << "";
-    fail_msg_writer() << "ETH address is provided later when generating STARK proof.";
+    fail_msg_writer() << "ETH address is provided later when generating zk-STARK proof.";
     fail_msg_writer() << "  This prevents linking your Fuego wallet to your ETH address on-chain.";
     return true;
   }
@@ -1554,7 +1554,7 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
     success_msg_writer() << "  Amount: " << m_currency.formatAmount(cold_amount) << " (" << amount_label << ")";
     success_msg_writer() << "  Term: " << term_label << " (" << cold_term << " blocks)";
     success_msg_writer() << "";
-    success_msg_writer() << "ETH address is provided later when generating STARK proof.";
+    success_msg_writer() << "ETH address is provided later when generating zk-STARK proof.";
     success_msg_writer() << "  This prevents linking your Fuego wallet to your ETH address on-chain.";
 
     // Send the COLD deposit transaction
@@ -1567,7 +1567,7 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
       return true;
     }
 
-    success_msg_writer() << "COLD deposit transaction sent! ID: " << txId;
+    success_msg_writer() << "COLD transaction sent! ID: " << txId;
     return true;
   }
   catch (const std::exception& e)
@@ -1599,10 +1599,10 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
     success_msg_writer() << "┌─── WHAT IS THIS? ──────────────────────────────────────────┐";
-    success_msg_writer() << "│ The Elderfire StayKing Ceremony is the ritual through which │";
-    success_msg_writer() << "│ you commit to becoming an ELDERFIER on the Fuego network.   │";
-    success_msg_writer() << "│ Elderfiers form the backbone of consensus, signing merkle   │";
-    success_msg_writer() << "│ roots and earning rewards for their vigilance.             │";
+    success_msg_writer() << "│ The Elderfire StayKing Ceremony is the ritual thru which   │";
+    success_msg_writer() << "│ you commit to becoming an ELDERFIER on the Fuego network.  │";
+    success_msg_writer() << "│ Elderfiers enable cross-chain consensus by signing merkle  │";
+    success_msg_writer() << "│ roots and earn banking rewards for their vigilance.        │";
     success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
     success_msg_writer() << "";
     success_msg_writer() << "┌─── WHAT DO YOU NEED? ──────────────────────────────────────┐";
@@ -1612,7 +1612,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "│     • Total commitment: 4,000 XFG                          │";
     success_msg_writer() << "│     • Tagged with 0xEF (Elderfier staking tag)             │";
     success_msg_writer() << "│     • No banking fees applied to your deposits             │";
-    success_msg_writer() << "│     • Network transaction fees: ~0.00005 XFG per deposit   │";
+    success_msg_writer() << "│     • Network transaction fees: ~0.0008 XFG per deposit   │";
     success_msg_writer() << "│                                                            │";
     success_msg_writer() << "│  💰 TOTAL COST:                                            │";
     success_msg_writer() << "│     • 4,000 XFG (deposits) + network fees                  │";
@@ -1625,38 +1625,39 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "│  🔐 ELDERFIER POWERS:                                      │";
     success_msg_writer() << "│     ✓ Sign merkle roots of deposit commitments             │";
     success_msg_writer() << "│     ✓ Participate in consensus validation (69% threshold)  │";
-    success_msg_writer() << "│     ✓ Earn 0.1% of all HEAT/COLD banking fees             │";
+    success_msg_writer() << "│     ✓ Earn 0.1% of all HEAT/COLD banking fees              │";
     success_msg_writer() << "│     ✓ Pro-rata fee distribution (only to signers)          │";
     success_msg_writer() << "│     ✓ Contribute to network security & decentralization    │";
     success_msg_writer() << "│                                                            │";
     success_msg_writer() << "│  🌍 NETWORK REGISTRATION:                                  │";
     success_msg_writer() << "│     • Network automatically detects your 5 deposits        │";
     success_msg_writer() << "│     • You are assigned an Elderfier ID (0-255)             │";
-    success_msg_writer() << "│     • Your deposits become immune to normal withdrawals     │";
-    success_msg_writer() << "│     • You're added to the active elderfiers registry       │";
+    success_msg_writer() << "│     • Stake can only be withdrawn after 1000 block review  │";
+    success_msg_writer() << "│     • You're added to the active Elderfiers registry       │";
     success_msg_writer() << "│                                                            │";
     success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
     success_msg_writer() << "";
     success_msg_writer() << "┌─── HOW DOES IT WORK? ──────────────────────────────────────┐";
     success_msg_writer() << "│                                                            │";
-    success_msg_writer() << "│  1️⃣  YOU perform the ceremony (deposit 4000 XFG)           │";
-    success_msg_writer() << "│  2️⃣  5 transactions are broadcast to the network           │";
-    success_msg_writer() << "│  3️⃣  Miners confirm all 5 deposits in blocks               │";
-    success_msg_writer() << "│  4️⃣  Network auto-detects pattern & registers you         │";
-    success_msg_writer() << "│  5️⃣  You receive an Elderfier ID                          │";
-    success_msg_writer() << "│  6️⃣  Your node can now sign merkle roots independently    │";
-    success_msg_writer() << "│  7️⃣  Fees earned when ≥69% elderfiers validate same root  │";
-    success_msg_writer() << "│  8️⃣  You receive pro-rata share of banking fees           │";
+    success_msg_writer() << "│  1️⃣  YOU perform the ceremony (deposit 4000 XFG)            │";
+    success_msg_writer() << "│  2️⃣  5 transactions are broadcast to the network            │";
+    success_msg_writer() << "│  3️⃣  Miners confirm all 5 deposits in blocks                │";
+    success_msg_writer() << "│  4️⃣  Network auto-detects pattern & registers you           │";
+    success_msg_writer() << "│  5️⃣  You receive an Elderfier ID                            │";
+    success_msg_writer() << "│  6️⃣  Your node can now sign merkle roots independently      │";
+    success_msg_writer() << "│  7️⃣  Fees earned when ≥69% elderfiers validate same root    │";
+    success_msg_writer() << "│  8️⃣  You receive pro-rata share of banking fees             │";
     success_msg_writer() << "│                                                            │";
     success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
     success_msg_writer() << "";
-    success_msg_writer() << "┌─── IMPORTANT NOTES ────────────────────────────────────────┐";
-    success_msg_writer() << "│                                                            │";
+    success_msg_writer() << "┌─── IMPORTANT NOTES ───────────────────────────────────────┐";
+    success_msg_writer() << "│                                                           │";
     success_msg_writer() << "│  ⚠️  This is a PERMANENT commitment to the network         │";
-    success_msg_writer() << "│  ⚠️  Deposits become part of elderfier consensus            │";
-    success_msg_writer() << "│  ⚠️  Only sign roots you believe are valid                 │";
-    success_msg_writer() << "│  ⚠️  Malicious signing can result in slashing              │";
-    success_msg_writer() << "│  ⚠️  You MUST run an elderfier node to earn fees           │";
+    success_msg_writer() << "│  ⚠️  A 1000 block review by Elder Council req'd to unstake │";
+    success_msg_writer() << "│  ⚠️  Deposits become part of Elderfier consensus           │";
+    success_msg_writer() << "│  ⚠️  Only sign roots you believe are of valid chain        │";
+    success_msg_writer() << "│  ⚠️  Malicious signing will result in slashing             │";
+    success_msg_writer() << "│  ⚠️  You MUST run an Elderfier node to sign/earn fees      │";
     success_msg_writer() << "│                                                            │";
     success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
     success_msg_writer() << "";
@@ -1696,14 +1697,14 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
 
     if (confirm != "DRACARYS") {
       success_msg_writer() << "";
-      success_msg_writer() << "🚫 Ceremony aborted. The Elderfire remains dormant.";
+      success_msg_writer() << "🚫 Ceremony aborted. Your Elderfire remains dormant.";
       return true;
     }
 
     success_msg_writer() << "";
     success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
     success_msg_writer() << "║                 🔥⚡ THE CEREMONY BEGINS ⚡🔥               ║";
-    success_msg_writer() << "║              Igniting the Elderfire StayKing ritual...     ║";
+    success_msg_writer() << "║           Igniting the Elderfire StayKing ritual...        ║";
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
 
@@ -1735,7 +1736,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       elderfierDeposit.securityWindow = 28800;  // 8 hours default security window
       elderfierDeposit.metadata.clear();
       elderfierDeposit.signature.clear();
-      elderfierDeposit.isSlashable = true;  // Deposits can be slashed by Elder Council
+      elderfierDeposit.isSlashable = true;  // Deposits can be slashed by Elder Kings Council
 
       // Add elderfier deposit to transaction extra
       CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
@@ -1769,9 +1770,9 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "║         🔥⚡ CEREMONY COMPLETE - ELDERFIRE IGNITED! ⚡🔥    ║";
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
-    success_msg_writer() << "✅ All 5 Elderfire stakes forged successfully!";
+    success_msg_writer() << "✅ All 5 Elderfire deposits staked successfully!";
     success_msg_writer() << "   🔥 Total commitment: 4,000 XFG";
-    success_msg_writer() << "   ⚡ Ritual complete. The fires now burn bright.";
+    success_msg_writer() << "   ⚡ Ceremony complete. The Elderfires burn bright.";
     success_msg_writer() << "";
     success_msg_writer() << "⏳ NETWORK RECOGNITION (Automatic)";
     success_msg_writer() << "   The network recognizes your commitment and will:";
@@ -1780,7 +1781,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "   ✓ Assign you an Elderfier ID (0-255)";
     success_msg_writer() << "   ✓ Add you to the active elderfiers registry";
     success_msg_writer() << "";
-    success_msg_writer() << "⚡ YOUR NEW POWERS";
+    success_msg_writer() << "⚡ YOUR NEW POWERS AS A GUARDIAN OF THE FLAME";
     success_msg_writer() << "   🔐 SIGN merkle roots of deposit commitments";
     success_msg_writer() << "   💰 EARN 0.1% of all HEAT/COLD banking fees";
     success_msg_writer() << "   🌍 PARTICIPATE in 69% consensus validation";
@@ -1792,14 +1793,14 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "   3. Run your elderfier node to sign merkle roots";
     success_msg_writer() << "   4. Start earning fees when consensus is reached";
     success_msg_writer() << "";
-    success_msg_writer() << "🎉 Welcome King, to the Ælder Council!";
+    success_msg_writer() << " 🔥 Welcome King, to The Ælder Council!";
     success_msg_writer() << "";
 
     return true;
   }
   catch (const std::exception& e)
   {
-    fail_msg_writer() << "Error during elderfier registration: " << e.what();
+    fail_msg_writer() << "Error during Elderfier registration: " << e.what();
     return true;
   }
 }
@@ -1906,7 +1907,7 @@ bool simple_wallet::generate_proof(const std::vector<std::string> &args) {
          if (field.type() == typeid(CryptoNote::TransactionExtraHeatCommitment)) {
            const auto& heatCommitment = boost::get<CryptoNote::TransactionExtraHeatCommitment>(field);
 
-           success_msg_writer() << "Found HEAT burn transaction: " << tx_hash;
+           success_msg_writer() << "Found XFG burn transaction: " << tx_hash;
            success_msg_writer() << "Amount: " << m_currency.formatAmount(heatCommitment.amount);
 
            // Generate STARK proof data
@@ -1916,19 +1917,19 @@ bool simple_wallet::generate_proof(const std::vector<std::string> &args) {
            std::cout << "Amount: " << heatCommitment.amount << " atomic XFG" << std::endl;
            std::cout << "=====================================" << std::endl;
 
-           logger(INFO, BRIGHT_GREEN) << "Proof data generated for HEAT burn transaction " << tx_hash;
+           logger(INFO, BRIGHT_GREEN) << "Proof data generated for XFG burn (HEAT) transaction " << tx_hash;
            return true;
          }
          // Check for COLD deposit commitment (0xCD = 205 tag in tx_extra)
          else if (field.type() == typeid(CryptoNote::TransactionExtraColdCommitment)) {
            const auto& coldDeposit = boost::get<CryptoNote::TransactionExtraColdCommitment>(field);
 
-           success_msg_writer() << "Found COLD deposit transaction: " << tx_hash;
+           success_msg_writer() << "Found COLD transaction: " << tx_hash;
            success_msg_writer() << "Amount: " << m_currency.formatAmount(coldDeposit.amount);
            success_msg_writer() << "Term: " << coldDeposit.term << " blocks";
 
            // Generate proof data
-           std::cout << "\n=== COLD DEPOSIT PROOF DATA ===" << std::endl;
+           std::cout << "\n=== Certificate Of Ledger Deposit PROOF DATA ===" << std::endl;
            std::cout << "Transaction Hash: " << tx_hash << std::endl;
            std::cout << "Commitment: " << Common::podToHex(coldDeposit.commitment) << std::endl;
            std::cout << "Amount: " << coldDeposit.amount << " atomic XFG" << std::endl;
@@ -1942,7 +1943,7 @@ bool simple_wallet::generate_proof(const std::vector<std::string> &args) {
        }
      }
 
-     fail_msg_writer() << "No HEAT burn or COLD deposit commitment found in transaction: " << tx_hash;
+     fail_msg_writer() << "No HEAT burn or COLD commitment found in transaction: " << tx_hash;
      return true;
    } catch (const std::exception& e) {
      fail_msg_writer() << "Error processing transaction: " << e.what();
@@ -1989,7 +1990,7 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
     switch (deposit.depositType) {
       case CryptoNote::Deposit::Type::HEAT:
         depositType = "HEAT Burn (0x08)";
-        typeDescription = "Permanent burn deposit - removed from circulation";
+        typeDescription = "Permanent 'forever' deposit - removed from circulation";
         break;
       case CryptoNote::Deposit::Type::COLD:
         depositType = "COLD Yield (0xCD)";
@@ -3096,7 +3097,7 @@ bool simple_wallet::register_alias(const std::vector<std::string> &args) {
     CryptoNote::WalletLegacyTransaction txInfo;
     m_wallet->getTransaction(tx, txInfo);
     success_msg_writer(true) << "";
-    success_msg_writer(true) << "@ Alias registered successfully!";
+    success_msg_writer(true) << " XFG Alias registered successfully!";
     success_msg_writer(true) << "  Alias: @" << alias;
     success_msg_writer(true) << "  TX Hash: " << Common::podToHex(txInfo.hash);
     success_msg_writer(true) << "  The alias will be active after the transaction is confirmed.";
@@ -3134,7 +3135,7 @@ bool simple_wallet::lookup_alias(const std::vector<std::string> &args) {
       invokeJsonCommand(httpClient, "/get_alias_by_address", req, res);
 
       if (res.found) {
-        success_msg_writer() << "@ Alias found:";
+        success_msg_writer() << "XFG @ Alias found:";
         success_msg_writer() << "  Alias:    @" << res.alias;
         success_msg_writer() << "  Address:  " << res.address;
         success_msg_writer() << "  Type:     " << (res.alias_type == 0 ? "Elderfier" : "Regular");
@@ -3150,7 +3151,7 @@ bool simple_wallet::lookup_alias(const std::vector<std::string> &args) {
       invokeJsonCommand(httpClient, "/get_alias", req, res);
 
       if (res.found) {
-        success_msg_writer() << "@ Alias found:";
+        success_msg_writer() << "XFG Alias found:";
         success_msg_writer() << "  Alias:    @" << res.alias;
         success_msg_writer() << "  Address:  " << res.address;
         success_msg_writer() << "  Type:     " << (res.alias_type == 0 ? "Elderfier" : "Regular");
@@ -3183,7 +3184,7 @@ bool simple_wallet::list_aliases(const std::vector<std::string> &args) {
     }
 
     success_msg_writer() << "";
-    success_msg_writer() << "Registered @ Aliases (" << res.total << " total):";
+    success_msg_writer() << "Registered XFG Aliases (" << res.total << " total):";
     success_msg_writer() << "────────────────────────────────────────────────";
 
     for (const auto& entry : res.aliases) {

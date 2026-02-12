@@ -43,6 +43,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Set C standard for proper stdint.h and other C headers
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
    CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR
    CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
@@ -51,6 +55,14 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /std:c++17")
     message(STATUS "Using MSVC compiler with C++17")
+endif()
+
+# Set C standard flags
+if(CMAKE_C_COMPILER_ID STREQUAL "GNU" OR
+   CMAKE_C_COMPILER_ID STREQUAL "Clang" OR
+   CMAKE_C_COMPILER_ID STREQUAL "AppleClang")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -std=c99")
+    message(STATUS "Using ${CMAKE_C_COMPILER_ID} compiler with C99")
 endif()
 
 # Debug/Release flags - platform-specific
@@ -90,10 +102,6 @@ if(APPLE OR FREEBSD)
 
     # Fix header search paths for macOS
     if(APPLE)
-        # Add Homebrew include paths for macOS
-        include_directories(SYSTEM /opt/homebrew/include)
-        include_directories(SYSTEM /usr/local/include)
-
         # Ensure proper C++ standard library is used
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
 
@@ -104,9 +112,32 @@ if(APPLE OR FREEBSD)
             set(CMAKE_OSX_SYSROOT "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
         endif()
 
-        # Add explicit paths for C++ standard library headers
-        include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1)
-        include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1)
+        # Add C++ standard library headers explicitly
+        if(EXISTS "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
+            include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1)
+            include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include)
+        elseif(EXISTS "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+            include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1)
+            include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include)
+        endif()
+
+        # Add C standard library headers
+        if(EXISTS "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
+            include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include)
+        elseif(EXISTS "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+            include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include)
+        endif()
+
+        # Add Homebrew include paths for macOS (after standard library paths)
+        include_directories(SYSTEM /opt/homebrew/include)
+        include_directories(SYSTEM /usr/local/include)
+
+        # Ensure C targets also get proper system includes
+        if(EXISTS "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
+            set(CMAKE_INCLUDE_PATH "${CMAKE_INCLUDE_PATH}:/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include")
+        elseif(EXISTS "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+            set(CMAKE_INCLUDE_PATH "${CMAKE_INCLUDE_PATH}:/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include")
+        endif()
     endif()
 endif()
 
@@ -154,17 +185,6 @@ include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
 message(STATUS "Boost Found: ${Boost_INCLUDE_DIRS}")
 message(STATUS "Found Boost Version: ${Boost_VERSION}")
 
-# Additional fixes for macOS Boost linking
-if(APPLE)
-    # Ensure we're using the correct Boost libraries path
-    if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
-        link_directories("/opt/homebrew/opt/boost@1.85/lib")
-    endif()
-    if(EXISTS "/usr/local/opt/boost@1.85/lib")
-        link_directories("/usr/local/opt/boost@1.85/lib")
-    endif()
-endif()
-
 # Platform-specific Boost library handling
 if(MINGW)
   set(Boost_LIBRARIES "${Boost_LIBRARIES};ws2_32;mswsock;iphlpapi;bcrypt")
@@ -174,6 +194,14 @@ elseif(APPLE)
       set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
   elseif(EXISTS "/usr/local/opt/boost@1.85/lib")
       set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/boost@1.85/lib -Wl,-rpath,/usr/local/opt/boost@1.85/lib")
+  endif()
+
+  # Ensure we're using the correct Boost libraries path
+  if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
+      link_directories("/opt/homebrew/opt/boost@1.85/lib")
+  endif()
+  if(EXISTS "/usr/local/opt/boost@1.85/lib")
+      link_directories("/usr/local/opt/boost@1.85/lib")
   endif()
 elseif(OPENBSD OR ANDROID)
   set(Boost_LIBRARIES "${Boost_LIBRARIES}")
@@ -374,6 +402,7 @@ endif()
 if(APPLE)
     # Enhanced compiler flags for macOS to ensure proper header search
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-deprecated-declarations -Wno-deprecated -Wno-deprecated-builtins -stdlib=libc++")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wextra")
 
     # Ensure we're using the correct C++ standard library
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++")
@@ -383,6 +412,13 @@ if(APPLE)
         set(CMAKE_OSX_SYSROOT "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
     elseif(EXISTS "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
         set(CMAKE_OSX_SYSROOT "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+    endif()
+
+    # Ensure proper system header inclusion
+    if(EXISTS "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
+    elseif(EXISTS "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -isysroot /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
     endif()
 endif()
 

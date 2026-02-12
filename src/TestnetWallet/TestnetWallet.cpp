@@ -66,15 +66,15 @@ namespace CryptoNote
   void CryptoNote::testnet_wallet::register_testnet_commands()
   {
     // Add testnet-specific deposit commands (in addition to inherited ones)
-    m_consoleHandler.setHandler("burn", boost::bind(&testnet_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
-    m_consoleHandler.setHandler("cold", boost::bind(&testnet_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a Certificate of Ledger Deposit (0.8, 8, 80, 800 XFG with terms 3 (3months) or 12 (1yr)");
-    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 TEST deposits (0xEF tag, 4000 TEST total). Creates elderfier registration commitment.");
+    m_consoleHandler.setHandler("burn", boost::bind(&testnet_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn (0.8, 8, 80, 800 TEST)");
+    m_consoleHandler.setHandler("cold", boost::bind(&testnet_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a Certificate of Ledger Deposit (0.8, 8, 80, 800 TEST with terms 3 (3months) or 12 (1yr)");
+    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 TEST deposits (0xEF tag, 4000 TEST total). Creates Elderfier registration commitment.");
     m_consoleHandler.setHandler("list_burns", boost::bind(&testnet_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all burn transactions.");
 
     // @ Alias system commands (inherited from simple_wallet)
-    m_consoleHandler.setHandler("register_alias", boost::bind(&testnet_wallet::register_alias, this, boost::arg<1>()), "register_alias <alias> - Register an xfg@ alias (8 chars: [A-Z0-9] for Elderfiers, [a-z0-9] for regular users)");
-    m_consoleHandler.setHandler("lookup_alias", boost::bind(&testnet_wallet::lookup_alias, this, boost::arg<1>()), "lookup_alias <alias_or_address> - Look up an xfg@ alias by name or wallet address");
-    m_consoleHandler.setHandler("list_aliases", boost::bind(&testnet_wallet::list_aliases, this, boost::arg<1>()), "list_aliases - List all registered xfg@ aliases on the network");
+    m_consoleHandler.setHandler("register_alias", boost::bind(&testnet_wallet::register_alias, this, boost::arg<1>()), "register_alias <alias> - Register a TEST alias (8 chars ONLY: [A-Z0-9] (CAPS-LOCK) req'd for Elderfiers, [a-z0-9] (lowercase) req'd for regular user wallets)");
+    m_consoleHandler.setHandler("lookup_alias", boost::bind(&testnet_wallet::lookup_alias, this, boost::arg<1>()), "lookup_alias <alias_or_address> - Look up a TEST alias by name or wallet address");
+    m_consoleHandler.setHandler("list_aliases", boost::bind(&testnet_wallet::list_aliases, this, boost::arg<1>()), "list_aliases - List all registered TEST aliases on the network");
   }
 
   //----------------------------------------------------------------------------------------------------
@@ -87,7 +87,7 @@ namespace CryptoNote
     if (args.size() != 1)
     {
       fail_msg_writer() << "Usage: burn <amount>";
-      fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
+      fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 TEST";
       return true;
     }
 
@@ -111,7 +111,7 @@ namespace CryptoNote
 
       auto it = std::find(valid_amounts.begin(), valid_amounts.end(), burn_amount);
       if (it == valid_amounts.end()) {
-        fail_msg_writer() << "Invalid amount. Valid tiers: 0.8, 8, 80, 800 XFG";
+        fail_msg_writer() << "Invalid amount. Valid tiers: 0.8, 8, 80, 800 TEST";
         return true;
       }
 
@@ -135,7 +135,7 @@ namespace CryptoNote
         return true;
       }
 
-      // Create HEAT commitment for burn deposit (0x08 tag)
+      // Create HEAT commitment for burn (0x08 tag)
       std::vector<uint8_t> extra;
       Crypto::PublicKey pubkey;
       Crypto::SecretKey seckey;
@@ -150,7 +150,7 @@ namespace CryptoNote
       CryptoNote::addHeatCommitmentToExtra(extra, heatCommitment);
       std::string extraString = std::string(extra.begin(), extra.end());
 
-      success_msg_writer() << "Creating HEAT burn deposit: " << m_currency.formatAmount(burn_amount) << " XFG";
+      success_msg_writer() << "Creating TEST to HEAT burn: " << m_currency.formatAmount(burn_amount) << " TEST";
       CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
 
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
@@ -158,7 +158,7 @@ namespace CryptoNote
         return true;
       }
 
-      success_msg_writer() << "HEAT burn deposit created. TX ID: " << txId;
+      success_msg_writer() << "TEST to HEAT burn transaction created. TX ID: " << txId;
       return true;
     }
     catch (const std::exception& e)
@@ -175,7 +175,7 @@ namespace CryptoNote
     if (args.size() != 2)
     {
       fail_msg_writer() << "Usage: cold <amount> <term_code>";
-      fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
+      fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 TEST";
       fail_msg_writer() << "Valid term codes: 3 (3 months), 12 (1 year)";
       return true;
     }
