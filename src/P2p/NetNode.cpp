@@ -738,7 +738,7 @@ namespace CryptoNote
     {
       logger(Logging::WARNING) << context
                                << "COMMAND_HANDSHAKE Warning, your software may be out of date. Please visit: "
-                               << "https://github.com/fandomgold/fango/releases for the latest version.";
+                               << "https://github.com/usexfg/fuego-suite/releases for the latest version.";
     }
 
     if (!handle_remote_peerlist(rsp.local_peerlist, rsp.node_data.local_time, context)) {

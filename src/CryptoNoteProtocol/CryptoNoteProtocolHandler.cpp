@@ -691,7 +691,7 @@ bool CryptoNoteProtocolHandler::on_connection_synchronized()
       << "**********************************************************************" << ENDL
       << "You are synchronized with the " << networkName << "." << ENDL
       << walletName << " is now at your service, m'lorde." << ENDL
-      << "Type \"help\" to see Fango daemon commands." << ENDL
+      << "Type \"help\" to see available daemon commands." << ENDL
       << ENDL
       << "Please note, the " << networkName << " blockchain will only be saved after" << ENDL
       << "you quit the daemon with \"exit\" command" << ENDL
