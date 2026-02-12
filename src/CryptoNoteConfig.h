@@ -431,6 +431,8 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
 			    { 950000, "c23a6da74e4d1ec8b2bc1debac5578d7c12ea70f3b03a692a62cab8d3c4431e1" },
 			   { 960000, "1ac7447e9819be997209b0bd3fa56edeca31f4cd33068a1808db3ab2c6705f18" },
 			  { 970000, "96f8735193c5435254d32c03d25b3747e059931cd3382c436d91b61cb6c6b871" },
+			 { 980000, "1ae34b8d56a796bf5d82bd80ba9cb81e029deda46a293ebb225b26f33c8e240a"},
+			  { 988000, "dd509fba899ecb1b7b58ea3023624fbd2b34df247056869c0ac4b59d65cfa6bf"}
 
 
 		};
