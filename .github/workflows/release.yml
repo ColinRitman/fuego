@@ -7,20 +7,35 @@ on:
 
 jobs:
   release-macos:
-    runs-on: macos-14
+    runs-on: ${{ matrix.os }}
     strategy:
       matrix:
         include:
-          - arch: intel
+          - os: macos-13
+            arch: intel
             arch_flag: x86_64
             arch_name: intel
-          - arch: apple
+            boost_arch: x86
+            platform_version: 13
+          - os: macos-14
+            arch: apple
             arch_flag: arm64
             arch_name: apple
+            boost_arch: aarch64
+            platform_version: 14
     env:
       CMAKE_BUILD_TYPE: Release
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install Boost
+        uses: MarkusJx/install-boost@v2
+        id: install-boost
+        with:
+          boost_version: 1.86.0
+          platform_version: ${{ matrix.platform_version }}
+          toolset: clang
+          arch: ${{ matrix.boost_arch }}
 
       # -------------------- Cache Dependencies --------------------
       - name: Cache Homebrew packages (macOS)
@@ -36,13 +51,11 @@ jobs:
 
       - name: Install dependencies (macOS)
         run: |
-          brew update
-          brew install ninja qt@5 miniupnpc qrencode icu4c boost@1.85 jsoncpp
+          # Ensure Xcode Command Line Tools are properly configured
+          sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer || true
 
-          # Set environment variables for Boost 1.85
-          BOOST_PREFIX=$(brew --prefix boost@1.85)
-          echo "BOOST_ROOT=$BOOST_PREFIX" >> $GITHUB_ENV
-          echo "Boost 1.85 installed from Homebrew at $BOOST_PREFIX"
+          brew update
+          brew install ninja qt@5 miniupnpc qrencode icu4c jsoncpp
 
           # Try different ICU versions
           if [ -d "$(brew --prefix)/opt/icu4c" ]; then
@@ -62,6 +75,8 @@ jobs:
           echo "CPPFLAGS=-I$ICU_PREFIX/include" >> $GITHUB_ENV
 
       - name: Build macOS ${{ matrix.arch_name }}
+        env:
+          BOOST_ROOT: ${{ steps.install-boost.outputs.BOOST_ROOT }}
         run: |
           build_folder="build/"
           xfg_ver=$(echo ${{ github.ref }} | sed 's|refs/tags/||')
@@ -76,12 +91,18 @@ jobs:
           export LDFLAGS="-L$ICU_ROOT/lib $LDFLAGS"
           export CPPFLAGS="-I$ICU_ROOT/include $CPPFLAGS"
 
-          # Use Boost 1.85 from Homebrew (set in previous step)
-          echo "Boost 1.85 root: $BOOST_ROOT"
+          echo "Using Boost from: $BOOST_ROOT"
           ls -la "$BOOST_ROOT/include/boost/version.hpp" && grep "BOOST_LIB_VERSION" "$BOOST_ROOT/include/boost/version.hpp" || echo "Boost version.hpp not found"
+
+          # Get SDK path for proper C++ include resolution
+          SDKROOT=$(xcrun --show-sdk-path)
+          echo "Using SDK: $SDKROOT"
 
           cmake -S .. -B . -G Ninja -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
                 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch_flag }} \
+                -DCMAKE_OSX_SYSROOT="$SDKROOT" \
+                -DCMAKE_C_FLAGS="-isysroot $SDKROOT" \
+                -DCMAKE_CXX_FLAGS="-isysroot $SDKROOT -stdlib=libc++ -I$SDKROOT/usr/include" \
                 -DBOOST_ROOT="$BOOST_ROOT" \
                 -DBOOST_INCLUDEDIR="$BOOST_ROOT/include" \
                 -DBOOST_LIBRARYDIR="$BOOST_ROOT/lib" \
