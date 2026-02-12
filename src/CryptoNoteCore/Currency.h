@@ -167,7 +167,12 @@ public:
   size_t difficultyCut() const { return m_difficultyCut; }
   size_t difficultyBlocksCountByBlockVersion(uint8_t blockMajorVersion) const
     {
-      if (blockMajorVersion >= BLOCK_MAJOR_VERSION_3)
+      if (blockMajorVersion >= BLOCK_MAJOR_VERSION_7)
+      {
+        // v7+ uses DIFFICULTY_WINDOW_V4 (45 blocks) for LWMA
+        return difficultyBlocksCount4() + 1;
+      }
+      else if (blockMajorVersion >= BLOCK_MAJOR_VERSION_3)
       {
         return difficultyBlocksCount3() + 1;
       }
@@ -183,6 +188,7 @@ public:
   size_t difficultyBlocksCount() const { return m_difficultyWindow + m_difficultyLag; }
   size_t difficultyBlocksCount2() const { return CryptoNote::parameters::DIFFICULTY_WINDOW_V2; }
   size_t difficultyBlocksCount3() const { return CryptoNote::parameters::DIFFICULTY_WINDOW_V3; }
+  size_t difficultyBlocksCount4() const { return CryptoNote::parameters::DIFFICULTY_WINDOW_V4; }
 
     uint64_t depositMinAmount() const { return m_depositMinAmount; }
     uint32_t depositMinTerm() const { return m_depositMinTerm; }
