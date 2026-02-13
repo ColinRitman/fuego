@@ -1097,46 +1097,113 @@ double Currency::getBurnPercentage() const {
 	}
 
 
+	// Helper: Calculate LWMA-1 difficulty for a specific window size
+	// Returns the calculated difficulty using Zawy's LWMA-1 formula
+	static uint64_t calculateLWMA(
+		const std::vector<uint64_t>& timestamps,
+		const std::vector<difficulty_type>& cumulativeDifficulties,
+		uint64_t N,  // window size
+		uint64_t T,  // target time
+		uint64_t minDifficulty) {
+
+		if (timestamps.size() < 2) return minDifficulty;
+
+		uint64_t effectiveN = std::min(N, static_cast<uint64_t>(timestamps.size() - 1));
+		if (effectiveN < 2) return minDifficulty;
+
+		// LWMA-1: L = sum(i * solveTime[i]) for i = 1 to N
+		uint64_t L = 0;
+		uint64_t previous_timestamp = timestamps[0];
+
+		for (uint64_t i = 1; i <= effectiveN; i++) {
+			uint64_t this_timestamp = timestamps[i];
+
+			// Prevent out-of-sequence timestamps
+			if (this_timestamp <= previous_timestamp) {
+				this_timestamp = previous_timestamp + 1;
+			}
+
+			uint64_t solveTime = this_timestamp - previous_timestamp;
+
+			// Clamp solve time (max 6*T as in original LWMA)
+			if (solveTime > 6 * T) solveTime = 6 * T;
+
+			L += i * solveTime;
+			previous_timestamp = this_timestamp;
+		}
+
+		// Prevent L from being too small
+		uint64_t minL = effectiveN * effectiveN * T / 20;
+		if (L < minL) L = minL;
+
+		// Calculate average difficulty
+		uint64_t avgD = minDifficulty;
+		if (cumulativeDifficulties.size() > effectiveN && effectiveN > 0) {
+			avgD = (cumulativeDifficulties[effectiveN] - cumulativeDifficulties[0]) / effectiveN;
+		}
+		if (avgD < minDifficulty) avgD = minDifficulty;
+
+		// LWMA-1 formula: next_D = avg_D * N * (N+1) * T * 0.99 / (2 * L)
+		uint64_t next_D;
+		if (avgD > 2000000 * effectiveN * effectiveN * T) {
+			next_D = (avgD / (200 * L)) * (effectiveN * (effectiveN + 1) * T * 99);
+		} else {
+			next_D = (avgD * effectiveN * (effectiveN + 1) * T * 99) / (200 * L);
+		}
+
+		return std::max(minDifficulty, next_D);
+	}
+
 	difficulty_type Currency::nextDifficultyV6(uint32_t height, uint8_t blockMajorVersion,
 		std::vector<std::uint64_t> timestamps, std::vector<difficulty_type> cumulativeDifficulties) const {
 
-		// Stabilization period protection: Use fixed difficulty for first blocks after upgrade
-		// Commented out but left available in case needed
-		// const uint64_t difficulty_plate = 100000; // Standard stabilization difficulty
-		// const uint32_t upgradeHeight = CryptoNote::parameters::UPGRADE_HEIGHT_V10;
-		// const uint32_t stabilizationPeriod = 15; // Shorter period for DMWDA since it's adaptive
+		// Multi-Window LWMA (MW-LWMA) for v10+
+		// Uses 3 separate LWMA-1 calculations with different window sizes
+		// Combined with fixed weights - no complex adjustments
 
-		// if (height <= upgradeHeight + stabilizationPeriod) {
-		// 	return difficulty_plate;
-		// }
+		const uint64_t T = difficultyTarget();
+		const uint64_t minDifficulty = isTestnet() ? 1000 : 100000;
 
-		// Buffer protection: Limit the size of input vectors to prevent crazy calculations
-		const size_t MAX_DIFFICULTY_WINDOW = 200; // Reasonable limit for DMWDA
-		if (timestamps.size() > MAX_DIFFICULTY_WINDOW) {
-			timestamps.resize(MAX_DIFFICULTY_WINDOW);
-			cumulativeDifficulties.resize(MAX_DIFFICULTY_WINDOW);
-		}
+		// Window sizes based on Zawy guidance: higher N for lower T
+		// T=480s is close to T=600 where N≈60 is recommended
+		const uint64_t N_short  = 20;   // Quick reaction (~2.7 hours)
+		const uint64_t N_medium = 60;   // Correct N for T≈480s (~8 hours)
+		const uint64_t N_long   = 120;  // Trend dampening (~16 hours)
 
-		// Ensure vectors have the same size and minimum required data
-		assert(timestamps.size() == cumulativeDifficulties.size());
+		// Fixed weights - medium dominates for stability
+		const uint64_t W_short  = 25;   // 20% - responsiveness
+		const uint64_t W_medium = 50;   // 55% - stability anchor
+		const uint64_t W_long   = 25;   // 25% - trend dampening
+
+		// Sanity checks
 		if (timestamps.size() != cumulativeDifficulties.size() || timestamps.size() < 3) {
-			return 100000; // Minimum difficulty for insufficient data
+			return minDifficulty;
 		}
 
-		// Use DMWDA (Dynamic Multi-Window Difficulty Adjustment) for BMV10+
-		AdaptiveDifficulty::DifficultyConfig config = getDefaultFuegoConfig(isTestnet());
-		AdaptiveDifficulty dmwda(config);
+		// Calculate LWMA for each window
+		uint64_t D_short = calculateLWMA(timestamps, cumulativeDifficulties, N_short, T, minDifficulty);
+		uint64_t D_medium = calculateLWMA(timestamps, cumulativeDifficulties, N_medium, T, minDifficulty);
+		uint64_t D_long = calculateLWMA(timestamps, cumulativeDifficulties, N_long, T, minDifficulty);
 
-		// Convert difficulty_type vector to uint64_t vector as expected by DMWDA
-		std::vector<uint64_t> difficulties;
-		for (const auto& diff : cumulativeDifficulties) {
-			difficulties.push_back(static_cast<uint64_t>(diff));
+		// Weighted average (integer math to avoid floating point)
+		uint64_t next_D = (D_short * W_short + D_medium * W_medium + D_long * W_long) / (W_short + W_medium + W_long);
+
+		// Enforce minimum
+		if (next_D < minDifficulty) {
+			next_D = minDifficulty;
 		}
 
-		uint64_t calculatedDifficulty = dmwda.calculateNextDifficulty(height, timestamps, difficulties, isTestnet());
+		// Round to nice numbers for readability
+		uint64_t i = 1000000000;
+		while (i > 1) {
+			if (next_D > i * 100) {
+				next_D = ((next_D + i / 2) / i) * i;
+				break;
+			}
+			i /= 10;
+		}
 
-		// Final safety check: enforce minimum difficulty
-		return std::max(static_cast<uint64_t>(100000), calculatedDifficulty);
+		return next_D;
 	}
 
 
@@ -1274,7 +1341,6 @@ double Currency::getBurnPercentage() const {
     minimumFee(parameters::MINIMUM_FEE); // Use the configured default
     minimumFeeV1(parameters::MINIMUM_FEE_V1);
     minimumFeeV2(parameters::MINIMUM_FEE_V2);
-    minimumFeeBanking(parameters::MINIMUM_FEE_BANKING_PERCENT);
     defaultDustThreshold(parameters::DEFAULT_DUST_THRESHOLD);
 
     difficultyTarget(parameters::DIFFICULTY_TARGET);
@@ -1295,8 +1361,7 @@ double Currency::getBurnPercentage() const {
 
     // Burn deposit configuration
     burnDepositMinAmount(parameters::BURN_DEPOSIT_MIN_AMOUNT);
-    burnDepositStandardAmount(parameters::BURN_DEPOSIT_STANDARD_AMOUNT);
-    burnDepositLargeAmount(parameters::BURN_DEPOSIT_LARGE_AMOUNT);
+
     depositTermForever(parameters::DEPOSIT_TERM_FOREVER);
 
     // HEAT conversion rate (0.8 XFG = 8M HEAT)

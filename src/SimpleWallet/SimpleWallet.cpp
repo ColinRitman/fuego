@@ -1462,8 +1462,8 @@ bool simple_wallet::burn(const std::vector<std::string> &args)
     success_msg_writer() << "Burn XFG Transaction Summary:";
     success_msg_writer() << "  Amount: " << m_currency.formatAmount(burn_amount) << " XFG (PERMANENT)";
     success_msg_writer() << "  Banking Fee: " << m_currency.formatAmount(banking_fee) << " XFG (0.1% of amount to Elderfiers)";
-    success_msg_writer() << "  Network Fee: " << m_currency.formatAmount(fee) << " XFG (minimum txn fee to miners)";
-    success_msg_writer() << "  Commitment Type: 〘HEAT〙 ✺  These funds will be BURNED (enabling you to mint HEAT)";
+    success_msg_writer() << "  Network Fee: " << m_currency.formatAmount(m_currency.minimumFee()) << " XFG (minimum txn fee to miners)";
+    success_msg_writer() << "  Commitment Type: 〘HEAT〙 These funds will be BURNED (enabling HEAT minting rights)";
     success_msg_writer() << "";
     success_msg_writer() << "Confirm? (1) OK  (2) No ";
 
@@ -1474,9 +1474,23 @@ bool simple_wallet::burn(const std::vector<std::string> &args)
       success_msg_writer() << "Cancelled.";
       return true;
     }
+
+    // Create HEAT commitment for burn (0x08 tag)
+    std::vector<uint8_t> extra;
+    Crypto::PublicKey pubkey;
+    Crypto::SecretKey seckey;
+    Crypto::generate_keys(pubkey, seckey);
+    Crypto::Hash heatCommit = Crypto::cn_fast_hash(pubkey.data, sizeof(pubkey.data));
+
+    CryptoNote::TransactionExtraHeatCommitment heatCommitment;
+    heatCommitment.commitment = heatCommit;
+    heatCommitment.amount = burn_amount;
+    heatCommitment.metadata = {0x08};  // Tag 0x08 for HEAT
+
+    CryptoNote::addHeatCommitmentToExtra(extra, heatCommitment);
+    std::string extraString(extra.begin(), extra.end());
+
     // Send the burn deposit transaction
-    uint64_t fee = m_currency.minimumFee();
-    std::string extraString = "";
     CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
 
     if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
@@ -1504,8 +1518,6 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
     fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
     fail_msg_writer() << "Valid term codes: 3 (3 months) or 12 (1 year)";
     fail_msg_writer() << "";
-    fail_msg_writer() << "ETH address is provided later when generating zk-STARK proof.";
-    fail_msg_writer() << "  This prevents linking your Fuego wallet to your ETH address on-chain.";
     return true;
   }
 
@@ -1579,10 +1591,9 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
       banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
     } else if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_2) {
       banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
-    } else (cold_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
+    } else if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
       banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
     }
-    // Fee = minimum fee
     uint64_t fee = m_currency.minimumFee();
 
     // Confirmation
@@ -1591,7 +1602,7 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
     success_msg_writer() << "  Amount: " << m_currency.formatAmount(cold_amount) << " XFG";
     success_msg_writer() << "  Term: " << term_label << " (" << cold_term << " blocks)";
     success_msg_writer() << "  Banking Fee: " << m_currency.formatAmount(banking_fee) << " XFG (0.1% of amount to Elderfiers)";
-    success_msg_writer() << "  Network Fee: " << m_currency.formatAmount(fee) << " XFG (minimum txn fee to miners)";
+    success_msg_writer() << "  Network Fee: " << m_currency.formatAmount(m_currency.minimumFee()) << " XFG (minimum txn fee to miners)";
     success_msg_writer() << "  Commitment Type: 【COLD】 ▋ Off-chain (CD) interest yield";
     success_msg_writer() << "";
 
@@ -1601,9 +1612,27 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
     std::getline(std::cin, confirm);
 
     if (confirm != "1" && confirm != "OK" && confirm != "Ok" && confirm != "ok") {
+      success_msg_writer() << "Cancelled.";
+      return true;
+    }
 
-    // Send the COLD transaction
-    std::string extraString = "";
+    // Create COLD commitment for yield deposit (0xCD tag)
+    std::vector<uint8_t> extra;
+    Crypto::PublicKey pubkey;
+    Crypto::SecretKey seckey;
+    Crypto::generate_keys(pubkey, seckey);
+    Crypto::Hash coldCommit = Crypto::cn_fast_hash(pubkey.data, sizeof(pubkey.data));
+
+    CryptoNote::TransactionExtraColdCommitment coldCommitment;
+    coldCommitment.commitment = coldCommit;
+    coldCommitment.amount = cold_amount;
+    coldCommitment.term = cold_term;
+    coldCommitment.claimChainCode = 1;  // Default to ETH chain
+
+    CryptoNote::addColdCommitmentToExtra(extra, coldCommitment);
+    std::string extraString(extra.begin(), extra.end());
+
+    // Send the COLD deposit transaction
     CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee, extraString, 0);
 
     if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {

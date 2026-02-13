@@ -1783,11 +1783,12 @@ namespace PaymentService
         if (!isForeverTerm) {
           /* For regular deposits, validate term constraints */
 
-          /* Deposits should be either min_term, max_term, or DEPOSIT_TERM_FOREVER (HEAT burn) */
+          /* Use testnet or mainnet term limits */
           bool isTestnet = this->currency.isTestnet();
           uint32_t min_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;
           uint32_t max_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;
 
+          /* Deposits should be either min_term, max_term, or DEPOSIT_TERM_FOREVER (HEAT burn) */
           bool isValidTerm = (term == min_term ||
                              term == max_term ||
                              term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
@@ -1797,16 +1798,12 @@ namespace PaymentService
 
           /* Skip range validation for HEAT burn (DEPOSIT_TERM_FOREVER) */
           if (term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
-            /* Use testnet or mainnet term limits */
-            bool isTestnet = this->currency.isTestnet();
-            uint32_t min_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;
-            uint32_t max_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;
-            /* The minimum term should be COLD_MIN_TERM */
+            /* The minimum term should be min_term */
             if (term < min_term) {
               return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_SMALL);
             }
 
-            /* Current deposit rates are for a maximum term of DEPOSIT_MAX_TERM */
+            /* Current deposit rates are for a maximum term of max_term */
             if (term > max_term) {
               return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_BIG);
             }
@@ -1821,7 +1818,7 @@ namespace PaymentService
           minAmount = CryptoNote::parameters::BURN_DEPOSIT_MIN_AMOUNT;
         } else {
           /* Yield deposits (0x07) use lower minimum: 8 XFG (no maximum) */
-          minAmount = CryptoNote::parameters::YIELD_DEPOSIT_MIN_AMOUNT;
+          minAmount = CryptoNote::parameters::DEPOSIT_MIN_AMOUNT;
         }
 
         /* Validate minimum deposit amount */
@@ -1923,7 +1920,7 @@ namespace PaymentService
           minAmount = CryptoNote::parameters::BURN_DEPOSIT_MIN_AMOUNT;
         } else {
           /* Yield deposits (0x07) use lower minimum: 8 XFG (no maximum) */
-          minAmount = CryptoNote::parameters::YIELD_DEPOSIT_MIN_AMOUNT;
+          minAmount = CryptoNote::parameters::DEPOSIT_MIN_AMOUNT;
         }
 
         /* Validate minimum deposit amount */
@@ -2378,10 +2375,10 @@ namespace PaymentService
 
     try {
       // Use BurnProofDataFileGenerator to create BPDF
-      // Note: recipientAddress is no longer used in BPDF for privacy reasons
       std::error_code bpdfResult = CryptoNote::BurnProofDataFileGenerator::generateBPDF(
         transactionHash,
         secret,
+        recipientAddress,
         amount,
         outputPath
       );
@@ -2400,6 +2397,7 @@ namespace PaymentService
 
   std::error_code WalletService::generateBurnProofDataFile(
       const std::string& transactionHash,
+      const std::string& recipientAddress,
       const std::string& outputPath,
       const std::string& networkId) {
 
@@ -2419,6 +2417,7 @@ namespace PaymentService
       std::error_code bpdfResult = CryptoNote::BurnProofDataFileGenerator::generateBPDF(
         transactionHash,
         secret,
+        recipientAddress,
         amount,
         outputPath
       );

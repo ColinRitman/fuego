@@ -412,6 +412,7 @@ std::error_code PaymentServiceJsonRpcServer::handleCreateBurnDepositWithProof(co
     std::string outputPath = service.getDefaultWalletPath() + "/bpdf/" + response.transactionHash + ".json";
     std::error_code bpdfResult = service.generateBurnProofDataFile(
       response.transactionHash,
+      request.recipientAddress,
       outputPath,
       secret,
       amount,
@@ -515,6 +516,7 @@ std::error_code PaymentServiceJsonRpcServer::handleCreateBurnDepositLargeWithPro
     std::string outputPath = service.getDefaultWalletPath() + "/bpdf/" + response.transactionHash + ".json";
     std::error_code bpdfResult = service.generateBurnProofDataFile(
       response.transactionHash,
+      request.recipientAddress,
       outputPath,
       secret,
       amount,
@@ -547,6 +549,7 @@ std::error_code PaymentServiceJsonRpcServer::handleGenerateBurnProofDataFile(con
     // Note: recipientAddress is no longer used for privacy reasons
     std::error_code bpdfResult = service.generateBurnProofDataFile(
       request.transactionHash,
+      request.recipientAddress,
       outputPath,
       networkId
     );
@@ -588,9 +591,9 @@ std::error_code PaymentServiceJsonRpcServer::handleGenerateBurnProofDataFileAuto
     }
 
     // Generate BPDF using local secret
-    // Note: recipientAddress is no longer used for privacy reasons
     std::error_code bpdfResult = service.generateBurnProofDataFile(
       request.transactionHash,
+      request.recipientAddress,
       outputPath,
       secret,
       amount,

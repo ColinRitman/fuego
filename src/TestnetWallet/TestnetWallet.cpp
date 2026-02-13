@@ -246,7 +246,8 @@ namespace CryptoNote
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
       } else if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_2) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
-      } else (cold_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
+      } else if
+          (cold_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
       }
       // Fee = minimum fee
@@ -287,7 +288,7 @@ namespace CryptoNote
       CryptoNote::addColdCommitmentToExtra(extra, coldCommitment);
       std::string extraString = std::string(extra.begin(), extra.end());
 
-      success_msg_writer() << "Creating COLD deposit: " << m_currency.formatAmount(cold_amount) << " XFG for " << term_label;
+      success_msg_writer() << "Creating COLD transaction: " << m_currency.formatAmount(cold_amount) << " XFG for " << term_label;
       CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee, extraString, 0);
 
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
@@ -295,7 +296,7 @@ namespace CryptoNote
         return true;
       }
 
-      success_msg_writer() << "COLD deposit created. TX ID: " << txId;
+      success_msg_writer() << "COLD txn created. TX ID: " << txId;
       return true;
     }
     catch (const std::exception& e)
@@ -319,20 +320,20 @@ namespace CryptoNote
     {
       success_msg_writer() << "";
       success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-      success_msg_writer() << "║            🔥⚡  ELDERFIRE STAYKING CEREMONY  ⚡🔥          ║";
-      success_msg_writer() << "║                    (TESTNET ELDERFIER REGISTRATION)         ║";
+      success_msg_writer() << "║            🔥⚡  TESTIFIER STAYKING CEREMONY  ⚡🔥          ║";
+      success_msg_writer() << "║               (TESTNET ELDERFIER REGISTRATION)             ║";
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
-      success_msg_writer() << "Testing elderfier registration on testnet!";
-      success_msg_writer() << "This creates 5 deposits of 800 XFG each (4000 XFG total)";
+      success_msg_writer() << "Testing Testifier registration on testnet!";
+      success_msg_writer() << "This creates 5 deposits of 800 TEST each (4000 TEST total)";
       success_msg_writer() << "";
 
       uint64_t balance = m_wallet->actualBalance();
       uint64_t required = 4000 * CryptoNote::parameters::COIN;
       uint64_t fee = m_currency.minimumFee();
 
-      success_msg_writer() << "Balance: " << m_currency.formatAmount(balance) << " XFG";
-      success_msg_writer() << "Required: " << m_currency.formatAmount(required + (5 * fee)) << " XFG";
+      success_msg_writer() << "Balance: " << m_currency.formatAmount(balance) << " TEST";
+      success_msg_writer() << "Required: " << m_currency.formatAmount(required + (5 * fee)) << " TEST";
       success_msg_writer() << "";
 
       if (balance < required + (5 * fee)) {
@@ -341,17 +342,17 @@ namespace CryptoNote
       }
 
       std::string confirm;
-      success_msg_writer() << "⚡ Type 'TESTFYRE' to begin ceremony: ";
+      success_msg_writer() << "⚡ Type 'TESTIFY' to begin ceremony: ";
       std::getline(std::cin, confirm);
 
-      if (confirm != "TESTFYRE") {
+      if (confirm != "TESTIFY") {
         success_msg_writer() << "Ceremony cancelled.";
         return true;
       }
 
       uint64_t amount_per_deposit = 800 * CryptoNote::parameters::COIN;
       success_msg_writer() << "";
-      success_msg_writer() << "🔥 Creating 5 TestaFyre stakes...";
+      success_msg_writer() << "🔥 Creating 5 TestiFier stakes...";
       success_msg_writer() << "";
 
       for (int i = 0; i < 5; ++i) {
@@ -400,8 +401,8 @@ namespace CryptoNote
       success_msg_writer() << "║         🔥⚡ TESTNET CEREMONY COMPLETE! ⚡🔥               ║";
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
-      success_msg_writer() << "✅ All 5 testafier stakes created (4000 XFG total)";
-      success_msg_writer() << "🎉 Ready for testafier testing on testnet!";
+      success_msg_writer() << "✅ All 5 Testifier stakes created (4000 TEST total)";
+      success_msg_writer() << "🎉 Ready for Testifier testing on testnet!";
       success_msg_writer() << "";
 
       return true;

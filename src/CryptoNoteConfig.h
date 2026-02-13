@@ -51,8 +51,6 @@ namespace CryptoNote
 		const uint64_t MINIMUM_FEE_V2 = UINT64_C(80000);	/* 0.008 XFG  (80Kħ) */
 		const uint64_t MINIMUM_FEE_8KH = UINT64_C(8000);	/* 0.0008 XFG (8Kħ)  BMv10+ Flat Fee */
 		const uint64_t MINIMUM_FEE = MINIMUM_FEE_8KH;
-		//const uint64_t MINIMUM_FEE_BANKING_PERCENT = UINT64_C(125000); // 0.125% fee for COLD/YIELD deposits
-		//const uint64_t MINIMUM_FEE_BANKING = MINIMUM_FEE_BANKING_PERCENT;
 
 		const uint64_t BANK_FEE_TIER_0 = UINT64_C(8000);  /* 0.0008 XFG / (8 Kiloħeat) for 0.8 XFG burns */
 		const uint64_t BANK_FEE_TIER_1 = UINT64_C(80000);  /* 0.008 XFG / (80Kħ) for 8 XFG burns */
