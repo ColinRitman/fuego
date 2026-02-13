@@ -597,7 +597,7 @@ TransactionId WalletLegacy::sendTransaction(Crypto::SecretKey& transactionSK,
      is larger than 0 */
   if (ttl == 0) 
   {
-    fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+    fee = m_currency.minimumFee();
   }
 
   /* This is the logic that determins if it is an optimization transaction */
@@ -609,7 +609,7 @@ TransactionId WalletLegacy::sendTransaction(Crypto::SecretKey& transactionSK,
     transfer.amount = 0;
     transfers.push_back(transfer);
     optimize = true;
-    fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+    fee = m_currency.minimumFee();
   }
 
   TransactionId txId = 0;
@@ -779,7 +779,7 @@ TransactionId WalletLegacy::sendFusionTransaction(const std::list<TransactionOut
   destination.amount = 0;
 
   /* For transaction pool differentiation, fusion and optimization should be 50 X */
-  fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+  fee = m_currency.minimumFee();
   
   for (auto& out : fusionInputs) {
     destination.amount += out.amount;
@@ -813,7 +813,7 @@ TransactionId WalletLegacy::deposit(uint32_t term, uint64_t amount, uint64_t fee
   std::unique_ptr<WalletRequest> request;
   std::deque<std::unique_ptr<WalletLegacyEvent>> events;
 
-  fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+  fee = m_currency.minimumFee(); // BMV10+: 8KH (0.0008 XFG), BMV8+: 80KH (0.008 XFG)
 
   {
     std::unique_lock<std::mutex> lock(m_cacheMutex);
@@ -841,7 +841,7 @@ TransactionId WalletLegacy::withdrawDeposits(const std::vector<DepositId>& depos
   std::unique_ptr<WalletRequest> request;
   std::deque<std::unique_ptr<WalletLegacyEvent>> events;
 
-  fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+  fee = m_currency.minimumFee(); // BMV10+: 8KH (0.0008 XFG)
 
   {
     std::unique_lock<std::mutex> lock(m_cacheMutex);

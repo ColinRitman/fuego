@@ -2133,7 +2133,9 @@ bool Blockchain::check_tx_outputs(const Transaction& tx, uint32_t height) const 
       } else {
         const auto& multisignatureOutput = ::boost::get<MultisignatureOutput>(out.target);
         if (multisignatureOutput.term != 0 && height >= 821000) {
-          if (multisignatureOutput.term < m_currency.depositMinTerm() || multisignatureOutput.term > m_currency.depositMaxTerm()) {
+          // Allow DEPOSIT_TERM_FOREVER for burn deposits (HEAT)
+          if (multisignatureOutput.term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER &&
+              (multisignatureOutput.term < m_currency.depositMinTerm() || multisignatureOutput.term > m_currency.depositMaxTerm())) {
             logger(INFO, BRIGHT_WHITE) << getObjectHash(tx) << " multisignature output has invalid term: " << multisignatureOutput.term;
             return false;
           } else if (out.amount < m_currency.depositMinAmount()) {
@@ -2449,7 +2451,7 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
 
     uint64_t in_amount = m_currency.getTransactionAllInputsAmount(transactions[i], block.height);
 	  uint64_t out_amount = getOutputAmount(transactions[i]);
-    uint64_t fee = in_amount < out_amount ? CryptoNote::parameters::MINIMUM_FEE : in_amount - out_amount;
+    uint64_t fee = in_amount < out_amount ? m_currency.minimumFee(blockData.majorVersion) : in_amount - out_amount;
 
     bool isTransactionValid = true;
     if (block.bl.majorVersion < BLOCK_MAJOR_VERSION_8 && transactions[i].version > TRANSACTION_VERSION_1) {

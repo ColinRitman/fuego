@@ -291,7 +291,7 @@ namespace CryptoNote
 
     if (height >= parameters::UPGRADE_HEIGHT_V8) {
       tvc.m_added_to_pool = true;
-      tvc.m_should_be_relayed = inputsValid && (fee == m_currency.minimumFee() || isFusionTransaction || isWithdrawalTransaction || ttl.ttl != 0);
+      tvc.m_should_be_relayed = inputsValid && (fee >= m_currency.minimumFee() || isFusionTransaction || isWithdrawalTransaction || ttl.ttl != 0);
       tvc.m_verification_failed = true;
     } else {
       tvc.m_added_to_pool = true;

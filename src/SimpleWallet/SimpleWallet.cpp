@@ -2696,7 +2696,7 @@ bool simple_wallet::optimize_outputs(const std::vector<std::string>& args) {
     std::vector<CryptoNote::WalletLegacyTransfer> transfers;
     std::vector<CryptoNote::TransactionMessage> messages;
     std::string extraString;
-    uint64_t fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+    uint64_t fee = m_currency.minimumFee();
     uint64_t mixIn = 0;
     uint64_t unlockTimestamp = 0;
     uint64_t ttl = 0;
@@ -2760,7 +2760,7 @@ bool simple_wallet::optimize_all_outputs(const std::vector<std::string>& args) {
       std::vector<CryptoNote::WalletLegacyTransfer> transfers;
       std::vector<CryptoNote::TransactionMessage> messages;
       std::string extraString;
-      uint64_t fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+      uint64_t fee = m_currency.minimumFee();
       uint64_t mixIn = 0;
       uint64_t unlockTimestamp = 0;
       uint64_t ttl = 0;
@@ -3146,7 +3146,7 @@ bool simple_wallet::register_alias(const std::vector<std::string> &args) {
     }
 
     std::vector<CryptoNote::TransactionMessage> messages;
-    uint64_t fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+    uint64_t fee = m_currency.minimumFee();
     uint64_t mixIn = 0;
     uint64_t unlockTimestamp = 0;
     uint64_t ttl = 0;

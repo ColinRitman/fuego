@@ -1133,9 +1133,47 @@ namespace CryptoNote
 
   bool getHeatCommitmentFromExtra(const std::vector<uint8_t> &tx_extra, TransactionExtraHeatCommitment &commitment)
   {
-    // CODL3 implementation will parse the extra field to extract HEAT commitment
-    // This is a placeholder until CODL3 merge-mining is implemented - full implementation needss parsing logic
-    return false;
+    // Find the 0x08 tag in tx_extra
+    size_t pos = 0;
+    bool found = false;
+
+    while (pos < tx_extra.size()) {
+      if (tx_extra[pos] == TX_EXTRA_HEAT_COMMITMENT) {
+        found = true;
+        pos++; // Skip tag
+        break;
+      }
+      pos++;
+    }
+
+    if (!found) return false;
+
+    // Deserialize commitment hash (32 bytes)
+    if (pos + 32 > tx_extra.size()) return false;
+    std::memcpy(commitment.commitment.data, &tx_extra[pos], 32);
+    pos += 32;
+
+    // Deserialize amount (8 bytes, little-endian)
+    if (pos + 8 > tx_extra.size()) return false;
+    commitment.amount = 0;
+    for (int i = 0; i < 8; ++i) {
+      commitment.amount |= static_cast<uint64_t>(tx_extra[pos + i]) << (i * 8);
+    }
+    pos += 8;
+
+    // Deserialize metadata size and data
+    if (pos >= tx_extra.size()) return false;
+    uint8_t metadataSize = tx_extra[pos];
+    pos += 1;
+
+    if (metadataSize > 0) {
+      if (pos + metadataSize > tx_extra.size()) return false;
+      commitment.metadata.assign(tx_extra.begin() + pos, tx_extra.begin() + pos + metadataSize);
+    } else {
+      commitment.metadata.clear();
+    }
+
+    return true;
   }
 
   // Yield commitment helper functions
