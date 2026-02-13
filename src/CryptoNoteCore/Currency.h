@@ -559,6 +559,13 @@ public:
     // Set testnet-specific address prefix when testnet mode is enabled
     if (val) {
       publicAddressBase58Prefix(CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET);
+      // Set testnet-specific deposit terms
+      depositMinTerm(parameters::TESTNET_COLD_MIN_TERM);
+      depositMaxTerm(parameters::TESTNET_COLD_MAX_TERM);
+    } else {
+      // Set mainnet deposit terms when switching from testnet to mainnet
+      depositMinTerm(parameters::COLD_MIN_TERM);
+      depositMaxTerm(parameters::COLD_MAX_TERM);
     }
 
     return *this;
