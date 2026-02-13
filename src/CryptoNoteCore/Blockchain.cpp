@@ -918,11 +918,32 @@ bool Blockchain::getBlockHeight(const Crypto::Hash& blockId, uint32_t& blockHeig
 
 difficulty_type Blockchain::getDifficultyForNextBlock() {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+
+  uint32_t currentHeight = static_cast<uint32_t>(m_blocks.size());
+  uint8_t BlockMajorVersion = getBlockMajorVersionForHeight(currentHeight);
+  size_t difficultyWindow = m_currency.difficultyBlocksCountByBlockVersion(BlockMajorVersion);
+
+  // Get the last checkpoint height to detect checkpoint zone transition
+  std::vector<uint32_t> checkpointHeights = m_checkpoints.getCheckpointHeights();
+  uint32_t lastCheckpointHeight = checkpointHeights.empty() ? 0 : checkpointHeights.back();
+
+  // Stabilization period: use fixed difficulty for N blocks after exiting checkpoint zone
+  // This prevents garbage difficulty from corrupted cumulative_difficulty during checkpoint sync
+  if (lastCheckpointHeight > 0 && currentHeight > lastCheckpointHeight &&
+      currentHeight <= lastCheckpointHeight + difficultyWindow + 10) {
+    // Use a reasonable stabilization difficulty based on recent network state
+    // This should be approximately the expected difficulty at the checkpoint boundary
+    difficulty_type stabilizationDifficulty = 500000; // ~500K is reasonable for mainnet post-v9
+    logger(DEBUGGING) << "Using stabilization difficulty " << stabilizationDifficulty
+                      << " for height " << currentHeight
+                      << " (checkpoint transition, last checkpoint: " << lastCheckpointHeight << ")";
+    return stabilizationDifficulty;
+  }
+
   std::vector<uint64_t> timestamps;
   std::vector<difficulty_type> cumulative_difficulties;
-  uint8_t BlockMajorVersion = getBlockMajorVersionForHeight(static_cast<uint32_t>(m_blocks.size()));
   size_t offset;
-  offset = m_blocks.size() - std::min(m_blocks.size(), static_cast<uint64_t>(m_currency.difficultyBlocksCountByBlockVersion(BlockMajorVersion)));
+  offset = m_blocks.size() - std::min(m_blocks.size(), static_cast<uint64_t>(difficultyWindow));
 
   if (offset == 0) {
     ++offset;
@@ -931,7 +952,7 @@ difficulty_type Blockchain::getDifficultyForNextBlock() {
     timestamps.push_back(m_blocks[offset].bl.timestamp);
     cumulative_difficulties.push_back(m_blocks[offset].cumulative_difficulty);
   }
-  return m_currency.nextDifficulty(static_cast<uint32_t>(m_blocks.size()), BlockMajorVersion, timestamps, cumulative_difficulties);
+  return m_currency.nextDifficulty(currentHeight, BlockMajorVersion, timestamps, cumulative_difficulties);
 }
 
 uint64_t Blockchain::getBlockTimestamp(uint32_t height) {

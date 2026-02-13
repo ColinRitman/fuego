@@ -874,7 +874,7 @@ bool simple_wallet::new_wallet(const std::string &wallet_file, const std::string
     std::string secretKeysData = std::string(reinterpret_cast<char*>(&keys.spendSecretKey), sizeof(keys.spendSecretKey)) + std::string(reinterpret_cast<char*>(&keys.viewSecretKey), sizeof(keys.viewSecretKey));
     std::string guiKeys = Tools::Base58::encode_addr(CryptoNote::parameters::CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX, secretKeysData);
 
-    logger(INFO, BRIGHT_GREEN) << "xfg_wallet is an open-source, client-side, free wallet which allows you to send & receive Fuego instantly on the blockchain. Only YOU are in control of your funds & your private keys. When you generate a new wallet, send, receive or deposit Fuego - everything happens locally. Your seed is never transmitted, received or stored. IT IS IMPERATIVE that you write down, print, or save your seed phrase somewhere safe. The backup of keys is your responsibility only. If you lose your seed, your account CANNOT be recovered. Freedom isn't free - to truly be our own bank, we must treat fuego keys just like the credit banks (backin the old days) did with their vault keys. Schofield's 2nd Law of Computing states that data doesn't really exist unless you have at least two copies of it-- then keep each somewhere safe & secure.   " << std::endl << std::endl;
+    logger(INFO, BRIGHT_GREEN) << "fire_wallet is an open-source, client-side, free wallet which allows you to send & receive Fuego instantly on the blockchain. Only YOU are in control of your funds & your private keys. When you generate a new wallet, send, receive or deposit XFG - everything happens locally. Your seed is never transmitted, received or stored. IT IS IMPERATIVE that you write down, print, or save your seed phrase somewhere safe. The backup of keys is your responsibility only. If you lose your seed, your account CANNOT be recovered. Freedom isn't free - the cost is responsibility. Schofield's 2nd Law of Computing states that data doesn't really exist unless you have at least two copies of it-- then keep each somewhere safe & secure.   " << std::endl << std::endl;
 
     std::cout << "Wallet Address: " << m_wallet->getAddress() << std::endl;
     std::cout << "Private spend key: " << Common::podToHex(keys.spendSecretKey) << std::endl;
@@ -963,7 +963,7 @@ bool simple_wallet::deposit(const std::vector<std::string> &args)
     fail_msg_writer() << "Amount tiers: 0.8, 8, 80, 800 XFG";
     fail_msg_writer() << "Term codes: 3 (3 months), 12 (1 year)";
     fail_msg_writer() << "";
-    fail_msg_writer() << "For HEAT burn deposits, use: burn <amount>";
+    fail_msg_writer() << "For XFG burns (HEAT), use: burn <amount>";
     fail_msg_writer() << "";
     fail_msg_writer() << "ETH address is provided later when generating STARK proof.";
     fail_msg_writer() << "         This prevents linking your Fuego wallet to your ETH address on-chain.";
@@ -1010,9 +1010,9 @@ bool simple_wallet::deposit(const std::vector<std::string> &args)
     std::string amount_label = amount_labels[amount_index];
 
     // Helper function to check if amount is HEAT burn (0.8 XFG tier)
-    auto is_heat_burn_amount = [](uint64_t amount) -> bool {
-      return amount == CryptoNote::parameters::AMOUNT_TIER_0;
-    };
+    // auto is_heat_burn_amount = [](uint64_t amount) -> bool {
+    //  return amount == CryptoNote::parameters::AMOUNT_TIER_0;
+    // };
 
     // Parse term code
     uint32_t term_code = boost::lexical_cast<uint32_t>(args[1]);
@@ -1031,11 +1031,11 @@ bool simple_wallet::deposit(const std::vector<std::string> &args)
       deposit_term = max_term;
       term_label = "1 year";
     } else {
-      fail_msg_writer() << "Invalid term code. Valid codes for deposit:";
-      fail_msg_writer() << "  3 for 3-month COLD deposit";
-      fail_msg_writer() << "  12 for 1-year COLD deposit";
+      fail_msg_writer() << "Invalid term code. Valid terms for deposit:";
+      fail_msg_writer() << "  (3) for 3-month COLD deposit";
+      fail_msg_writer() << "  (12) for 1-year COLD deposit";
       fail_msg_writer() << "";
-      fail_msg_writer() << "For HEAT burn deposits, use: burn <amount>";
+      fail_msg_writer() << "For XFG burns (HEAT), use: burn <amount>";
       return true;
     }
 
@@ -1156,20 +1156,20 @@ bool simple_wallet::deposit(const std::vector<std::string> &args)
     }
 
     if (deposit_amount == CryptoNote::parameters::AMOUNT_TIER_0) {
-      success_msg_writer(true) << "HEAT burn deposit transaction created successfully!";
+      success_msg_writer(true) << "HEAT burn transaction created successfully!";
       success_msg_writer() << "Transaction ID: " << txId;
       success_msg_writer() << "Amount burned: " << m_currency.formatAmount(deposit_amount);
       success_msg_writer() << "";
-      success_msg_writer() << "PRIVACY: No ETH address stored on-chain.";
+      success_msg_writer() << "For privacy, your ETH address is never part of on-chain transactions.";
       success_msg_writer() << "Use xfg-stark-cli to generate a STARK proof and claim HEAT (Fuego Embers) tokens.";
       success_msg_writer() << "You will provide your ETH address when generating the STARK proof.";
     } else {
-      success_msg_writer(true) << "COLD yield deposit transaction created successfully!";
+      success_msg_writer(true) << "COLD transaction created successfully!";
       success_msg_writer() << "Transaction ID: " << txId;
       success_msg_writer() << "Amount to be locked: " << m_currency.formatAmount(deposit_amount);
       success_msg_writer() << "Term: " << term_label;
       success_msg_writer() << "";
-      success_msg_writer() << "PRIVACY: No ETH address stored on-chain.";
+      success_msg_writer() << "For privacy, your ETH address is never included in commitment.";
       success_msg_writer() << "Use xfg-stark-cli to generate a STARK proof for claiming.";
       success_msg_writer() << "You will provide your ETH address when generating the STARK proof.";
     }
@@ -1341,7 +1341,7 @@ bool simple_wallet::list_deposits(const std::vector<std::string> &)
       continue; // Skip invalid deposits
     }
 
-    // Format amount (no interest on Fuego - interest handled off-chain via L2)
+    // Format amount (interest handled off-chain via L2)
     std::string amount_str = m_currency.formatAmount(deposit.amount);
 
     // Format term
@@ -1396,7 +1396,7 @@ bool simple_wallet::burn(const std::vector<std::string> &args)
     fail_msg_writer() << "Usage: burn <amount>";
     fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
     fail_msg_writer() << "";
-    fail_msg_writer() << "Creates an XFG burn with deposit term of FOREVER to mint equivalent amount of HEAT.";
+    fail_msg_writer() << "Creates an XFG burn (PERMANENT!) for minting an equivalent amount of HEAT.";
     fail_msg_writer() << "ETH address is provided later when generating STARK proof.";
     return true;
   }
@@ -1442,23 +1442,45 @@ bool simple_wallet::burn(const std::vector<std::string> &args)
 
     // HEAT burn deposits always use DEPOSIT_TERM_FOREVER
     uint32_t burn_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
-    std::string term_label = "HEAT burn (forever)";
+    std::string term_label = "XFG burn (forever)";
 
-    // Confirm with user
-    success_msg_writer() << "Creating XFG burn in exchange for minting HEAT tokens:";
-    success_msg_writer() << "  Amount: " << m_currency.formatAmount(burn_amount) << " (" << amount_label << ")";
-    success_msg_writer() << "  Term: " << term_label << " (" << burn_term << " blocks)";
+    // Determine banking fee based on amount tier
+    uint64_t banking_fee = 0;
+    if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_0) {
+      banking_fee = CryptoNote::parameters::BANK_FEE_TIER_0;
+    } else if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_1) {
+      banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
+    } else if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_2) {
+      banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
+    } else if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
+      banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
+    }
+    uint64_t fee = m_currency.minimumFee();
+
+    // Confirmation
     success_msg_writer() << "";
-    success_msg_writer() << "ETH address is provided later when generating STARK proof.";
-    success_msg_writer() << "  This prevents linking your Fuego wallet to your ETH address on-chain.";
+    success_msg_writer() << "Burn XFG Transaction Summary:";
+    success_msg_writer() << "  Amount: " << m_currency.formatAmount(burn_amount) << " XFG (PERMANENT)";
+    success_msg_writer() << "  Banking Fee: " << m_currency.formatAmount(banking_fee) << " XFG (0.1% of amount to Elderfiers)";
+    success_msg_writer() << "  Network Fee: " << m_currency.formatAmount(fee) << " XFG (minimum txn fee to miners)";
+    success_msg_writer() << "  Commitment Type: 〘HEAT〙 ✺  These funds will be BURNED (enabling you to mint HEAT)";
+    success_msg_writer() << "";
+    success_msg_writer() << "Confirm? (1) OK  (2) No ";
 
+    std::string confirm;
+    std::getline(std::cin, confirm);
+
+    if (confirm != "1" && confirm != "OK" && confirm != "Ok" && confirm != "ok") {
+      success_msg_writer() << "Cancelled.";
+      return true;
+    }
     // Send the burn deposit transaction
     uint64_t fee = m_currency.minimumFee();
     std::string extraString = "";
     CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
 
     if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
-      fail_msg_writer() << "Sending deposit transaction failed";
+      fail_msg_writer() << "Sending burn transaction failed";
       return true;
     }
 
@@ -1480,7 +1502,7 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
   {
     fail_msg_writer() << "Usage: cold <amount> <term_code>";
     fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 XFG";
-    fail_msg_writer() << "Valid term codes: 3 (3 months), 12 (1 year)";
+    fail_msg_writer() << "Valid term codes: 3 (3 months) or 12 (1 year)";
     fail_msg_writer() << "";
     fail_msg_writer() << "ETH address is provided later when generating zk-STARK proof.";
     fail_msg_writer() << "  This prevents linking your Fuego wallet to your ETH address on-chain.";
@@ -1543,22 +1565,44 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
       cold_term = max_term;
       term_label = "1 year";
     } else {
-      fail_msg_writer() << "Invalid term code. Valid codes:";
-      fail_msg_writer() << "  3 for 3-month COLD deposit";
-      fail_msg_writer() << "  12 for 1-year COLD deposit";
+      fail_msg_writer() << "Invalid term code. Valid terms:";
+      fail_msg_writer() << "  (3) for 3-month COLD term";
+      fail_msg_writer() << "  (12) for 1-year COLD term";
       return true;
     }
 
-    // Confirm with user
-    success_msg_writer() << "Creating COLD deposit:";
-    success_msg_writer() << "  Amount: " << m_currency.formatAmount(cold_amount) << " (" << amount_label << ")";
-    success_msg_writer() << "  Term: " << term_label << " (" << cold_term << " blocks)";
-    success_msg_writer() << "";
-    success_msg_writer() << "ETH address is provided later when generating zk-STARK proof.";
-    success_msg_writer() << "  This prevents linking your Fuego wallet to your ETH address on-chain.";
-
-    // Send the COLD deposit transaction
+    // Determine banking fee based on amount tier
+    uint64_t banking_fee = 0;
+    if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_0) {
+      banking_fee = CryptoNote::parameters::BANK_FEE_TIER_0;
+    } else if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_1) {
+      banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
+    } else if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_2) {
+      banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
+    } else (cold_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
+      banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
+    }
+    // Fee = minimum fee
     uint64_t fee = m_currency.minimumFee();
+
+    // Confirmation
+    success_msg_writer() << "";
+    success_msg_writer() << "Your XFG Certificate Of Ledger Deposit Summary:";
+    success_msg_writer() << "  Amount: " << m_currency.formatAmount(cold_amount) << " XFG";
+    success_msg_writer() << "  Term: " << term_label << " (" << cold_term << " blocks)";
+    success_msg_writer() << "  Banking Fee: " << m_currency.formatAmount(banking_fee) << " XFG (0.1% of amount to Elderfiers)";
+    success_msg_writer() << "  Network Fee: " << m_currency.formatAmount(fee) << " XFG (minimum txn fee to miners)";
+    success_msg_writer() << "  Commitment Type: 【COLD】 ▋ Off-chain (CD) interest yield";
+    success_msg_writer() << "";
+
+    success_msg_writer() << "Confirm? (1) OK  (2) NO  ";
+
+    std::string confirm;
+    std::getline(std::cin, confirm);
+
+    if (confirm != "1" && confirm != "OK" && confirm != "Ok" && confirm != "ok") {
+
+    // Send the COLD transaction
     std::string extraString = "";
     CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee, extraString, 0);
 
@@ -1625,7 +1669,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "│  🔐 ELDERFIER POWERS:                                      │";
     success_msg_writer() << "│     ✓ Sign merkle roots of deposit commitments             │";
     success_msg_writer() << "│     ✓ Participate in consensus validation (69% threshold)  │";
-    success_msg_writer() << "│     ✓ Earn 0.1% of all HEAT/COLD banking fees              │";
+    success_msg_writer() << "│     ✓ Earn banking fees (0.1% on all HEAT/COLD txn amounts)│";
     success_msg_writer() << "│     ✓ Pro-rata fee distribution (only to signers)          │";
     success_msg_writer() << "│     ✓ Contribute to network security & decentralization    │";
     success_msg_writer() << "│                                                            │";
@@ -1633,20 +1677,20 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "│     • Network automatically detects your 5 deposits        │";
     success_msg_writer() << "│     • You are assigned an Elderfier ID (0-255)             │";
     success_msg_writer() << "│     • Stake can only be withdrawn after 1000 block review  │";
-    success_msg_writer() << "│     • You're added to the active Elderfiers registry       │";
+    success_msg_writer() << "│     • Added to the active Elderfiers registry              │";
     success_msg_writer() << "│                                                            │";
     success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
     success_msg_writer() << "";
     success_msg_writer() << "┌─── HOW DOES IT WORK? ──────────────────────────────────────┐";
     success_msg_writer() << "│                                                            │";
-    success_msg_writer() << "│  1️⃣  YOU perform the ceremony (deposit 4000 XFG)            │";
+    success_msg_writer() << "│  1️⃣  You perform the ceremony (deposit 4000 XFG)            │";
     success_msg_writer() << "│  2️⃣  5 transactions are broadcast to the network            │";
     success_msg_writer() << "│  3️⃣  Miners confirm all 5 deposits in blocks                │";
-    success_msg_writer() << "│  4️⃣  Network auto-detects pattern & registers you           │";
+    success_msg_writer() << "│  4️⃣  Network auto-detects stakes & registers you            │";
     success_msg_writer() << "│  5️⃣  You receive an Elderfier ID                            │";
     success_msg_writer() << "│  6️⃣  Your node can now sign merkle roots independently      │";
-    success_msg_writer() << "│  7️⃣  Fees earned when ≥69% elderfiers validate same root    │";
-    success_msg_writer() << "│  8️⃣  You receive pro-rata share of banking fees             │";
+    success_msg_writer() << "│  7️⃣  Fees earned when ≥69% Elderfiers validate same root    │";
+    success_msg_writer() << "│  8️⃣  You receive pro-rata share of all banking fees         │";
     success_msg_writer() << "│                                                            │";
     success_msg_writer() << "└────────────────────────────────────────────────────────────┘";
     success_msg_writer() << "";
@@ -1849,9 +1893,9 @@ bool simple_wallet::withdraw_deposit(const std::vector<std::string> &args)
     success_msg_writer(true) << "Deposit withdrawal transaction created successfully!";
     success_msg_writer() << "Transaction ID: " << txId;
     success_msg_writer() << "Withdrawn amount: " << m_currency.formatAmount(deposit.amount);
-    if (deposit.amount != CryptoNote::parameters::AMOUNT_TIER_0) {
-      success_msg_writer() << "Interest earned: " << m_currency.formatAmount(deposit.interest);
-    }
+    //if (deposit.amount != CryptoNote::parameters::AMOUNT_TIER_0) {
+     // success_msg_writer() << "Interest earned: " << m_currency.formatAmount(deposit.interest);
+     // }
   }
   catch (std::exception &e)
   {
@@ -1914,7 +1958,7 @@ bool simple_wallet::generate_proof(const std::vector<std::string> &args) {
            std::cout << "\n=== STARK PROOF DATA FOR CONTRACT ===" << std::endl;
            std::cout << "Transaction Hash: " << tx_hash << std::endl;
            std::cout << "Commitment: " << Common::podToHex(heatCommitment.commitment) << std::endl;
-           std::cout << "Amount: " << heatCommitment.amount << " atomic XFG" << std::endl;
+           std::cout << "Amount: " << heatCommitment.amount << " heat / atomic XFG" << std::endl;
            std::cout << "=====================================" << std::endl;
 
            logger(INFO, BRIGHT_GREEN) << "Proof data generated for XFG burn (HEAT) transaction " << tx_hash;
@@ -1929,21 +1973,21 @@ bool simple_wallet::generate_proof(const std::vector<std::string> &args) {
            success_msg_writer() << "Term: " << coldDeposit.term << " blocks";
 
            // Generate proof data
-           std::cout << "\n=== Certificate Of Ledger Deposit PROOF DATA ===" << std::endl;
+           std::cout << "\n=== Your XFG Certificate Of Ledger Deposit PROOF DATA ===" << std::endl;
            std::cout << "Transaction Hash: " << tx_hash << std::endl;
            std::cout << "Commitment: " << Common::podToHex(coldDeposit.commitment) << std::endl;
-           std::cout << "Amount: " << coldDeposit.amount << " atomic XFG" << std::endl;
+           std::cout << "Amount: " << coldDeposit.amount << " heat (atomic XFG)" << std::endl;
            std::cout << "Term: " << coldDeposit.term << " blocks" << std::endl;
            std::cout << "Chain Code: " << static_cast<int>(coldDeposit.claimChainCode) << std::endl;
            std::cout << "=================================" << std::endl;
 
-           logger(INFO, BRIGHT_GREEN) << "Proof data generated for COLD deposit " << tx_hash;
+           logger(INFO, BRIGHT_GREEN) << "Proof data generated for COLD transaction " << tx_hash;
            return true;
          }
        }
      }
 
-     fail_msg_writer() << "No HEAT burn or COLD commitment found in transaction: " << tx_hash;
+     fail_msg_writer() << "No HEAT (burn) or COLD commitment found in transaction: " << tx_hash;
      return true;
    } catch (const std::exception& e) {
      fail_msg_writer() << "Error processing transaction: " << e.what();
@@ -1989,16 +2033,16 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
 
     switch (deposit.depositType) {
       case CryptoNote::Deposit::Type::HEAT:
-        depositType = "HEAT Burn (0x08)";
+        depositType = "XFG Burn (HEAT/0x08)";
         typeDescription = "Permanent 'forever' deposit - removed from circulation";
         break;
       case CryptoNote::Deposit::Type::COLD:
         depositType = "COLD Yield (0xCD)";
-        typeDescription = "Off-chain yield deposit - locked for specified term";
+        typeDescription = "Off-chain (CD) interest deposit - locked for your specified term";
         break;
       case CryptoNote::Deposit::Type::ELDERFIER:
         depositType = "ELDERFIER Stake (0xEF)";
-        typeDescription = "Staking deposit for elderfier - unstakeable with 8-day hold window";
+        typeDescription = "Staking deposit for Elderfier - unstakeable with 8-day review window";
         break;
       default:
         depositType = "Unknown";
@@ -2268,14 +2312,14 @@ bool simple_wallet::get_tx_proof(const std::vector<std::string> &args) {
 
     if (r) {
       if (args.size() == 3 && tx_key != tx_key2) {
-        fail_msg_writer() << "Tx secret key was found for the given txid, but you've also provided another tx secret key which doesn't match the found one.";
+        fail_msg_writer() << "Txn secret key was found for the given txid, but you've also provided another txn secret key which doesn't match the found one.";
         return true;
       }
     }
     tx_key = tx_key2;
   } else {
     if (!r) {
-      fail_msg_writer() << "Tx secret key wasn't found in the wallet file. Provide it as the optional third parameter if you have it elsewhere.";
+      fail_msg_writer() << "Txn secret key wasn't found in the wallet file. Provide it as the optional third parameter if you have it elsewhere.";
       return true;
     }
   }
@@ -2460,7 +2504,7 @@ bool simple_wallet::export_keys(const std::vector<std::string>& args) {
     secretKeysData
   );
 
-  logger(INFO, BRIGHT_GREEN) << std::endl << "xfg_wallet is an open-source, client-side, free wallet which allows you to send & receive Fuego instantly on the blockchain. You are in control of your funds & your private keys. When you generate a new wallet, login, send, receive or deposit $XFG - everything happens locally. Your seed is never transmitted, received or stored. That's why IT IS IMPERATIVE to write down, print or save your seed somewhere safe. The backup of keys is your responsibility only. If you lose your seed, your account can not be recovered. Freedom isn't free - the cost is responsibility. Protect your keys." << std::endl << std::endl;
+  logger(INFO, BRIGHT_GREEN) << std::endl << "fire_wallet is an open-source, client-side, free wallet which allows you to send & receive Fuego instantly on the blockchain. You are in control of your funds & your private keys. When you generate a new wallet, login, send, receive or deposit XFG - everything happens locally. Your seed is never transmitted, received or stored. That's why IT IS IMPERATIVE to write down, print or save your seed somewhere safe. The backup of keys is your responsibility only. If you lose your seed, your account can not be recovered. Freedom isn't free - the cost is responsibility. Protect your keys." << std::endl << std::endl;
 
   std::cout << "Private spend key: " << Common::podToHex(keys.spendSecretKey) << std::endl;
   std::cout << "Private view key: " <<  Common::podToHex(keys.viewSecretKey) << std::endl;
@@ -2919,7 +2963,7 @@ bool simple_wallet::register_alias(const std::vector<std::string> &args) {
   if (args.size() != 1) {
     fail_msg_writer() << "Usage: register_alias <alias>";
     fail_msg_writer() << "  Alias must be exactly 8 characters:";
-    fail_msg_writer() << "  [A-Z0-9] for Elderfiers, [a-z0-9] for regular users";
+    fail_msg_writer() << "  [A-Z0-9] (CAPS LOCK) for Elderfiers, [a-z0-9] (lowercase) for regular users";
     return true;
   }
 
@@ -2927,7 +2971,7 @@ bool simple_wallet::register_alias(const std::vector<std::string> &args) {
 
   // Validate length
   if (alias.length() != 8) {
-    fail_msg_writer() << "Alias must be exactly 8 characters. Got " << alias.length() << ".";
+    fail_msg_writer() << "Alias can only be 8 characters exactly. Got " << alias.length() << ".";
     return true;
   }
 
@@ -3135,7 +3179,7 @@ bool simple_wallet::lookup_alias(const std::vector<std::string> &args) {
       invokeJsonCommand(httpClient, "/get_alias_by_address", req, res);
 
       if (res.found) {
-        success_msg_writer() << "XFG @ Alias found:";
+        success_msg_writer() << "XFG Alias found:";
         success_msg_writer() << "  Alias:    @" << res.alias;
         success_msg_writer() << "  Address:  " << res.address;
         success_msg_writer() << "  Type:     " << (res.alias_type == 0 ? "Elderfier" : "Regular");

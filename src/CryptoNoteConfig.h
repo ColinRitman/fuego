@@ -51,13 +51,13 @@ namespace CryptoNote
 		const uint64_t MINIMUM_FEE_V2 = UINT64_C(80000);	/* 0.008 XFG  (80Kħ) */
 		const uint64_t MINIMUM_FEE_8KH = UINT64_C(8000);	/* 0.0008 XFG (8Kħ)  BMv10+ Flat Fee */
 		const uint64_t MINIMUM_FEE = MINIMUM_FEE_8KH;
-		const uint64_t MINIMUM_FEE_BANKING_PERCENT = UINT64_C(125000); // 0.125% fee for COLD/YIELD deposits
-		const uint64_t MINIMUM_FEE_BANKING = MINIMUM_FEE_BANKING_PERCENT;
+		//const uint64_t MINIMUM_FEE_BANKING_PERCENT = UINT64_C(125000); // 0.125% fee for COLD/YIELD deposits
+		//const uint64_t MINIMUM_FEE_BANKING = MINIMUM_FEE_BANKING_PERCENT;
 
-		const uint64_t BURN_FEE_TIER_0 = UINT64_C(8000);  /* 0.0008 XFG / (8 Kiloħeat) for 0.8 XFG burns */
-		const uint64_t BURN_FEE_TIER_1 = UINT64_C(80000);  /* 0.008 XFG / (80Kħ) for 8 XFG burns */
-		const uint64_t BURN_FEE_TIER_2 = UINT64_C(800000);  /* 0.08 XFG / (800Kħ) for 80 XFG burns */
-		const uint64_t BURN_FEE_TIER_3 = UINT64_C(8000000);  /* 0.8 XFG / (8 Milliħeat) for 800 XFG burns */
+		const uint64_t BANK_FEE_TIER_0 = UINT64_C(8000);  /* 0.0008 XFG / (8 Kiloħeat) for 0.8 XFG burns */
+		const uint64_t BANK_FEE_TIER_1 = UINT64_C(80000);  /* 0.008 XFG / (80Kħ) for 8 XFG burns */
+		const uint64_t BANK_FEE_TIER_2 = UINT64_C(800000);  /* 0.08 XFG / (800Kħ) for 80 XFG burns */
+		const uint64_t BANK_FEE_TIER_3 = UINT64_C(8000000);  /* 0.8 XFG / (8 Milliħeat) for 800 XFG burns */
 
 		// Fire Alias registration fee: 1 XFG for regular users, free for Elderfiers
 		const uint64_t ALIAS_REGISTRATION_FEE = COIN;  /* 1 XFG sent to Fuego Development Fund */
@@ -125,16 +125,6 @@ namespace CryptoNote
   // MAINNET DEPOSITS
 	const uint64_t DEPOSIT_MIN_AMOUNT = 8000000;   // 0.8 XFG
       const uint64_t BURN_DEPOSIT_MIN_AMOUNT = 8000000;  // 0.8 XFG (8,000,000 atomic units) 8M
-     const uint64_t YIELD_DEPOSIT_MIN_AMOUNT = 80000000;  // 8 XFG (80,000,000 atomic units) 80M
-     const uint64_t BURN_DEPOSIT_STANDARD_AMOUNT = 8000000;  // Standard burn: 0.8 XFG (8,000,000 [8M]HEAT)
-		const uint64_t BURN_DEPOSIT_LARGE_AMOUNT = 8000000000;  // 800 XFG (8,000,000,000 [8B]HEAT)
-		const uint64_t CD_AMOUNT_08      =      8000000; // 0.8 XFG
-          const uint64_t CD_AMOUNT_8     =     80000000; // 8 XFG
-          const uint64_t CD_AMOUNT_80    =    800000000; // 80 XFG
-          const uint64_t CD_AMOUNT_800   =   8000000000; // 800 XFG
-		const uint64_t CD_MIN_AMOUNT = 8000000000;   // 800 XFG for CD rewards
-
-
 	      const uint32_t DEPOSIT_MIN_TERM_v1 = 5480;  // blocks
          const uint32_t DEPOSIT_MAX_TERM_v1 = 5480;  // one month=5480
          const uint32_t DEPOSIT_MIN_TERM = 16440;  // blocks	 ( 3 months (16440) for release )
@@ -295,21 +285,7 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */
- 	// TESTNET DEPOSIT PARAMS
-    const uint64_t TESTNET_DEPOSIT_MIN_AMOUNT =       8000000; // 0.8 TESTNET coins
-    const uint64_t TESTNET_DEPOSIT_CD_AMOUNT_08 =     8000000; // 0.8 TESTNET coins
-    const uint64_t TESTNET_DEPOSIT_CD_AMOUNT_8 =     80000000; // 8 TESTNET coins
-    const uint64_t TESTNET_DEPOSIT_CD_AMOUNT_80 =   800000000; // 80 TESTNET coins
-    const uint64_t TESTNET_DEPOSIT_CD_AMOUNT_800 = 8000000000; // 800 TESTNET coins
 
-    const uint64_t TESTNET_BURN_DEPOSIT_MIN_AMOUNT =      8000000;  // 0.8 TEST (8,000,000 atomic units)
-	const uint64_t TESTNET_BURN_DEPOSIT_STANDARD_AMOUNT = 8000000;  // Standard burn: 0.8 TEST (8,000,000 atomic units)
-	const uint64_t TESTNET_BURN_DEPOSIT_MEDIUM_AMOUNT =  80000000;  // Standard burn: 0.8 TEST (8,000,000 atomic units)
-	const uint64_t TESTNET_BURN_DEPOSIT_LARGE_AMOUNT = 8000000000;  // 800 TEST (8,000,000,000 atomic units)
-
-	const uint64_t TESTNET_BURN_AMOUNT_08  =      8000000;  //  0.8 TEST (8,000,000 atomic units)
-	const uint64_t TESTNET_BURN_AMOUNT_8   =     80000000;  //  8 TEST (8,000,000 atomic units)
-	const uint64_t TESTNET_BURN_AMOUNT_80  =    800000000;  //  80 TEST (8,000,000 atomic units)
 	const uint64_t TESTNET_BURN_AMOUNT_800 =   8000000000;  //  800 TEST (8,000,000 atomic units)
 
 

@@ -116,23 +116,34 @@ namespace CryptoNote
       }
 
       uint32_t burn_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
-      // Fee = minimum fee + 0.1% banking fee (for Elderfier rewards)
-      uint64_t banking_fee = (burn_amount * m_currency.minimumFeeBanking()) / m_currency.coin();
-      uint64_t fee = m_currency.minimumFee() + banking_fee;
+
+      // Determine banking fee based on amount tier
+      uint64_t banking_fee = 0;
+      if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_0) {
+        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_0;
+      } else if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_1) {
+        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
+      } else if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_2) {
+        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
+      } else if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
+        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
+      }
+      uint64_t fee = m_currency.minimumFee();
 
       // Confirmation
       success_msg_writer() << "";
-      success_msg_writer() << "Burn TEST for HEAT Summary:";
+      success_msg_writer() << "Burn TEST transaction Summary:";
       success_msg_writer() << "  Amount: " << m_currency.formatAmount(burn_amount) << " TEST (PERMANENT)";
-      success_msg_writer() << "  Fee: " << m_currency.formatAmount(fee) << " TEST (includes " << m_currency.formatAmount(banking_fee) << " banking fee)";
-      success_msg_writer() << "  Type: HEAT (0x08) - funds will be BURNED";
+      success_msg_writer() << "  Banking Fee: " << m_currency.formatAmount(banking_fee) << " TEST (0.1% of amount to Elderfiers)";
+      success_msg_writer() << "  Network Fee: " << m_currency.formatAmount(fee) << " TEST (minimum txn fee to miners)";
+      success_msg_writer() << "  Commitment Type: 〘HEAT〙 ✺ These funds will be BURNED (to mint HEAT)";
       success_msg_writer() << "";
-      success_msg_writer() << "You cool with this? (1=yes, 2=no): ";
+      success_msg_writer() << "Confirm? (1) OK  (2) No ";
 
       std::string confirm;
       std::getline(std::cin, confirm);
 
-      if (confirm != "1" && confirm != "yes" && confirm != "y") {
+      if (confirm != "1" && confirm != "OK" && confirm != "Ok" && confirm != "ok") {
         success_msg_writer() << "Cancelled.";
         return true;
       }
@@ -152,7 +163,7 @@ namespace CryptoNote
       CryptoNote::addHeatCommitmentToExtra(extra, heatCommitment);
       std::string extraString = std::string(extra.begin(), extra.end());
 
-      success_msg_writer() << "Creating TEST to HEAT burn: " << m_currency.formatAmount(burn_amount) << " TEST";
+      success_msg_writer() << "Creating TEST burn (HEAT): " << m_currency.formatAmount(burn_amount) << " TEST";
       CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
 
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
@@ -160,7 +171,7 @@ namespace CryptoNote
         return true;
       }
 
-      success_msg_writer() << "TEST to HEAT burn transaction created. TX ID: " << txId;
+      success_msg_writer() << "TEST burn transaction created. TX ID: " << txId;
       return true;
     }
     catch (const std::exception& e)
@@ -202,7 +213,7 @@ namespace CryptoNote
 
       auto it = std::find(valid_amounts.begin(), valid_amounts.end(), cold_amount);
       if (it == valid_amounts.end()) {
-        fail_msg_writer() << "Invalid amount. Valid tiers: 0.8, 8, 80, 800 XFG";
+        fail_msg_writer() << "Invalid amount. Valid tiers: 0.8, 8, 80, 800 TEST";
         return true;
       }
 
@@ -213,35 +224,49 @@ namespace CryptoNote
       uint32_t min_term = CryptoNote::parameters::TESTNET_COLD_MIN_TERM;
       uint32_t max_term = CryptoNote::parameters::TESTNET_COLD_MAX_TERM;
 
+      // Map term codes to valid testnet terms
       if (term_code == 3) {
-        cold_term = min_term;
-        term_label = "3 months";
+        // For testnet, use a term that's within valid range
+        cold_term = min_term;  // 16 blocks for shortest term
+        term_label = "3 months (testnet: 16 blocks)";
       } else if (term_code == 12) {
-        cold_term = max_term;
-        term_label = "1 year";
+        // For testnet, use a term that's within valid range
+        cold_term = max_term;  // 65 blocks for longest term
+        term_label = "1 year (testnet: 65 blocks)";
       } else {
         fail_msg_writer() << "Invalid term code. Use: 3 (3 months) or 12 (1 year)";
         return true;
       }
 
-      // Fee = minimum fee + 0.1% banking fee (for Elderfier rewards)
-      uint64_t banking_fee = (cold_amount * m_currency.minimumFeeBanking()) / m_currency.coin();
-      uint64_t fee = m_currency.minimumFee() + banking_fee;
+      // Determine banking fee based on amount tier
+      uint64_t banking_fee = 0;
+      if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_0) {
+        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_0;
+      } else if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_1) {
+        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
+      } else if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_2) {
+        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
+      } else (cold_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
+        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
+      }
+      // Fee = minimum fee
+      uint64_t fee = m_currency.minimumFee();
 
       // Confirmation
       success_msg_writer() << "";
       success_msg_writer() << "Certificate Of Ledger Deposit Summary:";
       success_msg_writer() << "  Amount: " << m_currency.formatAmount(cold_amount) << " TEST";
       success_msg_writer() << "  Term: " << term_label << " (" << cold_term << " blocks)";
-      success_msg_writer() << "  Fee: " << m_currency.formatAmount(fee) << " TEST (includes " << m_currency.formatAmount(banking_fee) << " banking fee)";
-      success_msg_writer() << "  Type: COLD (0xCD) off-chain yield";
+      success_msg_writer() << "  Banking Fee: " << m_currency.formatAmount(banking_fee) << " TEST (0.1% of amount to Elderfiers)";
+      success_msg_writer() << "  Network Fee: " << m_currency.formatAmount(fee) << " TEST (minimum txn fee to miners)";
+      success_msg_writer() << "  Commitment Type:【COLD】 ▋ Off-chain (CD) interest yield";
       success_msg_writer() << "";
-      success_msg_writer() << "Confirm? (1=yes, 2=no): ";
+      success_msg_writer() << "Confirm? (1) OK  (2) NO  ";
 
       std::string confirm;
       std::getline(std::cin, confirm);
 
-      if (confirm != "1" && confirm != "yes" && confirm != "y") {
+      if (confirm != "1" && confirm != "OK" && confirm != "Ok" && confirm != "ok") {
         success_msg_writer() << "Cancelled.";
         return true;
       }
@@ -316,21 +341,21 @@ namespace CryptoNote
       }
 
       std::string confirm;
-      success_msg_writer() << "⚡ Type 'IGNITE' to begin ceremony: ";
+      success_msg_writer() << "⚡ Type 'TESTFYRE' to begin ceremony: ";
       std::getline(std::cin, confirm);
 
-      if (confirm != "IGNITE") {
+      if (confirm != "TESTFYRE") {
         success_msg_writer() << "Ceremony cancelled.";
         return true;
       }
 
       uint64_t amount_per_deposit = 800 * CryptoNote::parameters::COIN;
       success_msg_writer() << "";
-      success_msg_writer() << "🔥 Creating 5 elderfier stakes...";
+      success_msg_writer() << "🔥 Creating 5 TestaFyre stakes...";
       success_msg_writer() << "";
 
       for (int i = 0; i < 5; ++i) {
-        success_msg_writer() << "Ritual " << (i + 1) << " of 5: Creating 800 XFG stake...";
+        success_msg_writer() << "Ritual " << (i + 1) << " of 5: Creating 800 TEST stake...";
 
         std::vector<uint8_t> extra;
         std::string extraString = "";
@@ -375,8 +400,8 @@ namespace CryptoNote
       success_msg_writer() << "║         🔥⚡ TESTNET CEREMONY COMPLETE! ⚡🔥               ║";
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
-      success_msg_writer() << "✅ All 5 elderfier stakes created (4000 XFG total)";
-      success_msg_writer() << "🎉 Ready for elderfier testing on testnet!";
+      success_msg_writer() << "✅ All 5 testafier stakes created (4000 XFG total)";
+      success_msg_writer() << "🎉 Ready for testafier testing on testnet!";
       success_msg_writer() << "";
 
       return true;
