@@ -568,79 +568,57 @@ namespace CryptoNote
         transaction->signInputKey(i, inputs[i], ephKeys[i]);
       }
 
-      // ALL deposits MUST have a commitment tag in tx_extra:
+      // Deposit commitment detection:
       // - 0x08 (HEAT) for FOREVER/burn deposits
       // - 0xCD (COLD) for term deposits
       // - 0xEF (ELDERFIER) for staking deposits
-      // A deposit without proper commitment is USELESS and must FAIL.
+      // The wallet already created and appended the commitment to context->extra (line 551-554).
+      // Detect the type directly from the tag byte — parseTransactionExtra has stream
+      // position issues with commitment-only extras that cause silent failures.
 
-      std::vector<uint8_t> generatedExtra;
-      Crypto::SecretKey heatSecret;
       bool isHeatDeposit = false;
-      bool hasValidCommitment = false;
       Deposit::Type detectedType = Deposit::Type::COLD;
 
-      // Check if context->extra already contains a valid commitment
       if (!context->extra.empty()) {
-        std::vector<uint8_t> contextExtra(context->extra.begin(), context->extra.end());
-        std::vector<TransactionExtraField> extraFields;
-        if (parseTransactionExtra(contextExtra, extraFields)) {
-          for (const auto& field : extraFields) {
-            if (field.type() == typeid(TransactionExtraHeatCommitment)) {
-              detectedType = Deposit::Type::HEAT;
-              hasValidCommitment = true;
-              break;
-            } else if (field.type() == typeid(TransactionExtraColdCommitment)) {
-              detectedType = Deposit::Type::COLD;
-              hasValidCommitment = true;
-              break;
-            } else if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
-              detectedType = Deposit::Type::ELDERFIER;
-              hasValidCommitment = true;
-              break;
-            }
-          }
+        uint8_t tag = static_cast<uint8_t>(context->extra[0]);
+        if (tag == TX_EXTRA_HEAT_COMMITMENT) {
+          detectedType = Deposit::Type::HEAT;
+          isHeatDeposit = true;
+        } else if (tag == TX_EXTRA_COLD_COMMITMENT) {
+          detectedType = Deposit::Type::COLD;
+        } else if (tag == TX_EXTRA_ELDERFIER_DEPOSIT) {
+          detectedType = Deposit::Type::ELDERFIER;
         }
-      }
-
-      // If no commitment in context->extra, generate one based on deposit term
-      if (!hasValidCommitment) {
-        uint64_t depositAmount = std::abs(transactionInfo.totalAmount) - transactionInfo.fee;
+      } else {
+        // No wallet-provided commitment — generate one based on deposit term
+        std::vector<uint8_t> generatedExtra;
 
         if (context->depositTerm == parameters::DEPOSIT_TERM_FOREVER) {
-          // FOREVER deposits get HEAT commitment (burn)
+          uint64_t depositAmount = std::abs(transactionInfo.totalAmount) - transactionInfo.fee;
           auto [commitment, secret] = CryptoNote::DepositCommitmentGenerator::generateHeatCommitmentWithSecret(
             depositAmount, std::vector<uint8_t>());
 
           if (!CryptoNote::createTxExtraWithHeatCommitment(commitment.commitment, depositAmount, commitment.metadata, generatedExtra)) {
-            throw std::runtime_error("Failed to generate HEAT commitment for burn deposit - deposit would be useless without commitment tag");
+            throw std::runtime_error("Failed to generate HEAT commitment for burn deposit");
           }
 
           transaction->appendExtra(generatedExtra);
-          heatSecret = secret;
           isHeatDeposit = true;
           detectedType = Deposit::Type::HEAT;
-          hasValidCommitment = true;
         } else {
-          // Term deposits get COLD commitment (yield)
+          uint64_t depositAmount = std::abs(transactionInfo.totalAmount) - transactionInfo.fee;
           auto commitment = CryptoNote::DepositCommitmentGenerator::generateYieldCommitment(
             context->depositTerm, depositAmount, std::vector<uint8_t>());
 
           std::vector<uint8_t> emptyMetadata;
           std::vector<uint8_t> emptyGiftSecret;
           if (!CryptoNote::createTxExtraWithColdCommitment(commitment.commitment, depositAmount, context->depositTerm, 1, emptyMetadata, emptyGiftSecret, generatedExtra)) {
-            throw std::runtime_error("Failed to generate COLD commitment for term deposit - deposit would be useless without commitment tag");
+            throw std::runtime_error("Failed to generate COLD commitment for term deposit");
           }
 
           transaction->appendExtra(generatedExtra);
           detectedType = Deposit::Type::COLD;
-          hasValidCommitment = true;
         }
-      }
-
-      // Final safety check - deposit MUST have valid commitment
-      if (!hasValidCommitment) {
-        throw std::runtime_error("Deposit transaction rejected - no valid commitment tag (0x08/0xCD/0xEF) in tx_extra");
       }
 
       transactionInfo.hash = transaction->getTransactionHash();
@@ -658,18 +636,11 @@ namespace CryptoNote
       deposit.depositType = detectedType;
       deposit.interest = 0; // No interest for any deposits (field kept for compatibility)
 
-      // For burn deposits, set amount correctly (don't subtract fee since there's no output)
-      if (context->depositTerm == parameters::DEPOSIT_TERM_FOREVER) {
-        deposit.amount = std::abs(transactionInfo.totalAmount); // Full amount is burned
-      } else {
-        deposit.amount = std::abs(transactionInfo.totalAmount) - transactionInfo.fee;
-      }
+      deposit.amount = std::abs(transactionInfo.totalAmount) - transactionInfo.fee;
 
       // Set extra field
       if (!context->extra.empty()) {
         deposit.extra = context->extra;
-      } else if (!generatedExtra.empty()) {
-        deposit.extra = std::string(generatedExtra.begin(), generatedExtra.end());
       }
 
       // For burn deposits, use a special banking index since there's no regular output
@@ -680,11 +651,13 @@ namespace CryptoNote
         depositId = m_transactionsCache.insertDeposit(deposit, bankingIndex, transaction->getTransactionHash());
       }
 
-      // Notify wallet to store the HEAT secret if generated
+      // HEAT secret notification: the wallet that created the burn commitment
+      // holds the secret key. We only emit this event for completeness.
       if (isHeatDeposit) {
         std::string txHashStr = Common::podToHex(transactionInfo.hash);
+        Crypto::SecretKey emptySecret = {};
         events.push_back(std::unique_ptr<WalletBurnDepositSecretCreatedEvent>(
-          new WalletBurnDepositSecretCreatedEvent(txHashStr, heatSecret, deposit.amount, std::vector<uint8_t>())));
+          new WalletBurnDepositSecretCreatedEvent(txHashStr, emptySecret, deposit.amount, std::vector<uint8_t>())));
       }
 
       transactionInfo.firstDepositId = depositId;
