@@ -201,6 +201,8 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
 
 	// Fuego Developer Fund wallet — receives alias registration fees
 	const char FUEGO_DEV_FUND_ADDRESS[] = "fireVHx639SLMhzmBoJ8drTXbVyv2eRG6A8aMLc1taTiRNwk8pnwXpBDUSjH1dT5fg7yVVZrKkvm31CmigAMdVDg7sgxJmAUNp";
+   // RESERVE xfg @liases
+    const char DEVELOPMENT_FIRE_ALIASES[] = "FUEGOXFG", "FUEGODEV", "fuegoxfg", "fuegodev";
 
     const char CRYPTONOTE_NAME[] = "fuego";
 	const char GENESIS_COINBASE_TX_HEX[] = "013c01ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101bd4e0bf284c04d004fd016a21405046e8267ef81328cabf3017c4c24b273b25a";
