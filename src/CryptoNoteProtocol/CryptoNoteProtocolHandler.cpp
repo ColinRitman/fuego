@@ -685,15 +685,15 @@ bool CryptoNoteProtocolHandler::on_connection_synchronized()
 {
   bool val_expected = false;
   if (m_synchronized.compare_exchange_strong(val_expected, true)) {
-    std::string networkName = m_core.currency().isTestnet() ? "Fuego TESTNET" : "Fuego network";
-    std::string walletName = m_core.currency().isTestnet() ? "test_wallet" : "fuego-wallet-cli";
+    std::string networkName = m_core.currency().isTestnet() ? "Fuego TESTNET" : "Fuego Network";
+    std::string walletName = m_core.currency().isTestnet() ? "test_wallet" : "fire_wallet";
     logger(Logging::INFO, Logging::BRIGHT_CYAN)
       << "**********************************************************************" << ENDL
-      << "You are synchronized with the " << networkName << "." << ENDL
-      << walletName << " is now at your service, m'lorde." << ENDL
+      << "You are synchronized with " << networkName << "." << ENDL
+      << walletName << " is at your service now, m'lorde." << ENDL
       << "Type \"help\" to see available daemon commands." << ENDL
       << ENDL
-      << "Please note, the " << networkName << " blockchain will only be saved after" << ENDL
+      << "Please note, " << networkName << " blockchain will only be saved after" << ENDL
       << "you quit the daemon with \"exit\" command" << ENDL
       << "Better yet use the \"save\" command." << ENDL
       << "Otherwise, it may be necessary to re-sync." << ENDL
