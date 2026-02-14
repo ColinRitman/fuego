@@ -562,16 +562,19 @@ bool Blockchain::init(const std::string& config_folder, bool load_existing) {
         loadBlockchainIndices();
       }
 
-      m_checkpoints.load_checkpoints();
-      logger(Logging::INFO) << "Loading checkpoints";
-      // DNS checkpoints disabled to prevent segfaults
-      // m_checkpoints.load_checkpoints_from_dns();
-      logger(Logging::INFO) << "DNS checkpoints disabled";
     }
     else
     {
       m_blocks.clear();
     }
+
+  // Load checkpoints for mainnet only (testnet has no checkpoints)
+  if (!m_currency.isTestnet()) {
+    m_checkpoints.load_checkpoints();
+    logger(Logging::INFO) << "Loaded mainnet checkpoints";
+  } else {
+    logger(Logging::INFO) << "Testnet doesn't use or recognize checkpoints";
+  }
 
   if (m_blocks.empty()) {
     logger(INFO, BRIGHT_WHITE)
