@@ -241,7 +241,7 @@ public:
   const Crypto::Hash& genesisBlockHash() const { return m_genesisBlockHash; }
 
   bool getBlockReward(uint8_t blockMajorVersion, size_t medianSize, size_t currentBlockSize, uint64_t alreadyGeneratedCoins, uint64_t fee, uint32_t height,
-                        uint64_t &reward, int64_t &emissionChange) const;
+                        uint64_t &reward, int64_t &emissionChange, uint64_t burnedCoinsOverride = UINT64_MAX) const;
     // Interest functions
     uint64_t calculateInterest(uint64_t amount, uint32_t term, uint32_t height) const;
     uint64_t calculateTotalTransactionInterest(const Transaction &tx, uint32_t height) const;
@@ -253,7 +253,7 @@ public:
 
   bool constructMinerTx(uint8_t blockMajorVersion, uint32_t height, size_t medianSize, uint64_t alreadyGeneratedCoins, size_t currentBlockSize,
                           uint64_t fee, const AccountPublicAddress &minerAddress, Transaction &tx,
-                          const BinaryArray &extraNonce = BinaryArray(), size_t maxOuts = 1) const;
+                          const BinaryArray &extraNonce = BinaryArray(), size_t maxOuts = 1, uint64_t burnedCoinsOverride = UINT64_MAX) const;
 
   bool isFusionTransaction(const Transaction &transaction) const;
   bool isFusionTransaction(const Transaction &transaction, size_t size) const;

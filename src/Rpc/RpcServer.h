@@ -79,6 +79,8 @@ private:
   // json handlers
   bool on_get_info(const COMMAND_RPC_GET_INFO::request& req, COMMAND_RPC_GET_INFO::response& res);
   bool on_get_height(const COMMAND_RPC_GET_HEIGHT::request& req, COMMAND_RPC_GET_HEIGHT::response& res);
+  bool on_get_ethereal_flame(const COMMAND_RPC_GET_ETHERNAL_FLAME::request& req, COMMAND_RPC_GET_ETHERNAL_FLAME::response& res);
+
   bool on_get_deposits(const COMMAND_RPC_GET_DEPOSITS::request& req, COMMAND_RPC_GET_DEPOSITS::response& res);
   bool on_get_transactions(const COMMAND_RPC_GET_TRANSACTIONS::request& req, COMMAND_RPC_GET_TRANSACTIONS::response& res);
   // Commitment Index RPC endpoints (Fuego → EVM bridge)

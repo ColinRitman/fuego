@@ -1416,4 +1416,14 @@ struct COMMAND_RPC_CHECK_COMMITMENT_EXISTS {
   };
 };
 
+/** @brief Get total burned XFG amount (eternal flame)
+ */
+struct COMMAND_RPC_GET_ETHERNAL_FLAME {
+  struct request {};
+  struct response {
+    uint64_t ethernalXFG;
+    std::string formattedAmount;
+  };
+};
+
 }

@@ -558,8 +558,12 @@ bool core::get_block_template(Block& b, const AccountPublicAddress& adr, difficu
      two-phase miner transaction generation: we don't know exact block size until we prepare block, but we don't know reward until we know
      block size, so first miner transaction generated with fake amount of money, and with phase we know think we know expected block size
      */
+  // Use deterministic height-indexed burn amount for reward calculation
+  // Burns through block N-1 determine the reward for block N
+  uint64_t burnedCoins = (height > 0) ? m_blockchain.getBurnedXfgAtHeight(height - 1) : 0;
+
   //make blocks coin-base tx looks close to real coinbase tx to get truthful blob size
-  bool r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, txs_size, fee, adr, b.baseTransaction, ex_nonce, 11);
+  bool r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, txs_size, fee, adr, b.baseTransaction, ex_nonce, 11, burnedCoins);
   if (!r) {
     logger(ERROR, BRIGHT_RED) << "Failed to construct miner tx, first chance";
     return false;
@@ -571,7 +575,7 @@ bool core::get_block_template(Block& b, const AccountPublicAddress& adr, difficu
     logger(TRACE) << "constructMinerTx attempt " << try_count << ": height=" << height << ", majorVersion=" << (int)b.majorVersion
       << ", median_size=" << median_size << ", cumulative_size=" << cumulative_size
       << ", already_generated_coins=" << already_generated_coins << ", fee=" << fee;
-    r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, cumulative_size, fee, adr, b.baseTransaction, ex_nonce, 11);
+    r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, cumulative_size, fee, adr, b.baseTransaction, ex_nonce, 11, burnedCoins);
 
     if (!(r)) {
       logger(ERROR, BRIGHT_RED) << "Failed to construct miner tx, second chance. height=" << height

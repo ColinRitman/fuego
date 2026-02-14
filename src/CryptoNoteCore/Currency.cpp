@@ -239,17 +239,19 @@ double Currency::getBurnPercentage() const {
 }
 
 	bool Currency::getBlockReward(uint8_t blockMajorVersion, size_t medianSize, size_t currentBlockSize, uint64_t alreadyGeneratedCoins,
-		uint64_t fee, uint32_t height, uint64_t& reward, int64_t& emissionChange) const {
+		uint64_t fee, uint32_t height, uint64_t& reward, int64_t& emissionChange, uint64_t burnedCoinsOverride) const {
 		unsigned int selectedEmissionSpeedFactor = emissionSpeedFactor(blockMajorVersion);
 
     assert(selectedEmissionSpeedFactor > 0 && selectedEmissionSpeedFactor <= 8 * sizeof(uint64_t));
 
     // Only use burn-adjusted reward formula for v10+ blocks (when burns were introduced)
+    // burnedCoinsOverride: when != UINT64_MAX, use deterministic height-indexed value
+    //                      instead of live mutable getEternalFlame()
     uint64_t baseReward;
-    if (blockMajorVersion >= BLOCK_MAJOR_VERSION_10 && getEternalFlame() > 0) {
+    uint64_t eternalFlame = (burnedCoinsOverride != UINT64_MAX) ? burnedCoinsOverride : getEternalFlame();
+    if (blockMajorVersion >= BLOCK_MAJOR_VERSION_10 && eternalFlame > 0) {
         // Osavvirsak = coins in circulation (minted minus burned)
         // This makes burned coins available for re-emission
-        uint64_t eternalFlame = getEternalFlame();
         uint64_t Osavvirsak = (alreadyGeneratedCoins > eternalFlame) ?
                               (alreadyGeneratedCoins - eternalFlame) : 0;
         assert(Osavvirsak <= m_moneySupply);
@@ -443,7 +445,7 @@ double Currency::getBurnPercentage() const {
   }
 
 	bool Currency::constructMinerTx(uint8_t blockMajorVersion, uint32_t height, size_t medianSize, uint64_t alreadyGeneratedCoins, size_t currentBlockSize,
-		uint64_t fee, const AccountPublicAddress& minerAddress, Transaction& tx, const BinaryArray& extraNonce/* = BinaryArray()*/, size_t maxOuts/* = 1*/) const {
+		uint64_t fee, const AccountPublicAddress& minerAddress, Transaction& tx, const BinaryArray& extraNonce/* = BinaryArray()*/, size_t maxOuts/* = 1*/, uint64_t burnedCoinsOverride/* = UINT64_MAX*/) const {
 
 		tx.inputs.clear();
 		tx.outputs.clear();
@@ -464,7 +466,7 @@ double Currency::getBurnPercentage() const {
 
     uint64_t blockReward;
     int64_t emissionChange;
-    if (!getBlockReward(blockMajorVersion, medianSize, currentBlockSize, alreadyGeneratedCoins, fee, height, blockReward, emissionChange))
+    if (!getBlockReward(blockMajorVersion, medianSize, currentBlockSize, alreadyGeneratedCoins, fee, height, blockReward, emissionChange, burnedCoinsOverride))
     {
       logger(INFO) << "Block is too big";
       return false;
