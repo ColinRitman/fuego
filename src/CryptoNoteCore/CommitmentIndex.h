@@ -12,7 +12,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
-// For XFG-STARKs + Elderfier Consensus + Alias System
+// For XFG-STARKs + Elderfier Consensus
 
 
 #pragma once
@@ -26,6 +26,7 @@
 #include <string>
 #include <optional>
 #include "crypto/hash.h"
+#include "CryptoNoteCore/AliasIndex.h"
 
 namespace CryptoNote {
 
@@ -54,6 +55,7 @@ struct CommitmentEntry {
   uint32_t targetChainId = 0;  // Claim chain code: 1=ETH, 2=ARB, 3=SOL, etc. (0 = no cross-chain claim)
 
   std::string senderAddress;   // Wallet address that created this commitment (populated for 0xEF deposits)
+  std::string ceremonyAlias;   // 8-char alias from 0xEF deposit metadata (0xEA tag), auto-registered with EFiD
 
   void serialize(ISerializer& s);
 };
@@ -112,15 +114,7 @@ struct ElderfierRegistration {
   }
 };
 
-// @ Alias entry for on-chain alias registry
-struct AliasEntry {
-  std::string alias;            // "FIRENODE" (EFier) or "firenode" (regular)
-  std::string ownerAddress;     // Full wallet address
-  Crypto::Hash aliasHash;       // cn_fast_hash(alias) for fast lookup
-  Crypto::Hash addressHash;     // cn_fast_hash(address) for privacy
-  uint8_t aliasType = 0;        // 0 = Elderfier (ALLCAPS [A-Z0-9]), 1 = Regular (lowercase [a-z0-9])
-  uint32_t registeredBlock = 0;
-};
+
 
 // Main CommitmentIndex class
 class CommitmentIndex {

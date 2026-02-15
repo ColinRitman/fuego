@@ -340,7 +340,8 @@ private:
 			                   m_upgradeDetectorV7(currency, m_blocks, BLOCK_MAJOR_VERSION_7, logger),
 			                   m_upgradeDetectorV8(currency, m_blocks, BLOCK_MAJOR_VERSION_8, logger),
                          m_upgradeDetectorV9(currency, m_blocks, BLOCK_MAJOR_VERSION_9, logger),
-                        m_upgradeDetectorV10(currency, m_blocks, BLOCK_MAJOR_VERSION_10, logger) {
+                        m_upgradeDetectorV10(currency, m_blocks, BLOCK_MAJOR_VERSION_10, logger),
+                        m_aliasIndex() {
 } // upgradekit
 
 bool Blockchain::addObserver(IBlockchainStorageObserver* observer) {
@@ -2707,6 +2708,12 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             entry.type = CommitmentEntry::Type::ELDERFIER_STAKING;
             entry.targetChainId = 0;  // No cross-chain claim for staking
             entry.senderAddress = elderfierDeposit.elderfierAddress;
+
+            // Extract ceremony alias from metadata (0xEA tag + 8 bytes)
+            if (elderfierDeposit.metadata.size() == 9 && elderfierDeposit.metadata[0] == 0xEA) {
+              entry.ceremonyAlias = std::string(elderfierDeposit.metadata.begin() + 1, elderfierDeposit.metadata.end());
+            }
+
             m_commitmentIndex.addCommitment(entry);
 
             logger(DEBUGGING) << "Elderfier staking deposit indexed: " << Common::podToHex(elderfierDeposit.depositHash)

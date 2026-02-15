@@ -35,6 +35,7 @@
 #include "CryptoNoteCore/UpgradeDetector.h"
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
 #include "CryptoNoteCore/TransactionPool.h"
+#include "CryptoNoteCore/AliasIndex.h"
 #include "CryptoNoteCore/BlockchainIndices.h"
 
 #include "CryptoNoteCore/MessageQueue.h"
@@ -319,6 +320,7 @@ namespace CryptoNote {
     CryptoNote::BlockIndex m_blockIndex;
     CryptoNote::BankingIndex m_bankingIndex;
     CryptoNote::CommitmentIndex m_commitmentIndex;
+    CryptoNote::AliasIndex m_aliasIndex;
     TransactionMap m_transactionMap;
     MultisignatureOutputsContainer m_multisignatureOutputs;
     UpgradeDetector m_upgradeDetectorV2;
