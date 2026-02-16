@@ -50,28 +50,22 @@ void AliasIndex::reserveDevTeamAliases() {
 // VALIDATION HELPERS
 // ============================================================================
 
+// Elderfier alias: exactly 8 characters from [A-Z 0-9 &]
 bool AliasIndex::isValidElderfierAlias(const std::string& alias) {
   if (alias.length() != 8) return false;
   for (char c : alias) {
-    bool isUpper = (c >= 'A' && c <= 'Z');
-    bool isDigit = (c >= '0' && c <= '9');
-    bool isAmpersand = (c == '&');
-    if (!isUpper && !isDigit && !isAmpersand) {
-      return false;
-    }
+    bool ok = (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || (c == '&');
+    if (!ok) return false;
   }
   return true;
 }
 
+// Regular alias: exactly 8 characters from [a-z 0-9 &]
 bool AliasIndex::isValidRegularAlias(const std::string& alias) {
   if (alias.length() != 8) return false;
   for (char c : alias) {
-    bool isLower = (c >= 'a' && c <= 'z');
-    bool isDigit = (c >= '0' && c <= '9');
-    bool isAmpersand = (c == '&');
-    if (!isLower && !isDigit && !isAmpersand) {
-      return false;
-    }
+    bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || (c == '&');
+    if (!ok) return false;
   }
   return true;
 }
@@ -95,12 +89,10 @@ bool AliasIndex::registerAlias(const AliasEntry& entry) {
 
   // Validate format based on alias type
   if (entry.aliasType == 0) {
-    // Elderfier alias: [A-Z0-9&] only (ALLCAPS)
     if (!isValidElderfierAlias(entry.alias)) {
       return false;
     }
   } else if (entry.aliasType == 1) {
-    // Regular user alias: [a-z0-9&] only (lowercase)
     if (!isValidRegularAlias(entry.alias)) {
       return false;
     }

@@ -85,11 +85,16 @@ void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
       m_pendingElderfierStakes[wallet].deposit_count++;
       m_pendingElderfierStakes[wallet].total_amount += entry.amount;
 
+      // Extract ceremony alias from metadata if present
+      if (!entry.ceremonyAlias.empty() && m_pendingElderfierStakes[wallet].alias.empty()) {
+        m_pendingElderfierStakes[wallet].alias = entry.ceremonyAlias;
+      }
+
       // Auto-register when five 800 XFG deposits for 4000 XFG total are confirmed
       const uint64_t REGISTRATION_AMOUNT = CryptoNote::parameters::ELDERKING_CEREMONY_AMOUNT;  // 4000 XFG in atomic units
       if (m_pendingElderfierStakes[wallet].deposit_count == 5 &&
           m_pendingElderfierStakes[wallet].total_amount >= REGISTRATION_AMOUNT) {
-        tryRegisterElderfier(wallet, m_pendingElderfierStakes[wallet].signing_pubkey);
+        tryRegisterElderfier(wallet, m_pendingElderfierStakes[wallet].signing_pubkey, m_pendingElderfierStakes[wallet].alias);
         m_pendingElderfierStakes.erase(wallet);
       }
     }
@@ -240,7 +245,7 @@ std::string CommitmentIndex::getWalletAddressFromTx(const Crypto::Hash& txHash) 
   return "";
 }
 
-bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Crypto::PublicKey& pubkey) {
+bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Crypto::PublicKey& pubkey, const std::string& alias) {
   // Check if this address can register (not already registered, not void)
   // Note: caller already holds m_mutex
 
@@ -282,6 +287,19 @@ bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Cryp
   m_elderfierRegistrations[wallet] = reg;
   m_elderfier_ids.push_back(efid);
   m_elderfierAddresses[efid] = wallet;
+
+  // Auto-register ceremony alias via AliasIndex (tied to EFiD — voids on unstake)
+  if (m_aliasIndex && !alias.empty() && alias.length() == 8) {
+    AliasEntry aliasEntry;
+    aliasEntry.alias = alias;
+    aliasEntry.ownerAddress = wallet;
+    aliasEntry.aliasHash = Crypto::cn_fast_hash(alias.data(), alias.size());
+    aliasEntry.addressHash = Crypto::cn_fast_hash(wallet.data(), wallet.size());
+    aliasEntry.aliasType = 0;  // Elderfier type
+    aliasEntry.registeredBlock = static_cast<uint32_t>(m_current_block_height);
+
+    m_aliasIndex->registerAlias(aliasEntry);
+  }
 
   return true;
 }
@@ -463,8 +481,7 @@ void CommitmentIndex::clear() {
   m_root_first_seen_block.clear();
   m_pendingElderfierStakes.clear();
   m_elderfier_ids.clear();
-  m_aliases.clear();
-  m_addressToAlias.clear();
+  // Note: AliasIndex is cleared/reset separately by Blockchain (owns its own lifecycle)
   m_elderfierRegistrations.clear();
   m_voidRegistrations.clear();
   m_epochHistory.clear();
@@ -732,6 +749,11 @@ bool CommitmentIndex::completeElderfierUnstaking(const std::string& address, uin
     m_elderfier_ids.erase(eid_it);
   }
 
+  // Void the alias tied to this EFiD (alias lifecycle follows EFiD)
+  if (m_aliasIndex) {
+    m_aliasIndex->voidAlias(address);
+  }
+
   // Remove from registrations map (void set now tracks it permanently)
   m_elderfierRegistrations.erase(it);
   return true;
@@ -785,109 +807,6 @@ std::vector<ElderfierRegistration> CommitmentIndex::getElderfierRegistrationsByA
   }
 
   return results;
-}
-
-// ============================================================================
-// @ ALIAS SYSTEM
-// ============================================================================
-
-bool CommitmentIndex::registerAlias(const AliasEntry& entry) {
-  std::lock_guard<std::mutex> lock(m_mutex);
-
-  // Check alias does not already exist
-  if (m_aliases.find(entry.alias) != m_aliases.end()) {
-    return false;  // Alias already taken
-  }
-
-  // Check address does not already have an alias
-  if (m_addressToAlias.find(entry.ownerAddress) != m_addressToAlias.end()) {
-    return false;  // Address already has an alias
-  }
-
-  // Validate format based on alias type
-  if (entry.alias.length() != 8) {
-    return false;  // Must be exactly 8 characters
-  }
-
-  if (entry.aliasType == 0) {
-    // Elderfier alias: [A-Z0-9] only (ALLCAPS)
-    for (char c : entry.alias) {
-      bool isUpper = (c >= 'A' && c <= 'Z');
-      bool isDigit = (c >= '0' && c <= '9');
-      if (!isUpper && !isDigit) {
-        return false;
-      }
-    }
-
-    // Must be an active elderfier to register CAPS alias
-    auto reg_it = m_elderfierRegistrations.find(entry.ownerAddress);
-    if (reg_it == m_elderfierRegistrations.end() ||
-        reg_it->second.status != ElderfierStatus::ACTIVE) {
-      return false;  // Not an active elderfier
-    }
-  } else if (entry.aliasType == 1) {
-    // Regular user alias: [a-z0-9] only (lowercase)
-    for (char c : entry.alias) {
-      bool isLower = (c >= 'a' && c <= 'z');
-      bool isDigit = (c >= '0' && c <= '9');
-      if (!isLower && !isDigit) {
-        return false;
-      }
-    }
-  } else {
-    return false;  // Unknown alias type
-  }
-
-  // Register the alias
-  m_aliases[entry.alias] = entry;
-  m_addressToAlias[entry.ownerAddress] = entry.alias;
-  return true;
-}
-
-bool CommitmentIndex::aliasExists(const std::string& alias) const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-  return m_aliases.find(alias) != m_aliases.end();
-}
-
-bool CommitmentIndex::addressHasAlias(const std::string& address) const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-  return m_addressToAlias.find(address) != m_addressToAlias.end();
-}
-
-std::optional<AliasEntry> CommitmentIndex::getAliasByName(const std::string& alias) const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-
-  auto it = m_aliases.find(alias);
-  if (it != m_aliases.end()) {
-    return it->second;
-  }
-  return std::nullopt;
-}
-
-std::optional<AliasEntry> CommitmentIndex::getAliasByAddress(const std::string& address) const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-
-  auto alias_it = m_addressToAlias.find(address);
-  if (alias_it == m_addressToAlias.end()) {
-    return std::nullopt;
-  }
-
-  auto entry_it = m_aliases.find(alias_it->second);
-  if (entry_it != m_aliases.end()) {
-    return entry_it->second;
-  }
-  return std::nullopt;
-}
-
-std::vector<AliasEntry> CommitmentIndex::getAllAliases() const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-
-  std::vector<AliasEntry> result;
-  result.reserve(m_aliases.size());
-  for (const auto& pair : m_aliases) {
-    result.push_back(pair.second);
-  }
-  return result;
 }
 
 }  // namespace CryptoNote

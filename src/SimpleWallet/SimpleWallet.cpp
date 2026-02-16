@@ -536,7 +536,7 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // TODO: Re-enable burn and cold commands in next release
   // m_consoleHandler.setHandler("burn", boost::bind(&simple_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
   // m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
-  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 XFG deposits (0xEF tag, 4000 XFG total). Creates elderfier registration commitment.");
+  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony <ALIAS> - Register as Elderfier with alias [A-Z0-9&]: batch 5x 800 XFG deposits (0xEF tag, 4000 XFG total).");
   m_consoleHandler.setHandler("withdraw_deposit", boost::bind(&simple_wallet::withdraw_deposit, this, boost::arg<1>()), "withdraw_deposit <id> - Withdraw a deposit");
   m_consoleHandler.setHandler("list_deposits", boost::bind(&simple_wallet::list_deposits, this, boost::arg<1>()), "list_deposits - List all COLD or Elderfier deposits");
   m_consoleHandler.setHandler("deposit_info", boost::bind(&simple_wallet::deposit_info, this, boost::arg<1>()), "deposit_info <id> - Get detailed info for deposit");
@@ -550,7 +550,7 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("generate_proof", boost::bind(&simple_wallet::generate_proof, this, boost::arg<1>()), "generate_proof <tx_hash> - Generate STARK proof for deposit transaction (for L2 claims)");
 
   // @ Alias system commands
-  m_consoleHandler.setHandler("register_alias", boost::bind(&simple_wallet::register_alias, this, boost::arg<1>()), "register_alias <alias> - Register an @ alias (8 chars: [A-Z0-9] for Elderfiers, [a-z0-9] for regular users)");
+  m_consoleHandler.setHandler("register_alias", boost::bind(&simple_wallet::register_alias, this, boost::arg<1>()), "register_alias <alias> - Register an @ alias (8 chars [a-z0-9&], costs 1 XFG). EFier aliases [A-Z0-9&] via elderking_ceremony.");
   m_consoleHandler.setHandler("lookup_alias", boost::bind(&simple_wallet::lookup_alias, this, boost::arg<1>()), "lookup_alias <alias_or_address> - Look up an @ alias by name or wallet address");
   m_consoleHandler.setHandler("list_aliases", boost::bind(&simple_wallet::list_aliases, this, boost::arg<1>()), "list_aliases - List all registered @ aliases on the network");
 }
@@ -1663,10 +1663,65 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
 bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
 {
   // Elderfier registration: batch 5x 800 XFG deposits with 0xEF tag (total 4000 XFG)
-  // This is the ceremonial registration process for becoming an Elderfier
-  if (args.size() != 0)
+  // Alias is chosen during ceremony and permanently tied to the EFiD
+  if (args.size() != 1)
   {
-    fail_msg_writer() << "Usage: elderking_ceremony";
+    fail_msg_writer() << "Usage: elderking_ceremony <ALIAS>";
+    fail_msg_writer() << "  ALIAS must be exactly 8 characters [A-Z0-9&] (e.g., FIREKING)";
+    return true;
+  }
+
+  std::string alias = args[0];
+
+  // Validate alias: exactly 8 chars, uppercase + digits + & only
+  if (alias.length() != 8) {
+    fail_msg_writer() << "Alias must be exactly 8 characters. Got " << alias.length() << ".";
+    return true;
+  }
+  for (char c : alias) {
+    if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '&')) {
+      fail_msg_writer() << "Elderfier alias must be [A-Z0-9&] only. Invalid character: '" << c << "'";
+      return true;
+    }
+  }
+
+  // Check alias availability via RPC before proceeding
+  try {
+    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+    COMMAND_RPC_GET_ALIAS::request checkReq;
+    COMMAND_RPC_GET_ALIAS::response checkRes;
+    checkReq.alias = alias;
+    invokeJsonCommand(httpClient, "/get_alias", checkReq, checkRes);
+
+    if (checkRes.found) {
+      fail_msg_writer() << "Alias @" << alias << " is already taken. Choose another.";
+      return true;
+    }
+  } catch (const ConnectException&) {
+    printConnectionError();
+    return true;
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Failed to check alias availability: " << e.what();
+    return true;
+  }
+
+  // Check if address already has an alias
+  try {
+    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+    COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request addrReq;
+    COMMAND_RPC_GET_ALIAS_BY_ADDRESS::response addrRes;
+    addrReq.address = m_wallet->getAddress();
+    invokeJsonCommand(httpClient, "/get_alias_by_address", addrReq, addrRes);
+
+    if (addrRes.found) {
+      fail_msg_writer() << "Your address already has alias @" << addrRes.alias;
+      return true;
+    }
+  } catch (const ConnectException&) {
+    printConnectionError();
+    return true;
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Failed to check address alias: " << e.what();
     return true;
   }
 
@@ -1816,7 +1871,10 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       elderfierDeposit.depositAmount = amount_per_deposit;
       elderfierDeposit.elderfierAddress = m_wallet->getAddress();  // Wallet address for registration tracking
       elderfierDeposit.securityWindow = 28800;  // 8 hours default security window
+      // Embed alias in metadata of every deposit (0xEA prefix + 8 bytes alias)
       elderfierDeposit.metadata.clear();
+      elderfierDeposit.metadata.push_back(0xEA);  // Alias tag marker
+      elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(), alias.begin(), alias.end());
       elderfierDeposit.signature.clear();
       elderfierDeposit.isSlashable = true;  // Deposits can be slashed by Elder Kings Council
 
@@ -1861,6 +1919,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "   ✓ Detect all 5 stakes in the blockchain";
     success_msg_writer() << "   ✓ Register you as an ELDERFIER";
     success_msg_writer() << "   ✓ Assign you an Elderfier ID (0-255)";
+    success_msg_writer() << "   ✓ Register your alias @" << alias << " (tied to your EFiD)";
     success_msg_writer() << "   ✓ Add you to the active elderfiers registry";
     success_msg_writer() << "";
     success_msg_writer() << "⚡ YOUR NEW POWERS AS A GUARDIAN OF THE FLAME";
@@ -3140,8 +3199,8 @@ bool simple_wallet::process_command(const std::vector<std::string> &args) {
 bool simple_wallet::register_alias(const std::vector<std::string> &args) {
   if (args.size() != 1) {
     fail_msg_writer() << "Usage: register_alias <alias>";
-    fail_msg_writer() << "  Alias must be exactly 8 characters:";
-    fail_msg_writer() << "  [A-Z0-9] (CAPS LOCK) for Elderfiers, [a-z0-9] (lowercase) for regular users";
+    fail_msg_writer() << "  Alias must be exactly 8 characters [a-z0-9&] (e.g., firenode)";
+    fail_msg_writer() << "  UPPERCASE [A-Z0-9&] aliases are assigned via elderking_ceremony";
     return true;
   }
 
@@ -3149,50 +3208,31 @@ bool simple_wallet::register_alias(const std::vector<std::string> &args) {
 
   // Validate length
   if (alias.length() != 8) {
-    fail_msg_writer() << "Alias can only be 8 characters exactly. Got " << alias.length() << ".";
+    fail_msg_writer() << "Alias must be exactly 8 characters. Got " << alias.length() << ".";
     return true;
   }
 
-  // Determine alias type: all uppercase+digits = Elderfier (type 0), all lowercase+digits = Regular (type 1)
-  bool allUpper = true, allLower = true;
+  // Check if any uppercase letters present — block them, EFier aliases come from ceremony
   for (char c : alias) {
-    if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'))) allUpper = false;
-    if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))) allLower = false;
-  }
-
-  if (!allUpper && !allLower) {
-    fail_msg_writer() << "Invalid alias format. Use:";
-    fail_msg_writer() << "  [A-Z0-9] for Elderfier aliases (e.g., FIRENODE)";
-    fail_msg_writer() << "  [a-z0-9] for regular user aliases (e.g., firenode)";
-    return true;
-  }
-
-  uint8_t aliasType = allUpper ? 0 : 1;
-
-  // Elderfier aliases (type 0) require active Elderfier registration
-  if (aliasType == 0) {
-    try {
-      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
-      COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::request eligReq;
-      COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::response eligRes;
-      eligReq.address = m_wallet->getAddress();
-      invokeJsonCommand(httpClient, "/check_elderfier_eligibility", eligReq, eligRes);
-
-      // If the address CAN register (i.e., is NOT already registered), it's not an active Elderfier
-      if (eligRes.eligible) {
-        fail_msg_writer() << "UPPERCASE aliases are reserved for active Elderfiers.";
-        fail_msg_writer() << "Your address is not registered as an Elderfier.";
-        fail_msg_writer() << "Use lowercase alias [a-z0-9] or run 'elderking_ceremony' first.";
-        return true;
-      }
-    } catch (const ConnectException&) {
-      printConnectionError();
-      return true;
-    } catch (const std::exception& e) {
-      fail_msg_writer() << "Failed to check Elderfier eligibility: " << e.what();
+    if (c >= 'A' && c <= 'Z') {
+      fail_msg_writer() << "UPPERCASE aliases are reserved for Elderfiers.";
+      fail_msg_writer() << "Elderfier aliases are assigned during the ceremony:";
+      fail_msg_writer() << "  elderking_ceremony <ALIAS>";
+      fail_msg_writer() << "Use lowercase [a-z0-9&] for regular user aliases.";
       return true;
     }
   }
+
+  // Validate all chars are [a-z0-9&]
+  for (char c : alias) {
+    bool ok = (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || (c == '&');
+    if (!ok) {
+      fail_msg_writer() << "Invalid character '" << c << "'. Use [a-z0-9&] only.";
+      return true;
+    }
+  }
+
+  uint8_t aliasType = 1;  // Regular user alias only (EFier aliases come from ceremony)
 
   // Check if alias is already taken
   try {
@@ -3239,13 +3279,9 @@ bool simple_wallet::register_alias(const std::vector<std::string> &args) {
 
   // Show confirmation summary
   success_msg_writer() << "";
-  if (aliasType == 0) {
-    success_msg_writer() << "Registering Elderfier alias @" << alias << " (FREE for active Elderfiers)";
-    success_msg_writer() << "  Type: Elderfier [A-Z0-9]";
-    success_msg_writer() << "  This will send a small self-transfer to embed the alias on-chain.";
-  } else {
+  {
     success_msg_writer() << "Registering alias @" << alias;
-    success_msg_writer() << "  Type: Regular [a-z0-9]";
+    success_msg_writer() << "  Type: Regular [a-z0-9&]";
     if (m_currency.isTestnet()) {
       success_msg_writer() << "  Fee: self-transfer (testnet)";
     } else {
@@ -3293,14 +3329,15 @@ bool simple_wallet::register_alias(const std::vector<std::string> &args) {
 
     std::vector<CryptoNote::WalletLegacyTransfer> transfers;
 
-    if (aliasType == 0 || m_currency.isTestnet()) {
-      // Elderfier alias or testnet: send minimum amount to self
+    if (m_currency.isTestnet()) {
+      // Testnet: send minimum amount to self
       CryptoNote::WalletLegacyTransfer selfTransfer;
       selfTransfer.address = walletAddress;
       selfTransfer.amount = m_currency.minimumFee();
       transfers.push_back(selfTransfer);
     } else {
       // Regular alias on mainnet: 1 XFG fee to Fuego Developer Fund
+      // (EFier aliases are free and registered through elderking_ceremony)
       CryptoNote::WalletLegacyTransfer devFundTransfer;
       devFundTransfer.address = CryptoNote::FUEGO_DEV_FUND_ADDRESS;
       devFundTransfer.amount = CryptoNote::parameters::ALIAS_REGISTRATION_FEE;

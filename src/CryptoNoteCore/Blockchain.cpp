@@ -513,29 +513,33 @@ bool Blockchain::canAddressRegisterElderfier(const std::string& address) const {
   return m_commitmentIndex.canAddressRegisterNewElderfier(address);
 }
 
-// @ Alias system proxies
+// @ Alias system proxies (delegated to standalone AliasIndex)
 bool Blockchain::aliasExists(const std::string& alias) const {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.aliasExists(alias);
+  return m_aliasIndex.aliasExists(alias);
 }
 
 std::optional<AliasEntry> Blockchain::getAliasByName(const std::string& alias) const {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getAliasByName(alias);
+  return m_aliasIndex.getAliasByName(alias);
 }
 
 std::optional<AliasEntry> Blockchain::getAliasByAddress(const std::string& address) const {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getAliasByAddress(address);
+  return m_aliasIndex.getAliasByAddress(address);
 }
 
 std::vector<AliasEntry> Blockchain::getAllAliases() const {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getAllAliases();
+  return m_aliasIndex.getAllAliases();
 }
 
 bool Blockchain::init(const std::string& config_folder, bool load_existing) {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+
+  // Wire CommitmentIndex to AliasIndex so EFier registration can auto-register aliases
+  m_commitmentIndex.setAliasIndex(&m_aliasIndex);
+
   if (!config_folder.empty() && !Tools::create_directories_if_necessary(config_folder)) {
     logger(ERROR, BRIGHT_RED) << "Failed to create data directory: " << m_config_folder;
     return false;
@@ -2760,7 +2764,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
               aliasEntry.aliasType = aliasReg.aliasType;
               aliasEntry.registeredBlock = block.height;
 
-              if (m_commitmentIndex.registerAlias(aliasEntry)) {
+              if (m_aliasIndex.registerAlias(aliasEntry)) {
                 logger(INFO) << "@ Alias registered in block " << block.height
                              << ": @" << aliasReg.alias
                              << " (type=" << static_cast<int>(aliasReg.aliasType) << ")";

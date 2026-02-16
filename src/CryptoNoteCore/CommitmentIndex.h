@@ -168,13 +168,8 @@ public:
   uint64_t getTotalFeesInEscrow() const;
   uint64_t getTotalFeesDistributedAllTime() const;
 
-  // @ Alias system methods
-  bool registerAlias(const AliasEntry& entry);
-  bool aliasExists(const std::string& alias) const;
-  bool addressHasAlias(const std::string& address) const;
-  std::optional<AliasEntry> getAliasByName(const std::string& alias) const;
-  std::optional<AliasEntry> getAliasByAddress(const std::string& address) const;
-  std::vector<AliasEntry> getAllAliases() const;
+  // Set the AliasIndex reference (called by Blockchain after construction)
+  void setAliasIndex(AliasIndex* aliasIndex) { m_aliasIndex = aliasIndex; }
 
   // Legacy commitment methods (for backward compatibility with Blockchain)
   typedef uint32_t Height;
@@ -204,6 +199,7 @@ private:
     int deposit_count = 0;
     uint64_t total_amount = 0;
     Crypto::PublicKey signing_pubkey;
+    std::string alias;  // Ceremony alias extracted from 0xEF metadata (0xEA tag)
   };
 
   std::map<std::string, PendingElderfierStake> m_pendingElderfierStakes;
@@ -229,9 +225,8 @@ private:
   std::map<std::string, ElderfierRegistration> m_elderfierRegistrations;  // address -> registration
   std::set<std::pair<std::string, uint8_t>> m_voidRegistrations;   // (address, EFiD) -> permanently locked
 
-  // @ Alias storage
-  std::map<std::string, AliasEntry> m_aliases;          // alias -> entry
-  std::map<std::string, std::string> m_addressToAlias;  // address -> alias
+  // AliasIndex reference (owned by Blockchain, not by CommitmentIndex)
+  AliasIndex* m_aliasIndex = nullptr;
 
   // Commitment storage (indexed by commitment hash hex)
   std::map<std::string, CommitmentEntry> m_commitments;        // commitHash hex -> entry
@@ -244,7 +239,7 @@ private:
   // Helper methods
   bool isElderfierRegistrationDeposit(const CommitmentEntry& entry);
   std::string getWalletAddressFromTx(const Crypto::Hash& txHash);
-  bool tryRegisterElderfier(const std::string& wallet, const Crypto::PublicKey& pubkey);
+  bool tryRegisterElderfier(const std::string& wallet, const Crypto::PublicKey& pubkey, const std::string& alias);
   std::vector<uint8_t> calculateActiveElderfiers(uint64_t epochNumber) const;
   Crypto::Hash computeMerkleRootInternal() const;  // Recompute root from m_merkle_leaves (caller holds lock)
 };
