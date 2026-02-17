@@ -726,6 +726,14 @@ bool RpcServer::on_get_height(const COMMAND_RPC_GET_HEIGHT::request& req, COMMAN
   return true;
 }
 
+bool RpcServer::on_get_ethereal_flame(const COMMAND_RPC_GET_ETHERNAL_FLAME::request& req, COMMAND_RPC_GET_ETHERNAL_FLAME::response& res) {
+  uint64_t current_height = m_core.get_current_blockchain_height();
+  res.ethernalXFG = m_core.getBurnedXfgAtHeight(current_height);
+  res.formattedAmount = m_core.currency().formatAmount(res.ethernalXFG) + " XFG";
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
 bool RpcServer::on_get_transactions(const COMMAND_RPC_GET_TRANSACTIONS::request& req, COMMAND_RPC_GET_TRANSACTIONS::response& res) {
   std::vector<Hash> vh;
   for (const auto& tx_hex_str : req.txs_hashes) {

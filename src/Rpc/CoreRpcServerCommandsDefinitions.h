@@ -1417,13 +1417,19 @@ struct COMMAND_RPC_CHECK_COMMITMENT_EXISTS {
 };
 
 /** @brief Get total burned XFG amount (eternal flame)
- */
-struct COMMAND_RPC_GET_ETHERNAL_FLAME {
-  struct request {};
+  */
+ struct COMMAND_RPC_GET_ETHERNAL_FLAME {
+  typedef EMPTY_STRUCT request;
+  
   struct response {
     uint64_t ethernalXFG;
     std::string formattedAmount;
+    
+    void serialize(ISerializer &s) {
+      KV_MEMBER(ethernalXFG)
+      KV_MEMBER(formattedAmount)
+    }
   };
-};
+ };
 
 }
