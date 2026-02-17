@@ -341,6 +341,7 @@ private:
 			                   m_upgradeDetectorV8(currency, m_blocks, BLOCK_MAJOR_VERSION_8, logger),
                          m_upgradeDetectorV9(currency, m_blocks, BLOCK_MAJOR_VERSION_9, logger),
                         m_upgradeDetectorV10(currency, m_blocks, BLOCK_MAJOR_VERSION_10, logger),
+                        m_commitmentIndex(currency),
                         m_aliasIndex() {
 } // upgradekit
 

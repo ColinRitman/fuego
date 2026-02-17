@@ -1920,25 +1920,40 @@ namespace CryptoNote
     s(aliasType, "aliasType");
     return true;
   }
-
+ 
   bool TransactionExtraAliasRegistration::isValid() const {
+      // Special exception aliases
+      if (aliasType == 0) {
+        // Elderfier aliases: GALAPAGOS, WINSLAYER, and LOUDMINING
+        if (alias == "GALAPAGOS" || alias == "WINSLAYER" || alias == "LOUDMINING") {
+          return true;
+        }
+      } else if (aliasType == 1) {
+        // Regular aliases: galapagos OR winslayer
+        if (alias == "galapagos" || alias == "winslayer") {
+          return true;
+        }
+      }
+
     if (alias.length() != 8) {
       return false;
     }
 
     if (aliasType == 0) {
-      // Elderfier alias: [A-Z0-9] only
+      // Elderfier alias: [A-Z0-9&] only
       for (char c : alias) {
         bool isUpper = (c >= 'A' && c <= 'Z');
         bool isDigit = (c >= '0' && c <= '9');
-        if (!isUpper && !isDigit) return false;
+        bool isAmpersand = (c == '&');
+        if (!isUpper && !isDigit && !isAmpersand) return false;
       }
     } else if (aliasType == 1) {
-      // Regular user alias: [a-z0-9] only
+      // Regular user alias: [a-z0-9&] only
       for (char c : alias) {
         bool isLower = (c >= 'a' && c <= 'z');
         bool isDigit = (c >= '0' && c <= '9');
-        if (!isLower && !isDigit) return false;
+        bool isAmpersand = (c == '&');
+        if (!isLower && !isDigit && !isAmpersand) return false;
       }
     } else {
       return false;

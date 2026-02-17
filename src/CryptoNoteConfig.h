@@ -61,7 +61,8 @@ namespace CryptoNote
 		const uint64_t ALIAS_REGISTRATION_FEE = COIN;  /* 1 XFG sent to Fuego Development Fund */
 
 		// Elderking ceremony amount: 4000 XFG required for Elderking ceremony
-		const uint64_t ELDERKING_CEREMONY_AMOUNT = UINT64_C(4000) * COIN;  /* 4000 XFG in atomic units */
+		const uint64_t ELDERKING_CEREMONY_AMOUNT = UINT64_C(5) * AMOUNT_TIER_3;  /* 4000 XFG (40,000,000,000 atomic units) (5 x amount_tier_3 deposits) */
+
 
 		const uint64_t DEFAULT_DUST_THRESHOLD_20KH = UINT64_C(20000); /* < 0.002 XFG ( under 20 Kħ is dust) */
 		const uint64_t DEFAULT_DUST_THRESHOLD = UINT64_C(1000); /* < 0.0001 XFG ( under 1 Kħ is dust) v10 */
@@ -201,8 +202,8 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
 
 	// Fuego Developer Fund wallet — receives alias registration fees
 	const char FUEGO_DEV_FUND_ADDRESS[] = "fireVHx639SLMhzmBoJ8drTXbVyv2eRG6A8aMLc1taTiRNwk8pnwXpBDUSjH1dT5fg7yVVZrKkvm31CmigAMdVDg7sgxJmAUNp";
-   // RESERVE xfg @liases
-   // const char DEVELOPMENT_FIRE_ALIASES[] = "FUEGOXFG", "FUEGODEV", "fuegoxfg", "fuegodev";
+   // RESERVED xfg aliases    "galapgos"
+   // "FUEGOXFG", "FUEGODEV", "fuegoxfg", "fuegodev";
 
     const char CRYPTONOTE_NAME[] = "fuego";
 	const char GENESIS_COINBASE_TX_HEX[] = "013c01ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101bd4e0bf284c04d004fd016a21405046e8267ef81328cabf3017c4c24b273b25a";
@@ -300,7 +301,15 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
     const uint32_t TESTNET_DEPOSIT_TERM_MIN = 2;  // New 3-month term, slightly <90 days / Fuego blocks (180 blks per day)
     const uint32_t TESTNET_DEPOSIT_TERM_MAX = 69;   // ~1-year using 360(+1)days/yr (65k blocks)
 
-    const uint32_t TESTNET_DEPOSIT_TERM_YIELD = TESTNET_DEPOSIT_MIN_TERM;     // 16440 blocks (3 months) for yield deposits
+    const uint32_t TESTNET_DEPOSIT_TERM_YIELD = TESTNET_DEPOSIT_MIN_TERM;
+
+  		// TESTNET BURN/COLD/LP TIERS
+    const uint64_t TEST_AMOUNT_TIER_0 =     800000;  //0.08 TEST (800,000 atomic units)
+    const uint64_t TEST_AMOUNT_TIER_1 =    8000000;  //0.8 TEST (8,000,000 atomic units)
+    const uint64_t TEST_AMOUNT_TIER_2 =   80000000;  // 8 TEST (80,000,000 atomic units)
+    const uint64_t TEST_AMOUNT_TIER_3 =  800000000;  // 80 TEST (800,000,000 atomic units)
+    // TESTIFIER ceremony amount: 400 XFG required for TESTNET Elderking ceremony
+	const uint64_t TESTIFIER_CEREMONY_AMOUNT = UINT64_C(5) * TEST_AMOUNT_TIER_3;  /* 400 XFG in atomic units (5 x amount_tier_3 deposits) */
 //__________________________________________________________________________________________________________________________
                                      	// TESTNET DMWDA parameters
 //--------------------------------------------------------------------------------------------------------------------------

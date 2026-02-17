@@ -35,7 +35,7 @@ void CommitmentEntry::serialize(ISerializer& s) {
   s(targetChainId, "target_chain_id");
 }
 
-CommitmentIndex::CommitmentIndex() {
+CommitmentIndex::CommitmentIndex(const CryptoNote::Currency& currency) : m_currency(currency) {
 }
 
 CommitmentIndex::~CommitmentIndex() {
@@ -54,9 +54,11 @@ void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
   // Store the commitment
   m_commitments[commitHex] = entry;
   m_merkle_leaves.push_back(entry.commitment);
-  m_heightIndex[entry.blockHeight].push_back(commitHex);
 
-  // Update type counters
+  // Index by height
+  m_heightIndex[entry.blockHeight].insert(commitHex);
+
+  // Update counters
   switch (entry.type) {
     case CommitmentEntry::Type::HEAT:
       m_heat_count++;
@@ -66,8 +68,11 @@ void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
       break;
     case CommitmentEntry::Type::ELDERFIER_STAKING:
       m_elderfier_stake_count++;
+      // Handle elderfier staking deposits
+      handleElderfierStakingDeposit(entry);
       break;
   }
+}
 
   // Update highest block height
   if (entry.blockHeight > m_current_block_height) {
@@ -90,8 +95,12 @@ void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
         m_pendingElderfierStakes[wallet].alias = entry.ceremonyAlias;
       }
 
-      // Auto-register when five 800 XFG deposits for 4000 XFG total are confirmed
-      const uint64_t REGISTRATION_AMOUNT = CryptoNote::parameters::ELDERKING_CEREMONY_AMOUNT;  // 4000 XFG in atomic units
+      // Auto-register when five deposits for the required amount are confirmed
+      // Use testnet ceremony amount if on testnet, otherwise use mainnet amount
+      const uint64_t REGISTRATION_AMOUNT = m_currency.isTestnet() ? 
+        CryptoNote::parameters::TESTIFIER_CEREMONY_AMOUNT : 
+        CryptoNote::parameters::ELDERKING_CEREMONY_AMOUNT;
+      
       if (m_pendingElderfierStakes[wallet].deposit_count == 5 &&
           m_pendingElderfierStakes[wallet].total_amount >= REGISTRATION_AMOUNT) {
         tryRegisterElderfier(wallet, m_pendingElderfierStakes[wallet].signing_pubkey, m_pendingElderfierStakes[wallet].alias);
@@ -289,7 +298,7 @@ bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Cryp
   m_elderfierAddresses[efid] = wallet;
 
   // Auto-register ceremony alias via AliasIndex (tied to EFiD — voids on unstake)
-  if (m_aliasIndex && !alias.empty() && alias.length() == 8) {
+  if (m_aliasIndex && !alias.empty() && (alias.length() == 8 || alias == "GALAPAGOS" || alias == "WINSLAYER" || alias == "LOUDMINING")) {
     AliasEntry aliasEntry;
     aliasEntry.alias = alias;
     aliasEntry.ownerAddress = wallet;

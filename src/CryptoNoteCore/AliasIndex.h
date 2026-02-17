@@ -47,7 +47,6 @@ public:
   std::vector<AliasEntry> getAllAliases() const;
 
   // State
-  void clear();
   size_t size() const;
 
   // Validation helpers (static, usable by callers before registration)

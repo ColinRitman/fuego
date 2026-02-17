@@ -27,6 +27,7 @@
 #include <optional>
 #include "crypto/hash.h"
 #include "CryptoNoteCore/AliasIndex.h"
+#include "CryptoNoteCore/Currency.h"
 
 namespace CryptoNote {
 
@@ -119,7 +120,7 @@ struct ElderfierRegistration {
 // Main CommitmentIndex class
 class CommitmentIndex {
 public:
-  CommitmentIndex();
+  CommitmentIndex(const CryptoNote::Currency& currency);
   ~CommitmentIndex();
 
   // Add a commitment entry
@@ -235,6 +236,9 @@ private:
   size_t m_heat_count = 0;
   size_t m_cold_count = 0;
   size_t m_elderfier_stake_count = 0;
+
+  // Currency reference for network detection
+  const CryptoNote::Currency& m_currency;
 
   // Helper methods
   bool isElderfierRegistrationDeposit(const CommitmentEntry& entry);
