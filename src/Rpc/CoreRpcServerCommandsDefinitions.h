@@ -1424,10 +1424,12 @@ struct COMMAND_RPC_CHECK_COMMITMENT_EXISTS {
   struct response {
     uint64_t ethernalXFG;
     std::string formattedAmount;
+    std::string status;
     
     void serialize(ISerializer &s) {
       KV_MEMBER(ethernalXFG)
       KV_MEMBER(formattedAmount)
+      KV_MEMBER(status)
     }
   };
  };
