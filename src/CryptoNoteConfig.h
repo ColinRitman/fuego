@@ -33,7 +33,8 @@ namespace CryptoNote
 		const size_t CRYPTONOTE_MAX_BLOCK_BLOB_SIZE = 8000000;
 		const size_t CRYPTONOTE_MAX_TX_SIZE = 1000000000;
         const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX = 1753191; /* "fire" address prefix */
-		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW = 60;
+		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW = 69;
+		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW_TESTNET = 0;
 		const uint64_t DIFFICULTY_TARGET_DRGL = 81;
 		const unsigned EMISSION_SPEED_FACTOR = 18;
         const unsigned EMISSION_SPEED_FACTOR_FANGO = 19;  //major version 8
@@ -41,7 +42,7 @@ namespace CryptoNote
 		const uint64_t CRYPTONOTE_BLOCK_FUTURE_TIME_LIMIT  = 60 * 60 * 2;
 		const uint64_t CRYPTONOTE_BLOCK_FUTURE_TIME_LIMIT_V1 = DIFFICULTY_TARGET_DRGL * 6;
 		const uint64_t CRYPTONOTE_BLOCK_FUTURE_TIME_LIMIT_V2 = DIFFICULTY_TARGET * 2;
-		const uint64_t CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 8;
+		const uint64_t CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 3;
 		const size_t BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW = 60;
 		const size_t BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW_V1 = 11; /* LWMA3 */
 
@@ -80,28 +81,13 @@ namespace CryptoNote
 		const size_t   DIFFICULTY_WINDOW_V3                          = 60;  // blocks  Zawy-LWMA1
 		const size_t   DIFFICULTY_WINDOW_V4                          = 45;  // blocks  Zawy-LWMA1 Fuego (~180 block per day)
 
-		// DMWDA MAINNET parameters
-		const uint32_t DMWDA_SHORT_WINDOW                            = 15;   // Rapid response window
-		const uint32_t DMWDA_MEDIUM_WINDOW                           = 45;   // Stability window
-		const uint32_t DMWDA_LONG_WINDOW                             = 120;  // Trend analysis window
-		const uint32_t DMWDA_EMERGENCY_WINDOW                        = 5;    // Emergency response window
-		const double   DMWDA_MIN_ADJUSTMENT                          = 0.5;  // Minimum difficulty adjustment (50%)
-		const double   DMWDA_MAX_ADJUSTMENT                          = 4.0;  // Maximum difficulty adjustment (400%)
-		const double   DMWDA_EMERGENCY_THRESHOLD                     = 0.1;  // Emergency threshold (10%)
-		const double   DMWDA_SMOOTHING_FACTOR                        = 0.3;  // Smoothing factor for oscillations prevention
-		const double   DMWDA_CONFIDENCE_MIN                          = 0.1;  // Minimum confidence score
-		const double   DMWDA_CONFIDENCE_MAX                          = 1.0;  // Maximum confidence score
-		const double   DMWDA_ADJUSTMENT_RANGE                        = 0.3;  // Adjustment range for confidence-based bounds
-		const double   DMWDA_WEIGHT_SHORT                            = 0.4;  // Weight for short window
-		const double   DMWDA_WEIGHT_MEDIUM                           = 0.4;  // Weight for medium window
-		const double   DMWDA_WEIGHT_LONG                             = 0.2;  // Weight for long window
-		const double   DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 10.0; // Hash rate change threshold for anomaly detection
-		const double   DMWDA_DEFAULT_CONFIDENCE                      = 0.5;  // Default confidence score
-		const uint32_t DMWDA_RECENT_WINDOW_SIZE                      = 5;    // Recent window size for anomaly detection
-		const uint32_t DMWDA_HISTORICAL_WINDOW_SIZE                  = 20;   // Historical window size for anomaly detection
-		const uint32_t DMWDA_BLOCK_STEALING_CHECK_BLOCKS             = 5;    // Number of blocks to check for stealing attempts
-		const uint32_t DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
-		const double   DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.05; // 5% of target time threshold for fast blocks
+		// MWLWMA (Multi-Window LWMA) MAINNET parameters — just 3 Ns and 3 weights
+		const uint64_t MWLWMA_N_SHORT                                 = 30;   // Short window (~4 hours at T=480)
+		const uint64_t MWLWMA_N_MEDIUM                                = 60;   // Medium window (~8 hours) — Zawy-recommended N for T≈480
+		const uint64_t MWLWMA_N_LONG                                  = 90;   // Long window (~12 hours)
+		const uint64_t MWLWMA_W_SHORT                                 = 25;   // 25% weight — responsiveness
+		const uint64_t MWLWMA_W_MEDIUM                                = 50;   // 50% weight — stability anchor
+		const uint64_t MWLWMA_W_LONG                                  = 25;   // 25% weight — trend dampening
 
         // MIXIN
 		const uint64_t MIN_TX_MIXIN_SIZE_V2                          = 2;  // Legacy mixin
@@ -300,31 +286,14 @@ namespace CryptoNote
     const uint32_t TESTNET_ELDERFIER_STAKING_REVIEW_WINDOW = 10;  // 10 blocks (fast review for testing)
 
 	//__________________________________________________________________________________________________________________________
-                                     	// TESTNET DMWDA parameters
+                                     	// TESTNET MWLWMA parameters
 //--------------------------------------------------------------------------------------------------------------------------
- 		const uint32_t TESTNET_DMWDA_SHORT_WINDOW                            = 30;   // Rapid response window
- 		const uint32_t TESTNET_DMWDA_MEDIUM_WINDOW                           = 69;   // Stability window
- 		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 180;  // Trend analysis window
- 		const uint32_t TESTNET_DMWDA_EMERGENCY_WINDOW                        = 3;    // Emergency response window
- 		const double   TESTNET_DMWDA_MIN_ADJUSTMENT                          = 0.5;  // Minimum difficulty adjustment (50%)
- 		const double   TESTNET_DMWDA_MAX_ADJUSTMENT                          = 2.0;  // Maximum difficulty adjustment (200%)
- 		const double   TESTNET_DMWDA_EMERGENCY_THRESHOLD                     = 0.45;  // Emergency threshold (45%)
- 		const double   TESTNET_DMWDA_SMOOTHING_FACTOR                        = 0.8;  // Smoothing factor for oscillations prevention 80/20 prev/new
- 		const double   TESTNET_DMWDA_CONFIDENCE_MIN                          = 0.2;  // Minimum confidence score
- 		const double   TESTNET_DMWDA_CONFIDENCE_MAX                          = 1.0;  // Maximum confidence score
- 	    const double   TESTNET_DMWDA_DEFAULT_CONFIDENCE                      = 0.5;  // Default confidence score
-
-	const double   TESTNET_DMWDA_WEIGHT_SHORT                            = 0.5;  // Weight for short window
- 	const double   TESTNET_DMWDA_WEIGHT_MEDIUM                           = 0.3;  // Weight for medium window
- 	const double   TESTNET_DMWDA_WEIGHT_LONG                             = 0.2;  // Weight for long window
- 	const double   TESTNET_DMWDA_ADJUSTMENT_RANGE                        = 0.33;  // Adjustment range for confidence-based bounds
- 	const uint32_t TESTNET_DMWDA_RECENT_WINDOW_SIZE                      = 5;    // Recent window size for anomaly detection
- 	const uint32_t TESTNET_DMWDA_HISTORICAL_WINDOW_SIZE                  = 20;   // Historical window size for anomaly detection
- 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_CHECK_BLOCKS             = 5;    // Number of blocks to check for stealing attempts
- 	const double   TESTNET_DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.05; // 5% of target time threshold for fast blocks
-
- 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
-	const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 8.0; // Hash rate change threshold for anomaly detection
+		const uint64_t TESTNET_MWLWMA_N_SHORT                                = 15;   // Short window
+		const uint64_t TESTNET_MWLWMA_N_MEDIUM                               = 30;   // Medium window
+		const uint64_t TESTNET_MWLWMA_N_LONG                                 = 60;   // Long window
+		const uint64_t TESTNET_MWLWMA_W_SHORT                                = 30;   // 30% weight — more reactive on testnet
+		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 45;   // 45% weight — stability
+		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 25;   // 25% weight — trend
 
  	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 

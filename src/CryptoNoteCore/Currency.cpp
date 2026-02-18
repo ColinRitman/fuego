@@ -1159,23 +1159,19 @@ double Currency::getBurnPercentage() const {
 	difficulty_type Currency::nextDifficultyV6(uint32_t height, uint8_t blockMajorVersion,
 		std::vector<std::uint64_t> timestamps, std::vector<difficulty_type> cumulativeDifficulties) const {
 
-		// Multi-Window LWMA (MW-LWMA) for v10+
-		// Uses 3 separate LWMA-1 calculations with different window sizes
-		// Combined with fixed weights - no complex adjustments
+		// MWLWMA (Multi-Window LWMA) for v10+
+		// 3 LWMA-1 calculations with different N, combined by weights
 
 		const uint64_t T = difficultyTarget();
 		const uint64_t minDifficulty = isTestnet() ? 1000 : 100000;
 
-		// Window sizes based on Zawy guidance: higher N for lower T
-		// T=480s is close to T=600 where N≈60 is recommended
-		const uint64_t N_short  = 20;   // Quick reaction (~2.7 hours)
-		const uint64_t N_medium = 60;   // Correct N for T≈480s (~8 hours)
-		const uint64_t N_long   = 120;  // Trend dampening (~16 hours)
+		const uint64_t N_short  = isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_SHORT  : parameters::MWLWMA_N_SHORT;
+		const uint64_t N_medium = isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_MEDIUM : parameters::MWLWMA_N_MEDIUM;
+		const uint64_t N_long   = isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_LONG   : parameters::MWLWMA_N_LONG;
 
-		// Fixed weights - medium dominates for stability
-		const uint64_t W_short  = 25;   // 20% - responsiveness
-		const uint64_t W_medium = 50;   // 55% - stability anchor
-		const uint64_t W_long   = 25;   // 25% - trend dampening
+		const uint64_t W_short  = isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_SHORT  : parameters::MWLWMA_W_SHORT;
+		const uint64_t W_medium = isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_MEDIUM : parameters::MWLWMA_W_MEDIUM;
+		const uint64_t W_long   = isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_LONG   : parameters::MWLWMA_W_LONG;
 
 		// Sanity checks
 		if (timestamps.size() != cumulativeDifficulties.size() || timestamps.size() < 3) {

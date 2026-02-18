@@ -562,10 +562,14 @@ public:
       // Set testnet-specific deposit terms
       depositMinTerm(parameters::TESTNET_COLD_MIN_TERM);
       depositMaxTerm(parameters::TESTNET_COLD_MAX_TERM);
+      // Set testnet-specific mined money unlock window
+      minedMoneyUnlockWindow(parameters::CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW_TESTNET);
     } else {
       // Set mainnet deposit terms when switching from testnet to mainnet
       depositMinTerm(parameters::COLD_MIN_TERM);
       depositMaxTerm(parameters::COLD_MAX_TERM);
+      // Set mainnet mined money unlock window
+      minedMoneyUnlockWindow(parameters::CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW);
     }
 
     return *this;
