@@ -363,7 +363,7 @@ namespace CryptoNote
       }
     }
     else if (keysExists)
-    { //wallet not exists but keys presented
+    { //wallet does not exist but keys presented
       std::stringstream ss;
       importLegacyKeys(keys_file, password, ss);
       boost::filesystem::rename(keys_file, keys_file + ".back");

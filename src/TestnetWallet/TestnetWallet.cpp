@@ -87,7 +87,7 @@ namespace CryptoNote
     if (args.size() != 1)
     {
       fail_msg_writer() << "Usage: burn <amount>";
-      fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 TEST";
+      fail_msg_writer() << "Valid amounts: 0.08, 0.8, 8, 80 TEST";
       return true;
     }
 
@@ -103,15 +103,15 @@ namespace CryptoNote
       }
 
       std::vector<uint64_t> valid_amounts = {
-        CryptoNote::parameters::AMOUNT_TIER_0,
-        CryptoNote::parameters::AMOUNT_TIER_1,
-        CryptoNote::parameters::AMOUNT_TIER_2,
-        CryptoNote::parameters::AMOUNT_TIER_3
+        CryptoNote::parameters::TEST_AMOUNT_TIER_0,
+        CryptoNote::parameters::TEST_AMOUNT_TIER_1,
+        CryptoNote::parameters::TEST_AMOUNT_TIER_2,
+        CryptoNote::parameters::TEST_AMOUNT_TIER_3
       };
 
       auto it = std::find(valid_amounts.begin(), valid_amounts.end(), burn_amount);
       if (it == valid_amounts.end()) {
-        fail_msg_writer() << "Invalid amount. Valid tiers: 0.8, 8, 80, 800 TEST";
+        fail_msg_writer() << "Invalid amount. Valid tiers: 0.08, 0.8, 8, 80 TEST";
         return true;
       }
 
@@ -119,20 +119,20 @@ namespace CryptoNote
 
       // Determine banking fee based on amount tier
       uint64_t banking_fee = 0;
-      if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_0) {
+      if (burn_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_0) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_0;
-      } else if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_1) {
+      } else if (burn_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_1) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
-      } else if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_2) {
+      } else if (burn_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_2) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
-      } else if (burn_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
+      } else if (burn_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_3) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
       }
       uint64_t fee = m_currency.minimumFee();
 
       // Confirmation
       success_msg_writer() << "";
-      success_msg_writer() << "Burn TEST transaction Summary:";
+      success_msg_writer() << "TESTNET Burn Transaction Summary:";
       success_msg_writer() << "  Amount: " << m_currency.formatAmount(burn_amount) << " TEST (PERMANENT)";
       success_msg_writer() << "  Banking Fee: " << m_currency.formatAmount(banking_fee) << " TEST (0.1% of amount to Elderfiers)";
       success_msg_writer() << "  Network Fee: " << m_currency.formatAmount(fee) << " TEST (minimum txn fee to miners)";
@@ -188,7 +188,7 @@ namespace CryptoNote
     if (args.size() != 2)
     {
       fail_msg_writer() << "Usage: cold <amount> <term_code>";
-      fail_msg_writer() << "Valid amounts: 0.8, 8, 80, 800 TEST";
+      fail_msg_writer() << "Valid amounts: 0.08, 0.8, 8, 80 TEST";
       fail_msg_writer() << "Valid term codes: 3 (3 months), 12 (1 year)";
       return true;
     }
@@ -205,15 +205,15 @@ namespace CryptoNote
       }
 
       std::vector<uint64_t> valid_amounts = {
-        CryptoNote::parameters::AMOUNT_TIER_0,
-        CryptoNote::parameters::AMOUNT_TIER_1,
-        CryptoNote::parameters::AMOUNT_TIER_2,
-        CryptoNote::parameters::AMOUNT_TIER_3
+        CryptoNote::parameters::TEST_AMOUNT_TIER_0,
+        CryptoNote::parameters::TEST_AMOUNT_TIER_1,
+        CryptoNote::parameters::TEST_AMOUNT_TIER_2,
+        CryptoNote::parameters::TEST_AMOUNT_TIER_3
       };
 
       auto it = std::find(valid_amounts.begin(), valid_amounts.end(), cold_amount);
       if (it == valid_amounts.end()) {
-        fail_msg_writer() << "Invalid amount. Valid tiers: 0.8, 8, 80, 800 TEST";
+        fail_msg_writer() << "Invalid amount. Valid tiers: 0.08, 0.8, 8, 80 TEST";
         return true;
       }
 
@@ -240,14 +240,14 @@ namespace CryptoNote
 
       // Determine banking fee based on amount tier
       uint64_t banking_fee = 0;
-      if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_0) {
+      if (cold_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_0) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_0;
-      } else if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_1) {
+      } else if (cold_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_1) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
-      } else if (cold_amount == CryptoNote::parameters::AMOUNT_TIER_2) {
+      } else if (cold_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_2) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
       } else if
-          (cold_amount == CryptoNote::parameters::AMOUNT_TIER_3) {
+          (cold_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_3) {
         banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
       }
       // Fee = minimum fee
@@ -255,7 +255,7 @@ namespace CryptoNote
 
       // Confirmation
       success_msg_writer() << "";
-      success_msg_writer() << "Certificate Of Ledger Deposit Summary:";
+      success_msg_writer() << "TESTNET Certificate Of Ledger Deposit Summary:";
       success_msg_writer() << "  Amount: " << m_currency.formatAmount(cold_amount) << " TEST";
       success_msg_writer() << "  Term: " << term_label << " (" << cold_term << " blocks)";
       success_msg_writer() << "  Banking Fee: " << m_currency.formatAmount(banking_fee) << " TEST (0.1% of amount to Elderfiers)";
@@ -325,11 +325,11 @@ namespace CryptoNote
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
       success_msg_writer() << "Testing Testifier registration on testnet!";
-      success_msg_writer() << "This creates 5 deposits of 800 TEST each (4000 TEST total)";
+      success_msg_writer() << "This creates 5 deposits of 80 TEST each (400 TEST total)";
       success_msg_writer() << "";
 
       uint64_t balance = m_wallet->actualBalance();
-      uint64_t required = 4000 * CryptoNote::parameters::COIN;
+      uint64_t required = 400 * CryptoNote::parameters::COIN;
       uint64_t fee = m_currency.minimumFee();
 
       success_msg_writer() << "Balance: " << m_currency.formatAmount(balance) << " TEST";
@@ -350,13 +350,13 @@ namespace CryptoNote
         return true;
       }
 
-      uint64_t amount_per_deposit = 800 * CryptoNote::parameters::COIN;
+      uint64_t amount_per_deposit = CryptoNote::parameters::TEST_AMOUNT_TIER_3;
       success_msg_writer() << "";
       success_msg_writer() << "🔥 Creating 5 TestiFier stakes...";
       success_msg_writer() << "";
 
       for (int i = 0; i < 5; ++i) {
-        success_msg_writer() << "Ritual " << (i + 1) << " of 5: Creating 800 TEST stake...";
+        success_msg_writer() << "Ritual " << (i + 1) << " of 5: Creating 80 TEST stake...";
 
         std::vector<uint8_t> extra;
         std::string extraString = "";
@@ -381,7 +381,7 @@ namespace CryptoNote
         extraString = std::string(extra.begin(), extra.end());
 
         CryptoNote::TransactionId txId = m_wallet->deposit(
-          CryptoNote::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING,
+          CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING,
           amount_per_deposit,
           fee,
           extraString,
@@ -401,7 +401,7 @@ namespace CryptoNote
       success_msg_writer() << "║         🔥⚡ TESTNET CEREMONY COMPLETE! ⚡🔥               ║";
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
-      success_msg_writer() << "✅ All 5 Testifier stakes created (4000 TEST total)";
+      success_msg_writer() << "✅ All 5 Testifier stakes created (400 TEST total)";
       success_msg_writer() << "🎉 Ready for Testifier testing on testnet!";
       success_msg_writer() << "";
 
@@ -421,7 +421,7 @@ namespace CryptoNote
     try
     {
       success_msg_writer() << "";
-      success_msg_writer() << "=== TEST Burn Transactions ===";
+      success_msg_writer() << "=== TESTNET Burn Transactions ===";
       success_msg_writer() << "";
 
       size_t depositCount = m_wallet->getDepositCount();

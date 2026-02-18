@@ -33,7 +33,7 @@ namespace CryptoNote
 		const size_t CRYPTONOTE_MAX_BLOCK_BLOB_SIZE = 8000000;
 		const size_t CRYPTONOTE_MAX_TX_SIZE = 1000000000;
         const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX = 1753191; /* "fire" address prefix */
-		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW = 69;
+		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW = 60;
 		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW_TESTNET = 0;
 		const uint64_t DIFFICULTY_TARGET_DRGL = 81;
 		const unsigned EMISSION_SPEED_FACTOR = 18;
@@ -81,7 +81,7 @@ namespace CryptoNote
 		const size_t   DIFFICULTY_WINDOW_V3                          = 60;  // blocks  Zawy-LWMA1
 		const size_t   DIFFICULTY_WINDOW_V4                          = 45;  // blocks  Zawy-LWMA1 Fuego (~180 block per day)
 
-		// MWLWMA (Multi-Window LWMA) MAINNET parameters — just 3 Ns and 3 weights
+		// MWLWMA (Multi-Window LWMA) MAINNET parameters — 3 Ns and 3 weights
 		const uint64_t MWLWMA_N_SHORT                                 = 30;   // Short window (~4 hours at T=480)
 		const uint64_t MWLWMA_N_MEDIUM                                = 60;   // Medium window (~8 hours) — Zawy-recommended N for T≈480
 		const uint64_t MWLWMA_N_LONG                                  = 90;   // Long window (~12 hours)
@@ -101,11 +101,20 @@ namespace CryptoNote
         const uint64_t AMOUNT_TIER_1 =    80000000;  // 8 XFG (80,000,000 atomic heat) 80M HEAT
         const uint64_t AMOUNT_TIER_2 =   800000000;  // 80 XFG (800,000,000 atomic heat) 800M HEAT
         const uint64_t AMOUNT_TIER_3 =  8000000000;  // 800 XFG (8,000,000,000 atomic heat) 8B HEAT
+      		// TESTNET BURN/COLD/LP TIERS
+        const uint64_t TEST_AMOUNT_TIER_0 =     800000;  //0.08 TEST (800,000 atomic units)
+        const uint64_t TEST_AMOUNT_TIER_1 =    8000000;  //0.8 TEST (8,000,000 atomic units)
+        const uint64_t TEST_AMOUNT_TIER_2 =   80000000;  // 8 TEST (80,000,000 atomic units)
+        const uint64_t TEST_AMOUNT_TIER_3 =  800000000;  // 80 TEST (800,000,000 atomic units)
 
  	    // Elderfier constants
         const uint64_t ELDERKING_CEREMONY_AMOUNT = UINT64_C(5) * AMOUNT_TIER_3;  /* 4000 XFG (40,000,000,000 atomic units) (5 x amount_tier_3 deposits) */
         const uint32_t DEPOSIT_TERM_ELDERFIER_STAKING = 8;  // 0xEF deposits: term=8-block minimum, then unstakeable on demand, 1000-block review
         const uint32_t ELDERFIER_STAKING_REVIEW_WINDOW = 1000;  // 1000 blocks (~5.5 days) for review before unstaking completes
+        // TESTIFIER - TESTNET Elderiers
+	    const uint64_t TESTIFIER_CEREMONY_AMOUNT = UINT64_C(5) * TEST_AMOUNT_TIER_3;  /* 400 XFG in atomic units (5 x amount_tier_3 deposits) */
+	    const uint32_t TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING = 2;  // 0xEF deposits: term=0 (unstakeable on demand), 10-block review window
+        const uint32_t TESTNET_ELDERFIER_STAKING_REVIEW_WINDOW = 10;  // 10 blocks (fast review for testing)
 
         // MAINNET DEPOSITS
         const uint64_t DEPOSIT_MIN_AMOUNT = AMOUNT_TIER_0;   // 0.8 XFG
@@ -263,7 +272,7 @@ namespace CryptoNote
 		};
 
  	// TESTNET DEFAULTS
- 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "013c01ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101c6d726aeb4fc5e6df4a6af01e36616393bc6e487e9be1e822de901027bd9ea8e";
+ 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd088071210143adf9e243d11a69220a0c3c31570ca6d44d7e4fc42f36d9818b56cdc6b9b866";
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */
@@ -275,15 +284,7 @@ namespace CryptoNote
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
    // const uint32_t TESTNET_DEPOSIT_TERM_YIELD = TESTNET_COLD_MIN_TERM;
 
-  		// TESTNET BURN/COLD/LP TIERS
-    const uint64_t TEST_AMOUNT_TIER_0 =     800000;  //0.08 TEST (800,000 atomic units)
-    const uint64_t TEST_AMOUNT_TIER_1 =    8000000;  //0.8 TEST (8,000,000 atomic units)
-    const uint64_t TEST_AMOUNT_TIER_2 =   80000000;  // 8 TEST (80,000,000 atomic units)
-    const uint64_t TEST_AMOUNT_TIER_3 =  800000000;  // 80 TEST (800,000,000 atomic units)
-    // TESTIFIER - TESTNET Elderiers
-	const uint64_t TESTIFIER_CEREMONY_AMOUNT = UINT64_C(5) * TEST_AMOUNT_TIER_3;  /* 400 XFG in atomic units (5 x amount_tier_3 deposits) */
-	const uint32_t TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING = 2;  // 0xEF deposits: term=0 (unstakeable on demand), 10-block review window
-    const uint32_t TESTNET_ELDERFIER_STAKING_REVIEW_WINDOW = 10;  // 10 blocks (fast review for testing)
+
 
 	//__________________________________________________________________________________________________________________________
                                      	// TESTNET MWLWMA parameters
@@ -311,7 +312,7 @@ namespace CryptoNote
 	const std::initializer_list<CheckpointData>
 		CHECKPOINTS = {
  			{ 800,    "c1c64f752f6f5f6f69671b3794f741af0707c71b35302ea4fc96b0befdce8ce9" },
- 			{ 6484,   "6378b6899aebdf73da9d56ac9db5257af024490d68e6dd8dfb284ee8bd0fb004" },
+ 		    { 6484,   "6378b6899aebdf73da9d56ac9db5257af024490d68e6dd8dfb284ee8bd0fb004" },
              { 8008,   "299702f163995cd790b5c45362c78ad596f8717d749ff9016ce27eaa625b8a5e" },
  			  { 18008,  "46baf8aea2b9472a9f127ad7cdcb01a871ecf20d710e9e0d3a2b13176a452112" },
  			   { 63312,  "57c815dd1480b6a1de7037f85aa510ff7c784b91808f3777451c030d40614ddb" },

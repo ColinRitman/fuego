@@ -1163,7 +1163,7 @@ double Currency::getBurnPercentage() const {
 		// 3 LWMA-1 calculations with different N, combined by weights
 
 		const uint64_t T = difficultyTarget();
-		const uint64_t minDifficulty = isTestnet() ? 1000 : 100000;
+		const uint64_t minDifficulty = isTestnet() ? 1000 : 1000000;
 
 		const uint64_t N_short  = isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_SHORT  : parameters::MWLWMA_N_SHORT;
 		const uint64_t N_medium = isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_MEDIUM : parameters::MWLWMA_N_MEDIUM;

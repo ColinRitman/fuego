@@ -18,6 +18,7 @@
 #include "IWalletLegacy.h"
 
 #include "crypto/hash.h"
+#include "CryptoNoteConfig.h"
 #include "CryptoNoteCore/TransactionExtra.h"
 #include "Wallet/WalletErrors.h"
 #include "WalletLegacy/WalletUserTransactionsCache.h"
@@ -497,6 +498,17 @@ bool WalletUserTransactionsCache::getDeposit(DepositId depositId, Deposit& depos
   }
 
   deposit = m_deposits[depositId].deposit;
+
+  // Populate transactionHash and height from the creating transaction
+  // (these fields aren't serialized to maintain backward compat with old wallet caches)
+  if (deposit.creatingTransactionId < m_transactions.size()) {
+    const auto& tx = m_transactions[deposit.creatingTransactionId];
+    deposit.transactionHash = tx.hash;
+    deposit.height = static_cast<uint64_t>(tx.blockHeight);
+    deposit.unlockHeight = (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER)
+      ? 0 : deposit.height + deposit.term;
+  }
+
   return true;
 }
 
@@ -622,7 +634,12 @@ DepositId WalletUserTransactionsCache::insertNewDeposit(const TransactionOutputI
   deposit.creatingTransactionId = creatingTransactionId;
   deposit.term = depositOutput.term;
   deposit.spendingTransactionId = WALLET_LEGACY_INVALID_TRANSACTION_ID;
+  deposit.interest = 0;
+  deposit.height = height;
+  deposit.unlockHeight = (depositOutput.term == parameters::DEPOSIT_TERM_FOREVER) ? 0 : height + depositOutput.term;
   deposit.locked = true;
+  deposit.outputInTransaction = depositOutput.outputInTransaction;
+  deposit.transactionHash = depositOutput.transactionHash;
 
   return insertDeposit(deposit, depositOutput.outputInTransaction, depositOutput.transactionHash);
 }
