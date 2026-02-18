@@ -374,6 +374,7 @@ struct COMMAND_RPC_GET_INFO {
     uint8_t block_minor_version;
     uint32_t last_known_block_index;
     uint64_t full_deposit_amount;
+    uint64_t ethereal_xfg;
     uint64_t last_block_reward;
     uint64_t last_block_timestamp;
     uint64_t last_block_difficulty;
@@ -397,6 +398,7 @@ struct COMMAND_RPC_GET_INFO {
       KV_MEMBER(grey_peerlist_size)
       KV_MEMBER(last_known_block_index)
       KV_MEMBER(full_deposit_amount)
+      KV_MEMBER(ethereal_xfg)
       KV_MEMBER(last_block_reward)
       KV_MEMBER(last_block_timestamp)
       KV_MEMBER(last_block_difficulty)
@@ -1420,12 +1422,12 @@ struct COMMAND_RPC_CHECK_COMMITMENT_EXISTS {
   */
  struct COMMAND_RPC_GET_ETHERNAL_FLAME {
   typedef EMPTY_STRUCT request;
-  
+
   struct response {
     uint64_t ethernalXFG;
     std::string formattedAmount;
     std::string status;
-    
+
     void serialize(ISerializer &s) {
       KV_MEMBER(ethernalXFG)
       KV_MEMBER(formattedAmount)
