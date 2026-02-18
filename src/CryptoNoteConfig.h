@@ -60,10 +60,6 @@ namespace CryptoNote
 		// Fire Alias registration fee: 1 XFG for regular users, free for Elderfiers
 		const uint64_t ALIAS_REGISTRATION_FEE = COIN;  /* 1 XFG sent to Fuego Development Fund */
 
-		// Elderking ceremony amount: 4000 XFG required for Elderking ceremony
-		const uint64_t ELDERKING_CEREMONY_AMOUNT = UINT64_C(5) * AMOUNT_TIER_3;  /* 4000 XFG (40,000,000,000 atomic units) (5 x amount_tier_3 deposits) */
-
-
 		const uint64_t DEFAULT_DUST_THRESHOLD_20KH = UINT64_C(20000); /* < 0.002 XFG ( under 20 Kħ is dust) */
 		const uint64_t DEFAULT_DUST_THRESHOLD = UINT64_C(1000); /* < 0.0001 XFG ( under 1 Kħ is dust) v10 */
 
@@ -115,30 +111,31 @@ namespace CryptoNote
 		static_assert(2 * DIFFICULTY_CUT <= DIFFICULTY_WINDOW - 2, "Bad DIFFICULTY_WINDOW or DIFFICULTY_CUT");
 
 		// MAINNET BURN/COLD/LP TIERS
-  const uint64_t AMOUNT_TIER_0 =     8000000;  // 0.8 XFG (8,000,000 atomic heat) 8M HEAT
-  const uint64_t AMOUNT_TIER_1 =    80000000;  // 8 XFG (80,000,000 atomic heat) 80M HEAT
-  const uint64_t AMOUNT_TIER_2 =   800000000;  // 80 XFG (800,000,000 atomic heat) 800M HEAT
-  const uint64_t AMOUNT_TIER_3 =  8000000000;  // 800 XFG (8,000,000,000 atomic heat) 8B HEAT
+        const uint64_t AMOUNT_TIER_0 =     8000000;  // 0.8 XFG (8,000,000 atomic heat) 8M HEAT
+        const uint64_t AMOUNT_TIER_1 =    80000000;  // 8 XFG (80,000,000 atomic heat) 80M HEAT
+        const uint64_t AMOUNT_TIER_2 =   800000000;  // 80 XFG (800,000,000 atomic heat) 800M HEAT
+        const uint64_t AMOUNT_TIER_3 =  8000000000;  // 800 XFG (8,000,000,000 atomic heat) 8B HEAT
 
+ 	    // Elderfier constants
+        const uint64_t ELDERKING_CEREMONY_AMOUNT = UINT64_C(5) * AMOUNT_TIER_3;  /* 4000 XFG (40,000,000,000 atomic units) (5 x amount_tier_3 deposits) */
+        const uint32_t DEPOSIT_TERM_ELDERFIER_STAKING = 8;  // 0xEF deposits: term=8-block minimum, then unstakeable on demand, 1000-block review
+        const uint32_t ELDERFIER_STAKING_REVIEW_WINDOW = 1000;  // 1000 blocks (~5.5 days) for review before unstaking completes
 
-  // MAINNET DEPOSITS
-	const uint64_t DEPOSIT_MIN_AMOUNT = 8000000;   // 0.8 XFG
-      const uint64_t BURN_DEPOSIT_MIN_AMOUNT = 8000000;  // 0.8 XFG (8,000,000 atomic units) 8M
-	      const uint32_t DEPOSIT_MIN_TERM_v1 = 5480;  // blocks
-         const uint32_t DEPOSIT_MAX_TERM_v1 = 5480;  // one month=5480
-         const uint32_t DEPOSIT_MIN_TERM = 16440;  // blocks	 ( 3 months (16440) for release )
+        // MAINNET DEPOSITS
+        const uint64_t DEPOSIT_MIN_AMOUNT = AMOUNT_TIER_0;   // 0.8 XFG
+        const uint64_t BURN_DEPOSIT_MIN_AMOUNT = AMOUNT_TIER_0;  // 0.8 XFG (8,000,000 atomic units) 8M
+	    const uint32_t DEPOSIT_MIN_TERM_v1 = 5480;  // blocks
+        const uint32_t DEPOSIT_MAX_TERM_v1 = 5480;  // one month=5480
+        const uint32_t DEPOSIT_MIN_TERM = 16440;  // blocks	 ( 3 months (16440) for release )
         const uint32_t DEPOSIT_MAX_TERM = 16440;
         const uint32_t COLD_MIN_TERM = 16000;  // (v10+) <3mo in Fuego blocks (180 blocks/day x 88.888888 days)  check OverviewFrame::depositParamsChanged in fuego-desktop QT*/
-       const uint32_t COLD_MAX_TERM = 65000;  //  (v10+) ~1yr in Fuego blocks (180 blocks/day x 361 days)
+        const uint32_t COLD_MAX_TERM = 65000;  //  (v10+) ~1yr in Fuego blocks (180 blocks/day x 361 days)
+        const uint32_t TESTNET_COLD_MIN_TERM =  8;  //  (v10+) <3mo in Fuego blocks (180 blocks/day x 88.888888 days)
+        const uint32_t TESTNET_COLD_MAX_TERM = 42;  //  (v10+) ~1yr in Fuego blocks (180 blocks/day x 361 days)
 
-       const uint32_t TESTNET_COLD_MIN_TERM = 16;  //  (v10+) <3mo in Fuego blocks (180 blocks/day x 88.888888 days)
-const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180 blocks/day x 361 days)
-
-      const uint32_t DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
-       const uint32_t DEPOSIT_TERM_YIELD = COLD_MIN_TERM;     // 16k blocks (3 mo) for Fuego Untraceable Custom Interest Assets (FuCIA) deposits
+        const uint32_t DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
+        const uint32_t DEPOSIT_TERM_YIELD = COLD_MIN_TERM;     // 16k blocks (3 mo) for Fuego Untraceable Custom Interest Assets (FuCIA) deposits
         const uint32_t DEPOSIT_TERM_BURN = DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
-        const uint32_t DEPOSIT_TERM_ELDERFIER_STAKING = 8;  // 0xEF deposits: term=8 (8-block minimum lock), then unstakeable on demand, 1000-block review
-        const uint32_t ELDERFIER_STAKING_REVIEW_WINDOW = 1000;  // 1000 blocks (~5.5 days) for review before unstaking completes
 
         const uint32_t DEPOSIT_TERM_MIN = 16000;  // New 3-month term, slightly <90 days of Fuego blocks (180 blks per day)
         const uint32_t DEPOSIT_TERM_MAX   = 65000;   // ~1-year using 360(+1)days/yr (65k blocks)
@@ -200,10 +197,8 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
 
 	} // namespace parameters
 
-	// Fuego Developer Fund wallet — receives alias registration fees
+	// Developer Team wallet that receives alias registration fees. investigate mullet-cig opt for 3/5 access
 	const char FUEGO_DEV_FUND_ADDRESS[] = "fireVHx639SLMhzmBoJ8drTXbVyv2eRG6A8aMLc1taTiRNwk8pnwXpBDUSjH1dT5fg7yVVZrKkvm31CmigAMdVDg7sgxJmAUNp";
-   // RESERVED xfg aliases    "galapgos"
-   // "FUEGOXFG", "FUEGODEV", "fuegoxfg", "fuegodev";
 
     const char CRYPTONOTE_NAME[] = "fuego";
 	const char GENESIS_COINBASE_TX_HEX[] = "013c01ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101bd4e0bf284c04d004fd016a21405046e8267ef81328cabf3017c4c24b273b25a";
@@ -292,25 +287,19 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
 
 	const uint32_t TESTNET_DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
-    const uint32_t TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING = 0;  // 0xEF deposits: term=0 (unstakeable on demand), 10-block review window
-    const uint32_t TESTNET_ELDERFIER_STAKING_REVIEW_WINDOW = 10;  // 10 blocks (fast review for testing)
- 	const uint32_t TESTNET_DEPOSIT_MIN_TERM_v1 = 5480;  //blocks
- 	const uint32_t TESTNET_DEPOSIT_MAX_TERM_v1 = 5480;
- 	const uint32_t TESTNET_DEPOSIT_MIN_TERM = 2;  //blocks		 /* one month=5480
- 	const uint32_t TESTNET_DEPOSIT_MAX_TERM = 5;
-    const uint32_t TESTNET_DEPOSIT_TERM_MIN = 2;  // New 3-month term, slightly <90 days / Fuego blocks (180 blks per day)
-    const uint32_t TESTNET_DEPOSIT_TERM_MAX = 69;   // ~1-year using 360(+1)days/yr (65k blocks)
-
-    const uint32_t TESTNET_DEPOSIT_TERM_YIELD = TESTNET_DEPOSIT_MIN_TERM;
+   // const uint32_t TESTNET_DEPOSIT_TERM_YIELD = TESTNET_COLD_MIN_TERM;
 
   		// TESTNET BURN/COLD/LP TIERS
     const uint64_t TEST_AMOUNT_TIER_0 =     800000;  //0.08 TEST (800,000 atomic units)
     const uint64_t TEST_AMOUNT_TIER_1 =    8000000;  //0.8 TEST (8,000,000 atomic units)
     const uint64_t TEST_AMOUNT_TIER_2 =   80000000;  // 8 TEST (80,000,000 atomic units)
     const uint64_t TEST_AMOUNT_TIER_3 =  800000000;  // 80 TEST (800,000,000 atomic units)
-    // TESTIFIER ceremony amount: 400 XFG required for TESTNET Elderking ceremony
+    // TESTIFIER - TESTNET Elderiers
 	const uint64_t TESTIFIER_CEREMONY_AMOUNT = UINT64_C(5) * TEST_AMOUNT_TIER_3;  /* 400 XFG in atomic units (5 x amount_tier_3 deposits) */
-//__________________________________________________________________________________________________________________________
+	const uint32_t TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING = 2;  // 0xEF deposits: term=0 (unstakeable on demand), 10-block review window
+    const uint32_t TESTNET_ELDERFIER_STAKING_REVIEW_WINDOW = 10;  // 10 blocks (fast review for testing)
+
+	//__________________________________________________________________________________________________________________________
                                      	// TESTNET DMWDA parameters
 //--------------------------------------------------------------------------------------------------------------------------
  		const uint32_t TESTNET_DMWDA_SHORT_WINDOW                            = 30;   // Rapid response window
@@ -337,7 +326,7 @@ const uint32_t TESTNET_COLD_MAX_TERM = 65;  //  (v10+) ~1yr in Fuego blocks (180
  	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
 	const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 8.0; // Hash rate change threshold for anomaly detection
 
- 	// -------------------------------------- TESTNET CONFIGS ---------------------------------------------------------
+ 	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 
 	struct CheckpointData
 	{
