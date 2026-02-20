@@ -48,6 +48,7 @@ struct SendTransactionContext
   uint64_t ttl;
   uint32_t depositTerm;
   std::string extra;
+  bool dynamicRingSize = false; // true: select optimal ring size from actual daemon-returned outs
 };
 
 } //namespace CryptoNote

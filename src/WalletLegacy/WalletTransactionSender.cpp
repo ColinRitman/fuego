@@ -252,22 +252,13 @@ namespace CryptoNote
     }
     else
     {
-      // Use dynamic ring sizing for optimal privacy
-      // This will be enforced by the blockchain when BlockMajorVersion 10 is active
-      mixIn = CryptoNote::parameters::MIN_TX_MIXIN_SIZE_V10; // Start with minimum
       neededMoney = countNeededMoney(fee, transfers);
       context->foundMoney = selectTransfersToSend(neededMoney, false, context->dustPolicy.dustThreshold, context->selectedTransfers);
 
-      // Calculate optimal ring size based on available outputs
-      uint64_t calculatedRingSize = calculateDynamicRingSize(context->selectedTransfers, mixIn);
-
-      // Check if ring size 8 is achievable (for BlockMajorVersion 10+)
-      if (calculatedRingSize == 0) {
-        // Insufficient outputs for minimum ring size 8
-        throw std::system_error(make_error_code(error::INSUFFICIENT_OUTPUTS_FOR_RING_SIZE));
-      }
-
-      mixIn = calculatedRingSize;
+      // Probe with maxMixin outputs per amount; actual ring size is selected in
+      // sendTransactionRandomOutsByAmount once we know what the daemon has available.
+      mixIn = m_currency.maxMixin();
+      context->dynamicRingSize = true;
     }
     throwIf(context->foundMoney < neededMoney, error::WRONG_AMOUNT);
 
@@ -317,12 +308,15 @@ namespace CryptoNote
       uint64_t mixIn)
   {
 
-    // HEAT burn deposits use DEPOSIT_TERM_FOREVER and bypass normal term validation
-    if (term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+    // Skip term range validation for special terms (FOREVER burns and EFier staking)
+    bool isSpecialTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER ||
+                          term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING ||
+                          term == CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING);
+    if (!isSpecialTerm) {
       throwIf(term < m_currency.depositMinTerm(), error::DEPOSIT_TERM_TOO_SMALL);
       throwIf(term > m_currency.depositMaxTerm(), error::DEPOSIT_TERM_TOO_BIG);
     }
-    throwIf(amount < m_currency.depositMinAmount(), error::DEPOSIT_AMOUNT_TOO_SMALL);
+    throwIf(amount != CryptoNote::parameters::TEST_AMOUNT_TIER_0 && amount < m_currency.depositMinAmount(), error::DEPOSIT_AMOUNT_TOO_SMALL);
 
     uint64_t neededMoney = getSumWithOverflowCheck(amount, fee);
     std::shared_ptr<SendTransactionContext> context = std::make_shared<SendTransactionContext>();
@@ -439,10 +433,38 @@ namespace CryptoNote
       return;
     }
 
-    if (!checkIfEnoughMixins(context->outs, context->mixIn))
-    {
-      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::MIXIN_COUNT_TOO_BIG)));
-      return;
+    if (context->dynamicRingSize) {
+      // Determine the binding constraint: the minimum outs actually returned by the daemon
+      // across all input amounts. Each input ring must independently satisfy the ring size.
+      size_t minAvailable = context->outs.empty() ? 0 : SIZE_MAX;
+      for (const auto& oa : context->outs) {
+        minAvailable = std::min(minAvailable, oa.outs.size());
+      }
+
+      // Build a single OutputInfo representing the binding constraint and run DynamicRingSizeCalculator.
+      std::vector<CryptoNote::OutputInfo> outputInfos;
+      outputInfos.emplace_back(0, minAvailable);
+
+      size_t optimalRingSize = CryptoNote::DynamicRingSizeCalculator::calculateOptimalRingSize(
+        0,
+        outputInfos,
+        CryptoNote::BLOCK_MAJOR_VERSION_10,
+        m_currency.minMixin(CryptoNote::BLOCK_MAJOR_VERSION_10),
+        m_currency.maxMixin()
+      );
+
+      if (optimalRingSize == 0) {
+        events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::MIXIN_COUNT_TOO_BIG)));
+        return;
+      }
+
+      context->mixIn = static_cast<uint64_t>(optimalRingSize);
+    } else {
+      if (!checkIfEnoughMixins(context->outs, context->mixIn))
+      {
+        events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::MIXIN_COUNT_TOO_BIG)));
+        return;
+      }
     }
 
     if (isMultisigTransaction)
@@ -1090,54 +1112,6 @@ namespace CryptoNote
       Deposit &deposit = m_transactionsCache.getDeposit(id);
       deposit.spendingTransactionId = transactionId;
     }
-  }
-
-  uint64_t WalletTransactionSender::calculateDynamicRingSize(const std::vector<TransactionOutputInformation>& selectedTransfers, uint64_t minRingSize)
-  {
-    // Target ring sizes in order of preference (highest privacy first)
-    std::vector<uint64_t> targetRingSizes = {18, 15, 12, 11, 10, 9, 8};
-
-    // For BlockMajorVersion 10+, never go below ring size 8
-    // If we can't achieve ring size 8, direct user to run optimizer
-    if (minRingSize >= CryptoNote::parameters::MIN_TX_MIXIN_SIZE_V10) {
-      // Simplified check: For now, we'll assume we can achieve ring size 8
-      // In a full implementation, we would:
-      // 1. Query daemon for available outputs for each amount in selectedTransfers
-      // 2. Check if any amount has >= 8 outputs available
-      // 3. If not, return 0 to signal insufficient outputs
-
-      // For now, we'll use a basic heuristic:
-      // If we have multiple different amounts, we're more likely to have enough outputs
-      // This is a simplified approach - a full implementation would query the daemon
-
-      // Count unique amounts in selected transfers
-      std::set<uint64_t> uniqueAmounts;
-      for (const auto& transfer : selectedTransfers) {
-        uniqueAmounts.insert(transfer.amount);
-      }
-
-      // If we have very few unique amounts, we might not have enough outputs
-      // This is a conservative check - in practice, we'd query the daemon
-      if (uniqueAmounts.size() < 2) {
-        // Conservative check: if we only have one amount type,
-        // we might not have enough outputs for ring size 8
-        // Return 0 to signal that ring size 8 is not achievable
-        return 0;
-      }
-
-      // Start with the highest target and work down
-      for (uint64_t targetSize : targetRingSizes) {
-        if (targetSize >= minRingSize && targetSize <= m_currency.maxMixin()) {
-          return targetSize;
-        }
-      }
-
-      // This should never happen since we start with minRingSize, but just in case
-      return minRingSize;
-    }
-
-    // For older block versions, use static ring size
-    return minRingSize;
   }
 
 } /* namespace CryptoNote */

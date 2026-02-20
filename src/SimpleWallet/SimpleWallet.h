@@ -79,6 +79,7 @@ namespace CryptoNote
     bool register_alias(const std::vector<std::string> &args);
     bool lookup_alias(const std::vector<std::string> &args);
     bool list_aliases(const std::vector<std::string> &args);
+    void printConnectionError() const;
 
   private:
 
@@ -136,7 +137,6 @@ namespace CryptoNote
 
     bool ask_wallet_create_if_needed();
     std::string resolveAlias(const std::string& aliasUrl);
-    void printConnectionError() const;
 
        std::string get_wallet_keys() const;
  std::string generate_mnemonic(Crypto::SecretKey &);
@@ -205,8 +205,6 @@ namespace CryptoNote
     std::string m_import_path;
 
     std::string m_daemon_address;
-    std::string m_daemon_host;
-    uint16_t m_daemon_port;
 
     // Track if arguments were explicitly provided (for testnet wallet menu)
     bool m_wallet_file_arg_provided;
@@ -218,6 +216,8 @@ namespace CryptoNote
 
   protected:
     // Protected for testnet_wallet subclass access
+    std::string m_daemon_host;
+    uint16_t m_daemon_port;
     Common::ConsoleHandler m_consoleHandler;
     const CryptoNote::Currency& m_currency;
     Logging::LoggerManager& logManager;

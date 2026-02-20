@@ -1777,10 +1777,12 @@ namespace PaymentService
 
         /* Now validate the deposit term and the amount */
 
-        /* Check if this is a FOREVER term (burn deposit) */
+        /* Check if this is a FOREVER term (burn deposit) or a stake term (0xEF) */
         bool isForeverTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
+        bool isStakeTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING ||
+                            term == CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING);
 
-        if (!isForeverTerm) {
+        if (!isForeverTerm && !isStakeTerm) {
           /* For regular deposits, validate term constraints */
 
           /* Use testnet or mainnet term limits */
@@ -1788,25 +1790,25 @@ namespace PaymentService
           uint32_t min_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;
           uint32_t max_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;
 
-          /* Deposits should be either min_term, max_term, or DEPOSIT_TERM_FOREVER (HEAT burn) */
+          /* Deposits should be either min_term, max_term, or a special term */
           bool isValidTerm = (term == min_term ||
                              term == max_term ||
-                             term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
+                             term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER ||
+                             term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING ||
+                             term == CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING);
+
           if (!isValidTerm) {
             return make_error_code(CryptoNote::error::DEPOSIT_WRONG_TERM);
           }
 
-          /* Skip range validation for HEAT burn (DEPOSIT_TERM_FOREVER) */
-          if (term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
-            /* The minimum term should be min_term */
-            if (term < min_term) {
-              return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_SMALL);
-            }
+          /* The minimum term should be min_term */
+          if (term < min_term) {
+            return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_SMALL);
+          }
 
-            /* Current deposit rates are for a maximum term of max_term */
-            if (term > max_term) {
-              return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_BIG);
-            }
+          /* Current deposit rates are for a maximum term of max_term */
+          if (term > max_term) {
+            return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_BIG);
           }
         }
 
@@ -1876,7 +1878,7 @@ namespace PaymentService
         System::EventLock lk(readyEvent);
 
         /* Validate both the source and destination addresses
-       if they are not empty */
+         if they are not empty */
 
         if (!sourceAddress.empty())
         {

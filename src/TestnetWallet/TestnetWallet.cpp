@@ -68,7 +68,7 @@ namespace CryptoNote
     // Add testnet-specific deposit commands (in addition to inherited ones)
     m_consoleHandler.setHandler("burn", boost::bind(&testnet_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn (0.8, 8, 80, 800 TEST)");
     m_consoleHandler.setHandler("cold", boost::bind(&testnet_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a Certificate of Ledger Deposit (0.8, 8, 80, 800 TEST with terms 3 (3months) or 12 (1yr)");
-    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Register as Elderfier: batch 5x 800 TEST deposits (0xEF tag, 4000 TEST total). Creates Elderfier registration commitment.");
+    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony <ALIAS> - Register as Testifier with alias [A-Z0-9&]: batch 5x 80 TEST deposits (0xEF tag, 400 TEST total).");
     m_consoleHandler.setHandler("list_burns", boost::bind(&testnet_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all burn transactions.");
 
     // @ Alias system commands (inherited from simple_wallet)
@@ -309,10 +309,63 @@ namespace CryptoNote
   //----------------------------------------------------------------------------------------------------
   bool CryptoNote::testnet_wallet::elderking_ceremony(const std::vector<std::string> &args)
   {
-    // Testnet elderfier registration ceremony
-    if (args.size() != 0)
+    // Testnet elderfier registration ceremony with alias (mirrors mainnet, testnet amounts)
+    if (args.size() != 1)
     {
-      fail_msg_writer() << "Usage: elderking_ceremony";
+      fail_msg_writer() << "Usage: elderking_ceremony <ALIAS>";
+      fail_msg_writer() << "  ALIAS must be exactly 8 characters [A-Z0-9&] (e.g., TESTKING)";
+      return true;
+    }
+
+    std::string alias = args[0];
+
+    // Validate alias: exactly 8 chars, uppercase + digits + & only
+    if (alias.length() != 8) {
+      fail_msg_writer() << "Alias must be exactly 8 characters. Got " << alias.length() << ".";
+      return true;
+    }
+    for (char c : alias) {
+      if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '&')) {
+        fail_msg_writer() << "Elderfier alias must be [A-Z0-9&] only. Invalid character: '" << c << "'";
+        return true;
+      }
+    }
+
+    // Check alias availability via RPC
+    try {
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      COMMAND_RPC_GET_ALIAS::request checkReq;
+      COMMAND_RPC_GET_ALIAS::response checkRes;
+      checkReq.alias = alias;
+      invokeJsonCommand(httpClient, "/get_alias", checkReq, checkRes);
+      if (checkRes.found) {
+        fail_msg_writer() << "Alias @" << alias << " is already taken. Choose another.";
+        return true;
+      }
+    } catch (const ConnectException&) {
+      printConnectionError();
+      return true;
+    } catch (const std::exception& e) {
+      fail_msg_writer() << "Failed to check alias availability: " << e.what();
+      return true;
+    }
+
+    // Check if address already has an alias
+    try {
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request addrReq;
+      COMMAND_RPC_GET_ALIAS_BY_ADDRESS::response addrRes;
+      addrReq.address = m_wallet->getAddress();
+      invokeJsonCommand(httpClient, "/get_alias_by_address", addrReq, addrRes);
+      if (addrRes.found) {
+        fail_msg_writer() << "Your address already has alias @" << addrRes.alias;
+        return true;
+      }
+    } catch (const ConnectException&) {
+      printConnectionError();
+      return true;
+    } catch (const std::exception& e) {
+      fail_msg_writer() << "Failed to check address alias: " << e.what();
       return true;
     }
 
@@ -324,25 +377,27 @@ namespace CryptoNote
       success_msg_writer() << "║               (TESTNET ELDERFIER REGISTRATION)             ║";
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
-      success_msg_writer() << "Testing Testifier registration on testnet!";
-      success_msg_writer() << "This creates 5 deposits of 80 TEST each (400 TEST total)";
+      success_msg_writer() << "  Alias:    @" << alias;
+      success_msg_writer() << "  Network:  TESTNET";
+      success_msg_writer() << "  Deposits: 5 x 80 TEST (0xEF tag) = 400 TEST total";
       success_msg_writer() << "";
 
       uint64_t balance = m_wallet->actualBalance();
-      uint64_t required = 400 * CryptoNote::parameters::COIN;
+      uint64_t required = 5 * CryptoNote::parameters::TEST_AMOUNT_TIER_3;
       uint64_t fee = m_currency.minimumFee();
 
-      success_msg_writer() << "Balance: " << m_currency.formatAmount(balance) << " TEST";
-      success_msg_writer() << "Required: " << m_currency.formatAmount(required + (5 * fee)) << " TEST";
+      success_msg_writer() << "Balance:   " << m_currency.formatAmount(balance) << " TEST";
+      success_msg_writer() << "Required:  " << m_currency.formatAmount(required + (5 * fee)) << " TEST";
       success_msg_writer() << "";
 
       if (balance < required + (5 * fee)) {
         fail_msg_writer() << "Insufficient balance for ceremony.";
+        fail_msg_writer() << "Need " << m_currency.formatAmount(required + (5 * fee) - balance) << " more TEST.";
         return true;
       }
 
       std::string confirm;
-      success_msg_writer() << "⚡ Type 'TESTIFY' to begin ceremony: ";
+      success_msg_writer() << "Type 'TESTIFY' to begin ceremony, or press Enter to abort: ";
       std::getline(std::cin, confirm);
 
       if (confirm != "TESTIFY") {
@@ -350,9 +405,9 @@ namespace CryptoNote
         return true;
       }
 
-      uint64_t amount_per_deposit = CryptoNote::parameters::TEST_AMOUNT_TIER_3;
+      uint64_t amount_per_deposit = CryptoNote::parameters::TEST_AMOUNT_TIER_3;  // 80 TEST
       success_msg_writer() << "";
-      success_msg_writer() << "🔥 Creating 5 TestiFier stakes...";
+      success_msg_writer() << "Creating 5 Testifier stakes with alias @" << alias << "...";
       success_msg_writer() << "";
 
       for (int i = 0; i < 5; ++i) {
@@ -371,13 +426,14 @@ namespace CryptoNote
         elderfierDeposit.depositAmount = amount_per_deposit;
         elderfierDeposit.elderfierAddress = m_wallet->getAddress();
         elderfierDeposit.securityWindow = 28800;
+        // Embed alias in every deposit metadata (0xEA prefix + 8 bytes)
         elderfierDeposit.metadata.clear();
+        elderfierDeposit.metadata.push_back(0xEA);
+        elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(), alias.begin(), alias.end());
         elderfierDeposit.signature.clear();
         elderfierDeposit.isSlashable = true;
 
         CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
-
-        // Convert extra vector to string for wallet deposit() call
         extraString = std::string(extra.begin(), extra.end());
 
         CryptoNote::TransactionId txId = m_wallet->deposit(
@@ -393,7 +449,7 @@ namespace CryptoNote
           return true;
         }
 
-        success_msg_writer() << "✨ Stake " << (i + 1) << " forged! TX ID: " << txId;
+        success_msg_writer() << "  Stake " << (i + 1) << " forged! TX ID: " << txId;
       }
 
       success_msg_writer() << "";
@@ -401,8 +457,9 @@ namespace CryptoNote
       success_msg_writer() << "║         🔥⚡ TESTNET CEREMONY COMPLETE! ⚡🔥               ║";
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
-      success_msg_writer() << "✅ All 5 Testifier stakes created (400 TEST total)";
-      success_msg_writer() << "🎉 Ready for Testifier testing on testnet!";
+      success_msg_writer() << "All 5 Testifier stakes created (400 TEST total)";
+      success_msg_writer() << "Alias @" << alias << " will be registered when deposits confirm.";
+      success_msg_writer() << "Next: list_deposits  |  lookup_alias " << alias;
       success_msg_writer() << "";
 
       return true;
