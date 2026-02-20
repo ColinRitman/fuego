@@ -50,6 +50,7 @@
 #include "CryptoNoteCore/CryptoNoteTools.h"
 #include "CryptoNoteCore/TransactionExtra.h"
 #include "CryptoNoteCore/DepositCommitment.h"
+#include "CryptoNoteCore/AliasIndex.h"
 #include "crypto/crypto.h"
 #include "crypto/keccak.h"
 #include "CryptoNoteCore/BurnProofDataFileGenerator.h"
@@ -1762,22 +1763,12 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       success_msg_writer() << "  The Ælder Council watches. Return when you are ready.";
       return true;
     }
-    if (alias.length() != 8) {
-      fail_msg_writer() << "  Your name must be exactly 8 characters.";
-      fail_msg_writer() << "  '" << alias << "' has " << alias.length() << " character(s). Try again.";
+    if (!CryptoNote::AliasIndex::isValidElderfierAlias(alias)) {
+      fail_msg_writer() << "  Invalid name '" << alias << "'.";
+      fail_msg_writer() << "  Use exactly 8 characters [A-Z 0-9 &]";
       fail_msg_writer() << "  (Press Enter with no input to abort.)";
       continue;
     }
-    bool invalid = false;
-    for (char c : alias) {
-      if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '&')) {
-        fail_msg_writer() << "  Invalid character '" << c << "'. Use A-Z, 0-9, or & only. Try again.";
-        fail_msg_writer() << "  (Press Enter with no input to abort.)";
-        invalid = true;
-        break;
-      }
-    }
-    if (invalid) continue;
     break;
   }
 

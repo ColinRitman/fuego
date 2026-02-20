@@ -49,6 +49,7 @@
 #include "Rpc/CoreRpcServerCommandsDefinitions.h"
 #include "Rpc/HttpClient.h"
 #include "CryptoNoteCore/CryptoNoteTools.h"
+#include "CryptoNoteCore/AliasIndex.h"
 
 namespace CryptoNote
 {
@@ -392,6 +393,7 @@ namespace CryptoNote
     success_msg_writer() << "  on-chain when your deposits confirm.";
     success_msg_writer() << "";
     success_msg_writer() << "  Rules:  Exactly 8 characters  |  A-Z  0-9  & only";
+    success_msg_writer() << "  Special exemptions: GALAPAGOS  |  WINSLAYER  |  LOUDMINING  (reserved names)";
     success_msg_writer() << "  No two Testifiers may share a name.";
     success_msg_writer() << "";
     success_msg_writer() << "  Examples:";
@@ -412,22 +414,13 @@ namespace CryptoNote
         success_msg_writer() << "  The Elder Council watches. Return when you are ready.";
         return true;
       }
-      if (alias.length() != 8) {
-        fail_msg_writer() << "  Your name must be exactly 8 characters.";
-        fail_msg_writer() << "  '" << alias << "' has " << alias.length() << " character(s). Try again.";
+      if (!CryptoNote::AliasIndex::isValidElderfierAlias(alias)) {
+        fail_msg_writer() << "  Invalid name '" << alias << "'.";
+        fail_msg_writer() << "  Use exactly 8 characters [A-Z 0-9 &], unless, if you own one of the 2 reserved exceptional aliases:";
+        fail_msg_writer() << "  GALAPAGOS or WINSLAYER, and LOUDMINING";
         fail_msg_writer() << "  (Press Enter with no input to abort.)";
         continue;
       }
-      bool invalid = false;
-      for (char c : alias) {
-        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '&')) {
-          fail_msg_writer() << "  Invalid character '" << c << "'. Use A-Z, 0-9, or & only. Try again.";
-          fail_msg_writer() << "  (Press Enter with no input to abort.)";
-          invalid = true;
-          break;
-        }
-      }
-      if (invalid) continue;
       break;
     }
 
