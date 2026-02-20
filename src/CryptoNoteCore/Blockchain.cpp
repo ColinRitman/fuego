@@ -2807,10 +2807,9 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
 
     // Add permanent burns to EternalFlame if any were found
     if (permanentBurns > 0) {
-      uint32_t height = static_cast<uint32_t>(m_blocks.size());
-      m_bankingIndex.addForeverDeposit(permanentBurns, height);
+      m_bankingIndex.addForeverDeposit(permanentBurns, block.height);
       const_cast<Currency&>(m_currency).addEternalFlame(permanentBurns);
-      logger(INFO) << "Burn in block " << height << ": "
+      logger(INFO) << "Burn in block " << block.height << ": "
                    << m_currency.formatAmount(permanentBurns) << " XFG sent into the Ether";
     }
   }
