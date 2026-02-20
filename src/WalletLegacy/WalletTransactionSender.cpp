@@ -318,11 +318,18 @@ namespace CryptoNote
     }
     throwIf(amount != CryptoNote::parameters::TEST_AMOUNT_TIER_0 && amount < m_currency.depositMinAmount(), error::DEPOSIT_AMOUNT_TOO_SMALL);
 
+    // Enforce minimum mixin for v10+. Deposit callers pass 0 by convention but deposits
+    // spend real key outputs that require proper ring signatures like any other transaction.
+    const size_t requiredMixin = m_currency.minMixin(CryptoNote::BLOCK_MAJOR_VERSION_10);
+    if (mixIn < requiredMixin) {
+      mixIn = static_cast<uint64_t>(requiredMixin);
+    }
+
     uint64_t neededMoney = getSumWithOverflowCheck(amount, fee);
     std::shared_ptr<SendTransactionContext> context = std::make_shared<SendTransactionContext>();
     context->dustPolicy.dustThreshold = m_currency.defaultDustThreshold();
 
-    context->foundMoney = selectTransfersToSend(neededMoney, 0 == mixIn, context->dustPolicy.dustThreshold, context->selectedTransfers);
+    context->foundMoney = selectTransfersToSend(neededMoney, false, context->dustPolicy.dustThreshold, context->selectedTransfers);
 
     throwIf(context->foundMoney < neededMoney, error::WRONG_AMOUNT);
 
@@ -333,13 +340,11 @@ namespace CryptoNote
 
     context->extra = extra;
 
-    if (context->mixIn != 0)
+    // Always fetch random outputs — mixin is now always >= requiredMixin
     {
       Crypto::SecretKey transactionSK;
       return makeGetRandomOutsRequest(std::move(context), true, transactionSK);
     }
-
-    return doSendMultisigTransaction(std::move(context), events);
   }
 
   std::unique_ptr<WalletRequest> WalletTransactionSender::makeWithdrawDepositRequest(TransactionId &transactionId,

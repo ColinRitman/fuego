@@ -1721,10 +1721,11 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
 
   std::string acceptance;
   std::getline(std::cin, acceptance);
-  if (acceptance.empty() || (acceptance[0] != 'aye' && acceptance[0] != 'AYE')) {
+  // Accept: aye, y, Y, Aye, AYE, yes, YES
+  if (!acceptance.empty() && (acceptance[0] == 'a' || acceptance[0] == 'A' || acceptance[0] == 'y' || acceptance[0] == 'Y')) {
     success_msg_writer() << "";
     success_msg_writer() << "  The Ælder Council watches. Return when you are ready.";
-    success_msg_writer() << "  The Realm awaits those worthy of its flame.";
+    success_msg_writer() << "  The Realm awaits those worthy of guarding the flame.";
     success_msg_writer() << "";
     return true;
   }
@@ -1823,7 +1824,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
   }
 
   success_msg_writer() << "";
-  success_msg_writer() << "  So be it.  Arise, King " << alias << ;
+  success_msg_writer() << "  So be it.  Arise, King " << alias << "...";
   success_msg_writer() << " Protector of the Realm And Ξlderfier of the Fuego P2P Network";
 
   // ── RPC: check alias availability ───────────────────────────────────────
