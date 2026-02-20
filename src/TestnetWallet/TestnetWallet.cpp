@@ -68,7 +68,7 @@ namespace CryptoNote
     // Add testnet-specific deposit commands (in addition to inherited ones)
     m_consoleHandler.setHandler("burn", boost::bind(&testnet_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn (0.8, 8, 80, 800 TEST)");
     m_consoleHandler.setHandler("cold", boost::bind(&testnet_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a Certificate of Ledger Deposit (0.8, 8, 80, 800 TEST with terms 3 (3months) or 12 (1yr)");
-    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony <ALIAS> - Register as Testifier with alias [A-Z0-9&]: batch 5x 80 TEST deposits (0xEF tag, 400 TEST total).");
+    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begin the Testifier Staking Ceremony to become an Elderfier (interactive, 5x 80 TEST stakes).");
     m_consoleHandler.setHandler("list_burns", boost::bind(&testnet_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all burn transactions.");
 
     // @ Alias system commands (inherited from simple_wallet)
@@ -309,29 +309,175 @@ namespace CryptoNote
   //----------------------------------------------------------------------------------------------------
   bool CryptoNote::testnet_wallet::elderking_ceremony(const std::vector<std::string> &args)
   {
-    // Testnet elderfier registration ceremony with alias (mirrors mainnet, testnet amounts)
-    if (args.size() != 1)
-    {
-      fail_msg_writer() << "Usage: elderking_ceremony <ALIAS>";
-      fail_msg_writer() << "  ALIAS must be exactly 8 characters [A-Z0-9&] (e.g., TESTKING)";
+    // Interactive Testifier Staking Ceremony (Testnet).
+    // Alias chosen interactively — no command-line arg needed.
+
+    // ── PART I: THE CALLING ────────────────────────────────────────────────
+    success_msg_writer() << "";
+    success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+    success_msg_writer() << "║                                                            ║";
+    success_msg_writer() << "║         THE TESTIFIER STAKING CEREMONY  [TESTNET]          ║";
+    success_msg_writer() << "║                                                            ║";
+    success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+    success_msg_writer() << "";
+    success_msg_writer() << "  You stand at the threshold of the Elder Council.";
+    success_msg_writer() << "  Before you lies a path of honour, sacrifice, and purpose.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  ── WHAT IS AN ΞLDERFIER? ────────────────────────────────";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Elderfiers are the guardians of the Fuego realm — keepers";
+    success_msg_writer() << "  of cross-chain truth. They validate deposit commitments,";
+    success_msg_writer() << "  sign merkle roots, and ensure that XFG burned on Fuego is";
+    success_msg_writer() << "  faithfully reborn on Ethereum. Without Elderfiers, the";
+    success_msg_writer() << "  bridge between worlds cannot hold.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  On testnet, Testifiers rehearse this sacred duty — testing";
+    success_msg_writer() << "  the ceremony, the staking mechanism, and the network before";
+    success_msg_writer() << "  the mainnet Elderfiers are crowned.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  ── WHAT IT TAKES TO BE AN ELDER KING ───────────────────";
+    success_msg_writer() << "";
+    success_msg_writer() << "  COURAGE   You must be brave in the face of adversity.";
+    success_msg_writer() << "            When the network is under attack, when nodes";
+    success_msg_writer() << "            fall, when pressure mounts — you do not falter.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  JUSTICE   You must be just in all your judgments.";
+    success_msg_writer() << "            Sign only the roots you believe true. Never";
+    success_msg_writer() << "            collude, deceive, or act for gain over the good.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  PROTECTION  You must protect the weak and innocent.";
+    success_msg_writer() << "            The small holders, newcomers, the silent burners";
+    success_msg_writer() << "            who trust the bridge — their safety is yours.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  VIGILANCE   You must guard the Realm without rest.";
+    success_msg_writer() << "            Run your Testifier node at all times. A guardian";
+    success_msg_writer() << "            who sleeps while the Realm burns is no guardian.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  HONOUR    Your 400 TEST stake is your bond on testnet.";
+    success_msg_writer() << "            Betrayal of the Realm means slashing — your";
+    success_msg_writer() << "            stake burned and name struck from the registry.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  ── WHAT THE CEREMONY REQUIRES ───────────────────────────";
+    success_msg_writer() << "";
+    success_msg_writer() << "    5 deposits of 80 TEST each  (400 TEST total stake)";
+    success_msg_writer() << "    Tagged 0xEF — the Elderfier mark — slashable stake";
+    success_msg_writer() << "    A unique 8-character Elder King name (your on-chain ID)";
+    success_msg_writer() << "    You MUST run an Elderfier node to sign roots & earn fees";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Do you accept the calling of the Elder Council?";
+    success_msg_writer() << "  Do you pledge to be brave, be just, protect the innocent,";
+    success_msg_writer() << "  and guard the Realm with all your might and honour?";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Type 'yes' to step forward, or Enter to walk away: ";
+
+    std::string acceptance;
+    std::getline(std::cin, acceptance);
+    if (acceptance.empty() || (acceptance[0] != 'y' && acceptance[0] != 'Y')) {
+      success_msg_writer() << "";
+      success_msg_writer() << "  The Elder Council watches. Return when you are ready.";
+      success_msg_writer() << "  The Realm awaits those worthy of its flame.";
+      success_msg_writer() << "";
       return true;
     }
 
-    std::string alias = args[0];
+    success_msg_writer() << "";
+    success_msg_writer() << "  The Elder Council nods. You have answered the call.";
+    success_msg_writer() << "";
 
-    // Validate alias: exactly 8 chars, uppercase + digits + & only
-    if (alias.length() != 8) {
-      fail_msg_writer() << "Alias must be exactly 8 characters. Got " << alias.length() << ".";
-      return true;
-    }
-    for (char c : alias) {
-      if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '&')) {
-        fail_msg_writer() << "Elderfier alias must be [A-Z0-9&] only. Invalid character: '" << c << "'";
+    // ── PART II: CHOOSE YOUR ELDER KING NAME ──────────────────────────────
+    success_msg_writer() << "  ── CHOOSE YOUR ELDER KING NAME ─────────────────────────";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Your Elder King name is your identity on the Fuego testnet.";
+    success_msg_writer() << "  It will be embedded in all 5 of your stakes and registered";
+    success_msg_writer() << "  on-chain when your deposits confirm.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Rules:  Exactly 8 characters  |  A-Z  0-9  & only";
+    success_msg_writer() << "  No two Testifiers may share a name.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Examples:";
+    success_msg_writer() << "    TESTKING  |  IGNITE88  |  NETGUARD  |  BLAZE&TN";
+    success_msg_writer() << "    REALM001  |  VAULT888  |  DRAGON&1  |  XFG&TEST";
+    success_msg_writer() << "";
+
+    std::string alias;
+    while (true) {
+      success_msg_writer() << "  Enter your Elder King name: ";
+      std::getline(std::cin, alias);
+      // Trim whitespace
+      while (!alias.empty() && std::isspace((unsigned char)alias.front())) alias.erase(alias.begin());
+      while (!alias.empty() && std::isspace((unsigned char)alias.back()))  alias.pop_back();
+
+      if (alias.empty()) {
+        success_msg_writer() << "";
+        success_msg_writer() << "  The Elder Council watches. Return when you are ready.";
         return true;
       }
+      if (alias.length() != 8) {
+        fail_msg_writer() << "  Your name must be exactly 8 characters.";
+        fail_msg_writer() << "  '" << alias << "' has " << alias.length() << " character(s). Try again.";
+        fail_msg_writer() << "  (Press Enter with no input to abort.)";
+        continue;
+      }
+      bool invalid = false;
+      for (char c : alias) {
+        if (!((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '&')) {
+          fail_msg_writer() << "  Invalid character '" << c << "'. Use A-Z, 0-9, or & only. Try again.";
+          fail_msg_writer() << "  (Press Enter with no input to abort.)";
+          invalid = true;
+          break;
+        }
+      }
+      if (invalid) continue;
+      break;
     }
 
-    // Check alias availability via RPC
+    // ── PART III: THE OATH ─────────────────────────────────────────────────
+    success_msg_writer() << "";
+    success_msg_writer() << "  Before the Eternal Flame and the eyes of the Elder Council,";
+    success_msg_writer() << "  hear the oath of Elder King " << alias << ":";
+    success_msg_writer() << "";
+    success_msg_writer() << "  ════════════════════════════════════════════════════════";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Elder King " << alias << ", do you vow:";
+    success_msg_writer() << "";
+    success_msg_writer() << "    to be BRAVE in the face of all adversity — to stand";
+    success_msg_writer() << "    firm when the network is tested, threatened, or besieged?";
+    success_msg_writer() << "";
+    success_msg_writer() << "    to be JUST in all your judgments — to sign only the";
+    success_msg_writer() << "    roots you believe true, and never act for dishonest gain?";
+    success_msg_writer() << "";
+    success_msg_writer() << "    to PROTECT the weak and innocent — to safeguard those";
+    success_msg_writer() << "    who burn their TEST in trust that the bridge will hold?";
+    success_msg_writer() << "";
+    success_msg_writer() << "    to GUARD the Realm with all your might and honour —";
+    success_msg_writer() << "    running your node with vigilance and without deceit?";
+    success_msg_writer() << "";
+    success_msg_writer() << "    to honour the ETERNAL FLAME — knowing that betrayal";
+    success_msg_writer() << "    brings slashing, and your stake is your sacred bond";
+    success_msg_writer() << "    to this network, now and for all time?";
+    success_msg_writer() << "";
+    success_msg_writer() << "  ════════════════════════════════════════════════════════";
+    success_msg_writer() << "";
+    success_msg_writer() << "  To seal these vows, enter your Elder King name again: ";
+
+    std::string confirmAlias;
+    std::getline(std::cin, confirmAlias);
+    while (!confirmAlias.empty() && std::isspace((unsigned char)confirmAlias.front())) confirmAlias.erase(confirmAlias.begin());
+    while (!confirmAlias.empty() && std::isspace((unsigned char)confirmAlias.back()))  confirmAlias.pop_back();
+
+    if (confirmAlias != alias) {
+      fail_msg_writer() << "";
+      fail_msg_writer() << "  The names do not match.";
+      fail_msg_writer() << "  Entered '" << confirmAlias << "' — your chosen name was '" << alias << "'.";
+      fail_msg_writer() << "  The Realm demands certainty. Return when your resolve is firm.";
+      return true;
+    }
+
+    success_msg_writer() << "";
+    success_msg_writer() << "  So be it.  Elder King " << alias << " rises.";
+    success_msg_writer() << "";
+
+    // ── RPC: check alias availability ──────────────────────────────────────
     try {
       HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
       COMMAND_RPC_GET_ALIAS::request checkReq;
@@ -339,7 +485,8 @@ namespace CryptoNote
       checkReq.alias = alias;
       invokeJsonCommand(httpClient, "/get_alias", checkReq, checkRes);
       if (checkRes.found) {
-        fail_msg_writer() << "Alias @" << alias << " is already taken. Choose another.";
+        fail_msg_writer() << "  The name @" << alias << " is already claimed by another Testifier.";
+        fail_msg_writer() << "  Ceremony aborted. Run elderking_ceremony again to choose a new name.";
         return true;
       }
     } catch (const ConnectException&) {
@@ -350,7 +497,7 @@ namespace CryptoNote
       return true;
     }
 
-    // Check if address already has an alias
+    // ── RPC: check address not already registered ───────────────────────────
     try {
       HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
       COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request addrReq;
@@ -358,7 +505,8 @@ namespace CryptoNote
       addrReq.address = m_wallet->getAddress();
       invokeJsonCommand(httpClient, "/get_alias_by_address", addrReq, addrRes);
       if (addrRes.found) {
-        fail_msg_writer() << "Your address already has alias @" << addrRes.alias;
+        fail_msg_writer() << "  Your address already bears the name @" << addrRes.alias;
+        fail_msg_writer() << "  A Testifier may not be crowned twice. Ceremony aborted.";
         return true;
       }
     } catch (const ConnectException&) {
@@ -371,70 +519,58 @@ namespace CryptoNote
 
     try
     {
-      success_msg_writer() << "";
-      success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-      success_msg_writer() << "║            🔥⚡  TESTIFIER STAYKING CEREMONY  ⚡🔥          ║";
-      success_msg_writer() << "║               (TESTNET ELDERFIER REGISTRATION)             ║";
-      success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
-      success_msg_writer() << "";
-      success_msg_writer() << "  Alias:    @" << alias;
-      success_msg_writer() << "  Network:  TESTNET";
-      success_msg_writer() << "  Deposits: 5 x 80 TEST (0xEF tag) = 400 TEST total";
-      success_msg_writer() << "";
-
+      // ── Balance check ──────────────────────────────────────────────────
       uint64_t balance = m_wallet->actualBalance();
-      uint64_t required = 5 * CryptoNote::parameters::TEST_AMOUNT_TIER_3;
+      uint64_t amount_per_deposit = CryptoNote::parameters::TEST_AMOUNT_TIER_3;  // 80 TEST
+      uint64_t required = 5 * amount_per_deposit;
       uint64_t fee = m_currency.minimumFee();
 
-      success_msg_writer() << "Balance:   " << m_currency.formatAmount(balance) << " TEST";
-      success_msg_writer() << "Required:  " << m_currency.formatAmount(required + (5 * fee)) << " TEST";
+      success_msg_writer() << "  ── PREPARING THE RITUAL ─────────────────────────────────";
+      success_msg_writer() << "";
+      success_msg_writer() << "  Wallet balance:    " << m_currency.formatAmount(balance) << " TEST";
+      success_msg_writer() << "  5 stakes (80x5):   " << m_currency.formatAmount(required) << " TEST";
+      success_msg_writer() << "  Network fees (x5): " << m_currency.formatAmount(5 * fee) << " TEST";
+      success_msg_writer() << "  Total required:    " << m_currency.formatAmount(required + (5 * fee)) << " TEST";
       success_msg_writer() << "";
 
       if (balance < required + (5 * fee)) {
-        fail_msg_writer() << "Insufficient balance for ceremony.";
-        fail_msg_writer() << "Need " << m_currency.formatAmount(required + (5 * fee) - balance) << " more TEST.";
+        fail_msg_writer() << "  The flame requires more fuel.";
+        fail_msg_writer() << "  You need " << m_currency.formatAmount(required + (5 * fee) - balance) << " more TEST.";
+        fail_msg_writer() << "  Ceremony aborted. Return when your coffers are ready.";
         return true;
       }
 
-      std::string confirm;
-      success_msg_writer() << "Type 'TESTIFY' to begin ceremony, or press Enter to abort: ";
-      std::getline(std::cin, confirm);
-
-      if (confirm != "TESTIFY") {
-        success_msg_writer() << "Ceremony cancelled.";
-        return true;
-      }
-
-      uint64_t amount_per_deposit = CryptoNote::parameters::TEST_AMOUNT_TIER_3;  // 80 TEST
+      success_msg_writer() << "  The balance holds. The Ritual of Five Flames begins.";
       success_msg_writer() << "";
-      success_msg_writer() << "Creating 5 Testifier stakes with alias @" << alias << "...";
+      success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+      success_msg_writer() << "║            THE RITUAL OF FIVE FLAMES  [TESTNET]            ║";
+      success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
+
+      static const char* const flameNames[] = { "First", "Second", "Third", "Fourth", "Fifth" };
 
       for (int i = 0; i < 5; ++i) {
-        success_msg_writer() << "Ritual " << (i + 1) << " of 5: Creating 80 TEST stake...";
+        success_msg_writer() << "  The " << flameNames[i] << " Flame — forging stake " << (i + 1) << " of 5...";
 
         std::vector<uint8_t> extra;
-        std::string extraString = "";
-
         Crypto::PublicKey public_key;
         Crypto::SecretKey secret_key;
         Crypto::generate_keys(public_key, secret_key);
         Crypto::Hash commitment_hash = Crypto::cn_fast_hash(public_key.data, sizeof(public_key.data));
 
         CryptoNote::TransactionExtraElderfierDeposit elderfierDeposit;
-        elderfierDeposit.depositHash = commitment_hash;
-        elderfierDeposit.depositAmount = amount_per_deposit;
-        elderfierDeposit.elderfierAddress = m_wallet->getAddress();
-        elderfierDeposit.securityWindow = 28800;
-        // Embed alias in every deposit metadata (0xEA prefix + 8 bytes)
+        elderfierDeposit.depositHash        = commitment_hash;
+        elderfierDeposit.depositAmount      = amount_per_deposit;
+        elderfierDeposit.elderfierAddress   = m_wallet->getAddress();
+        elderfierDeposit.securityWindow     = 28800;
         elderfierDeposit.metadata.clear();
         elderfierDeposit.metadata.push_back(0xEA);
         elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(), alias.begin(), alias.end());
         elderfierDeposit.signature.clear();
-        elderfierDeposit.isSlashable = true;
+        elderfierDeposit.isSlashable        = true;
 
         CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
-        extraString = std::string(extra.begin(), extra.end());
+        std::string extraString = std::string(extra.begin(), extra.end());
 
         CryptoNote::TransactionId txId = m_wallet->deposit(
           CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING,
@@ -445,21 +581,33 @@ namespace CryptoNote
         );
 
         if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
-          fail_msg_writer() << "Failed at ritual " << (i + 1) << " of 5";
+          fail_msg_writer() << "";
+          fail_msg_writer() << "  The ritual faltered at flame " << (i + 1) << " of 5.";
+          fail_msg_writer() << "  " << i << " stake(s) were forged before it broke.";
+          fail_msg_writer() << "  Check your balance and connection, then try again.";
           return true;
         }
 
-        success_msg_writer() << "  Stake " << (i + 1) << " forged! TX ID: " << txId;
+        success_msg_writer() << "    Sealed.  TX: " << txId;
       }
 
+      // ── Completion ─────────────────────────────────────────────────────
       success_msg_writer() << "";
       success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-      success_msg_writer() << "║         🔥⚡ TESTNET CEREMONY COMPLETE! ⚡🔥               ║";
+      success_msg_writer() << "║          TESTNET CEREMONY COMPLETE — FLAME IGNITED         ║";
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
-      success_msg_writer() << "All 5 Testifier stakes created (400 TEST total)";
-      success_msg_writer() << "Alias @" << alias << " will be registered when deposits confirm.";
-      success_msg_writer() << "Next: list_deposits  |  lookup_alias " << alias;
+      success_msg_writer() << "  Elder King " << alias << " — all 5 Testifier stakes have been";
+      success_msg_writer() << "  broadcast to the testnet. Your name is embedded in each.";
+      success_msg_writer() << "";
+      success_msg_writer() << "  When all 5 deposits confirm on-chain, the testnet will";
+      success_msg_writer() << "  register you as Elder King @" << alias;
+      success_msg_writer() << "  and add you to the active Testifiers registry.";
+      success_msg_writer() << "";
+      success_msg_writer() << "  Your Elderfire burns bright.";
+      success_msg_writer() << "  Guard the Realm well, Elder King " << alias << ".";
+      success_msg_writer() << "";
+      success_msg_writer() << "  Commands:  list_deposits  |  lookup_alias " << alias;
       success_msg_writer() << "";
 
       return true;
