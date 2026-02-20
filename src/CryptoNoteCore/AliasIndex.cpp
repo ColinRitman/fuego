@@ -3,6 +3,7 @@
 
 #include "AliasIndex.h"
 #include "CryptoNoteConfig.h"
+#include "Common/StringTools.h"
 
 namespace CryptoNote {
 
@@ -32,16 +33,17 @@ void AliasIndex::reserveDevTeamAliases() {
   for (const auto& r : reserved) {
     AliasEntry entry;
     entry.alias = r.name;
-    entry.ownerAddress = devAddress;
+    entry.ownerAddress = "";  // Not stored on-chain for privacy
     entry.aliasHash = Crypto::cn_fast_hash(r.name.data(), r.name.size());
     entry.addressHash = Crypto::cn_fast_hash(devAddress.data(), devAddress.size());
     entry.aliasType = r.type;
     entry.registeredBlock = 0;  // Genesis
 
+    std::string addrHashHex = Common::podToHex(entry.addressHash);
     m_aliases[entry.alias] = entry;
-    // Note: only one address->alias mapping per address, so we use the first one
-    if (m_addressToAlias.find(devAddress) == m_addressToAlias.end()) {
-      m_addressToAlias[devAddress] = entry.alias;
+    // Map by address hash — only one alias per address, use the first one
+    if (m_addrHashToAlias.find(addrHashHex) == m_addrHashToAlias.end()) {
+      m_addrHashToAlias[addrHashHex] = entry.alias;
     }
   }
 }
@@ -124,8 +126,9 @@ bool AliasIndex::registerAlias(const AliasEntry& entry) {
     }
   }
 
-  // Check address does not already have an alias
-  if (m_addressToAlias.find(entry.ownerAddress) != m_addressToAlias.end()) {
+  // Check address hash does not already have an alias (no raw address stored)
+  std::string addrHashHex = Common::podToHex(entry.addressHash);
+  if (m_addrHashToAlias.find(addrHashHex) != m_addrHashToAlias.end()) {
     return false;  // Address already has an alias
   }
 
@@ -142,23 +145,26 @@ bool AliasIndex::registerAlias(const AliasEntry& entry) {
     return false;  // Unknown alias type
   }
 
-  // Store the alias
+  // Store the alias — reverse map uses addressHash hex, not raw address
   m_aliases[entry.alias] = entry;
-  m_addressToAlias[entry.ownerAddress] = entry.alias;
+  m_addrHashToAlias[addrHashHex] = entry.alias;
   return true;
 }
 
 bool AliasIndex::voidAlias(const std::string& ownerAddress) {
   std::lock_guard<std::mutex> lock(m_mutex);
 
-  auto alias_it = m_addressToAlias.find(ownerAddress);
-  if (alias_it == m_addressToAlias.end()) {
+  Crypto::Hash addrHash = Crypto::cn_fast_hash(ownerAddress.data(), ownerAddress.size());
+  std::string addrHashHex = Common::podToHex(addrHash);
+
+  auto alias_it = m_addrHashToAlias.find(addrHashHex);
+  if (alias_it == m_addrHashToAlias.end()) {
     return false;  // No alias for this address
   }
 
   std::string aliasName = alias_it->second;
   m_aliases.erase(aliasName);
-  m_addressToAlias.erase(alias_it);
+  m_addrHashToAlias.erase(alias_it);
   return true;
 }
 
@@ -173,7 +179,8 @@ bool AliasIndex::aliasExists(const std::string& alias) const {
 
 bool AliasIndex::addressHasAlias(const std::string& address) const {
   std::lock_guard<std::mutex> lock(m_mutex);
-  return m_addressToAlias.find(address) != m_addressToAlias.end();
+  Crypto::Hash addrHash = Crypto::cn_fast_hash(address.data(), address.size());
+  return m_addrHashToAlias.find(Common::podToHex(addrHash)) != m_addrHashToAlias.end();
 }
 
 std::optional<AliasEntry> AliasIndex::getAliasByName(const std::string& alias) const {
@@ -189,8 +196,9 @@ std::optional<AliasEntry> AliasIndex::getAliasByName(const std::string& alias) c
 std::optional<AliasEntry> AliasIndex::getAliasByAddress(const std::string& address) const {
   std::lock_guard<std::mutex> lock(m_mutex);
 
-  auto alias_it = m_addressToAlias.find(address);
-  if (alias_it == m_addressToAlias.end()) {
+  Crypto::Hash addrHash = Crypto::cn_fast_hash(address.data(), address.size());
+  auto alias_it = m_addrHashToAlias.find(Common::podToHex(addrHash));
+  if (alias_it == m_addrHashToAlias.end()) {
     return std::nullopt;
   }
 

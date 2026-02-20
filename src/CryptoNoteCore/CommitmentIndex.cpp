@@ -234,7 +234,7 @@ bool CommitmentIndex::isElderfierRegistrationDeposit(const CommitmentEntry& entr
 
 std::string CommitmentIndex::getWalletAddressFromTx(const Crypto::Hash& txHash) {
   // Look up the commitment entry by txHash to retrieve the senderAddress
-  // that was populated from TransactionExtraElderfierDeposit::elderfierAddress
+  // that was populated from Common::podToHex(TransactionExtraElderfierDeposit::elderfierCommitment)
   // during addCommitment() from Blockchain::pushBlock()
   std::string txHex = Common::podToHex(txHash);
   for (const auto& pair : m_commitments) {
@@ -292,7 +292,7 @@ bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Cryp
   if (m_aliasIndex && !alias.empty() && (alias.length() == 8 || alias == "GALAPAGOS" || alias == "WINSLAYER" || alias == "LOUDMINING")) {
     AliasEntry aliasEntry;
     aliasEntry.alias = alias;
-    aliasEntry.ownerAddress = wallet;
+    aliasEntry.ownerAddress = "";  // Not stored on-chain for privacy — addressHash is sufficient
     aliasEntry.aliasHash = Crypto::cn_fast_hash(alias.data(), alias.size());
     aliasEntry.addressHash = Crypto::cn_fast_hash(wallet.data(), wallet.size());
     aliasEntry.aliasType = 0;  // Elderfier type

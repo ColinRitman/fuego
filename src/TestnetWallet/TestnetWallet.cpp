@@ -549,6 +549,10 @@ namespace CryptoNote
 
       static const char* const flameNames[] = { "First", "Second", "Third", "Fourth", "Fifth" };
 
+      // Fetch spend public key once — used to build per-deposit commitment
+      CryptoNote::AccountKeys walletKeys;
+      m_wallet->getAccountKeys(walletKeys);
+
       for (int i = 0; i < 5; ++i) {
         success_msg_writer() << "  The " << flameNames[i] << " Flame — forging stake " << (i + 1) << " of 5...";
 
@@ -558,10 +562,18 @@ namespace CryptoNote
         Crypto::generate_keys(public_key, secret_key);
         Crypto::Hash commitment_hash = Crypto::cn_fast_hash(public_key.data, sizeof(public_key.data));
 
+        // Build one-way commitment: H(spendPublicKey || ephemeralPublicKey)
+        // Binds deposit to staker without embedding wallet address on-chain.
+        // The ephemeral public key is unique per deposit, so each commitment is distinct.
+        uint8_t commit_preimage[64];
+        std::memcpy(commit_preimage,      walletKeys.address.spendPublicKey.data, 32);
+        std::memcpy(commit_preimage + 32, public_key.data,                         32);
+        Crypto::Hash elderfier_commitment = Crypto::cn_fast_hash(commit_preimage, sizeof(commit_preimage));
+
         CryptoNote::TransactionExtraElderfierDeposit elderfierDeposit;
         elderfierDeposit.depositHash        = commitment_hash;
         elderfierDeposit.depositAmount      = amount_per_deposit;
-        elderfierDeposit.elderfierAddress   = m_wallet->getAddress();
+        elderfierDeposit.elderfierCommitment = elderfier_commitment;
         elderfierDeposit.securityWindow     = 28800;
         elderfierDeposit.metadata.clear();
         elderfierDeposit.metadata.push_back(0xEA);

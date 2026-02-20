@@ -132,9 +132,9 @@ struct TransactionExtraYieldCommitment {
 };
 
 struct TransactionExtraElderfierDeposit {
-  Crypto::Hash depositHash;         // Unique deposit identifier
+  Crypto::Hash depositHash;         // Unique deposit identifier (H(ephemeralPubKey))
   uint64_t depositAmount;           // XFG amount (minimum 800 XFG)
-  std::string elderfierAddress;     // Elderfier node address
+  Crypto::Hash elderfierCommitment; // 🔒 SECURE: H(spendPublicKey || ephemeralPublicKey) — one-way commitment
   uint32_t securityWindow;          // Security window in seconds (8 hours = 28800)
   std::vector<uint8_t> metadata;   // Additional metadata
   std::vector<uint8_t> signature;   // Deposit signature
@@ -244,7 +244,7 @@ bool addYieldCommitmentToExtra(std::vector<uint8_t>& tx_extra, const Transaction
 bool getYieldCommitmentFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraYieldCommitment& commitment);
 
 // Elderfier Deposit helper functions (contingency-based)
-bool createTxExtraWithElderfierDeposit(const Crypto::Hash& depositHash, uint64_t depositAmount, const std::string& elderfierAddress, uint32_t securityWindow, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
+bool createTxExtraWithElderfierDeposit(const Crypto::Hash& depositHash, uint64_t depositAmount, const Crypto::Hash& elderfierCommitment, uint32_t securityWindow, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
 bool addElderfierDepositToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraElderfierDeposit& deposit);
 bool getElderfierDepositFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraElderfierDeposit& deposit);
 

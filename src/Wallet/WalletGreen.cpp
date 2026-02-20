@@ -3617,7 +3617,7 @@ namespace CryptoNote
           elderfierData.lastSeenTimestamp = elderfierData.depositTimestamp;
           elderfierData.totalUptimeSeconds = 0;
           elderfierData.selectionMultiplier = 1;  // Start with 1x multiplier
-          elderfierData.elderfierAddress = elfDeposit.elderfierAddress;
+          elderfierData.elderfierAddress = Common::podToHex(elfDeposit.elderfierCommitment);
           elderfierData.isActive = true;
           elderfierData.isSlashable = elfDeposit.isSlashable;
           elderfierData.isUnlocked = false;

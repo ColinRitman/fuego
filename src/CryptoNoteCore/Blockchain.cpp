@@ -2712,7 +2712,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             entry.term = 0xFFFFFFFF;  // Staking is locked until explicit unstaking
             entry.type = CommitmentEntry::Type::ELDERFIER_STAKING;
             entry.targetChainId = 0;  // No cross-chain claim for staking
-            entry.senderAddress = elderfierDeposit.elderfierAddress;
+            entry.senderAddress = Common::podToHex(elderfierDeposit.elderfierCommitment);
 
             // Extract ceremony alias from metadata (0xEA tag + 8 bytes)
             if (elderfierDeposit.metadata.size() == 9 && elderfierDeposit.metadata[0] == 0xEA) {

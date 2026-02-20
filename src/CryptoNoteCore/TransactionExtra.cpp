@@ -661,7 +661,7 @@ namespace CryptoNote
   {
     s(depositHash, "depositHash");
     s(depositAmount, "depositAmount");
-    s(elderfierAddress, "elderfierAddress");
+    s(elderfierCommitment, "elderfierCommitment");
     s(securityWindow, "securityWindow");
     s(metadata, "metadata");
     s(signature, "signature");
@@ -683,8 +683,9 @@ namespace CryptoNote
 
   bool TransactionExtraElderfierDeposit::isValid() const
   {
+    static const Crypto::Hash zeroHash = {};
     return depositAmount >= 800000000000 && // Minimum 800 XFG
-           !elderfierAddress.empty() &&
+           elderfierCommitment != zeroHash &&  // Must have a valid one-way commitment
            securityWindow > 0 &&
            isSlashable; // Always true for contingency deposits
   }
@@ -694,18 +695,18 @@ namespace CryptoNote
     std::ostringstream oss;
     oss << "ElderfierDeposit{hash=" << Common::podToHex(depositHash)
         << ", amount=" << depositAmount
-        << ", address=" << elderfierAddress
+        << ", commitment=" << Common::podToHex(elderfierCommitment)
         << ", securityWindow=" << securityWindow
         << ", slashable=" << (isSlashable ? "true" : "false") << "}";
     return oss.str();
   }
 
-  bool createTxExtraWithElderfierDeposit(const Crypto::Hash& depositHash, uint64_t depositAmount, const std::string& elderfierAddress, uint32_t securityWindow, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra)
+  bool createTxExtraWithElderfierDeposit(const Crypto::Hash& depositHash, uint64_t depositAmount, const Crypto::Hash& elderfierCommitment, uint32_t securityWindow, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra)
   {
     TransactionExtraElderfierDeposit deposit;
     deposit.depositHash = depositHash;
     deposit.depositAmount = depositAmount;
-    deposit.elderfierAddress = elderfierAddress;
+    deposit.elderfierCommitment = elderfierCommitment;
     deposit.securityWindow = securityWindow;
     deposit.metadata = metadata;
     deposit.isSlashable = true; // Always true for contingency deposits
@@ -727,13 +728,8 @@ namespace CryptoNote
       amount >>= 8;
     }
 
-    // Serialize address length and data
-    uint32_t addrLen = static_cast<uint32_t>(deposit.elderfierAddress.length());
-    for (int i = 0; i < 4; ++i) {
-      tx_extra.push_back(static_cast<uint8_t>(addrLen & 0xFF));
-      addrLen >>= 8;
-    }
-    tx_extra.insert(tx_extra.end(), deposit.elderfierAddress.begin(), deposit.elderfierAddress.end());
+    // Serialize elderfier commitment (fixed 32 bytes — one-way commitment H(spendPubKey || ephemeralPubKey))
+    tx_extra.insert(tx_extra.end(), deposit.elderfierCommitment.data, deposit.elderfierCommitment.data + sizeof(deposit.elderfierCommitment.data));
 
     // Serialize security window (4 bytes, little-endian)
     uint32_t window = deposit.securityWindow;
@@ -785,17 +781,10 @@ namespace CryptoNote
     }
     pos += 8;
 
-    // Deserialize address length and data
-    if (pos + 4 > tx_extra.size()) return false;
-    uint32_t addrLen = 0;
-    for (int i = 0; i < 4; ++i) {
-      addrLen |= static_cast<uint32_t>(tx_extra[pos + i]) << (i * 8);
-    }
-    pos += 4;
-
-    if (pos + addrLen > tx_extra.size()) return false;
-    deposit.elderfierAddress.assign(reinterpret_cast<const char*>(&tx_extra[pos]), addrLen);
-    pos += addrLen;
+    // Deserialize elderfier commitment (fixed 32 bytes)
+    if (pos + 32 > tx_extra.size()) return false;
+    std::memcpy(deposit.elderfierCommitment.data, &tx_extra[pos], 32);
+    pos += 32;
 
     // Deserialize security window (4 bytes, little-endian)
     if (pos + 4 > tx_extra.size()) return false;
