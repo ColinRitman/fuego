@@ -490,9 +490,8 @@ namespace CryptoNote
           // Check if this is a HEAT/burn deposit (FOREVER term)
           if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
             burnCount++;
-            std::string status = deposit.locked ? "LOCKED" : "UNLOCKED";
             success_msg_writer() << "  [" << i << "] Amount: " << m_currency.formatAmount(deposit.amount)
-                                 << " TEST | Status: " << status
+                                 << " TEST | Status: Burned"
                                  << " | Type: HEAT (0x08)";
           }
         }

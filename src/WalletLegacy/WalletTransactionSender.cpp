@@ -1035,7 +1035,12 @@ namespace CryptoNote
 
     for (const auto &walletAmount : outputs)
     {
-      /** Use the number of digits to determine which buck they fit in */
+      // Skip outputs already pending in unconfirmed transactions
+      if (m_transactionsCache.isUsed(walletAmount)) {
+        continue;
+      }
+
+      /** Use the number of digits to determine which bucket they fit in */
       int numberOfDigits = floor(log10(walletAmount.amount)) + 1;
 
       /** If the amount is larger than the current dust threshold

@@ -428,8 +428,13 @@ std::vector<DepositId> WalletUserTransactionsCache::unlockDeposits(const std::ve
     }
 
     auto id = it->second;
-    unlockedDeposits.push_back(id);
 
+    // FOREVER (burn) deposits are permanently locked — never unlock them
+    if (m_deposits[id].deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+      continue;
+    }
+
+    unlockedDeposits.push_back(id);
     m_deposits[id].deposit.locked = false;
   }
 
@@ -505,8 +510,10 @@ bool WalletUserTransactionsCache::getDeposit(DepositId depositId, Deposit& depos
     const auto& tx = m_transactions[deposit.creatingTransactionId];
     deposit.transactionHash = tx.hash;
     deposit.height = static_cast<uint64_t>(tx.blockHeight);
-    deposit.unlockHeight = (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER)
-      ? 0 : deposit.height + deposit.term;
+    // FOREVER burns have no unlock height; unconfirmed txs use sentinel height (UINT32_MAX)
+    bool isForever = (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
+    bool isPending = (tx.blockHeight == static_cast<int32_t>(WALLET_LEGACY_UNCONFIRMED_TRANSACTION_HEIGHT));
+    deposit.unlockHeight = (isForever || isPending) ? 0 : deposit.height + deposit.term;
   }
 
   return true;

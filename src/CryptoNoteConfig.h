@@ -289,12 +289,12 @@ namespace CryptoNote
 	//__________________________________________________________________________________________________________________________
                                      	// TESTNET MWLWMA parameters
 //--------------------------------------------------------------------------------------------------------------------------
-		const uint64_t TESTNET_MWLWMA_N_SHORT                                = 15;   // Short window
-		const uint64_t TESTNET_MWLWMA_N_MEDIUM                               = 30;   // Medium window
-		const uint64_t TESTNET_MWLWMA_N_LONG                                 = 60;   // Long window
-		const uint64_t TESTNET_MWLWMA_W_SHORT                                = 30;   // 30% weight — more reactive on testnet
-		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 45;   // 45% weight — stability
-		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 25;   // 25% weight — trend
+		const uint64_t TESTNET_MWLWMA_N_SHORT                                =  9;   // Short window
+		const uint64_t TESTNET_MWLWMA_N_MEDIUM                               = 33;   // Medium window
+		const uint64_t TESTNET_MWLWMA_N_LONG                                 = 69;   // Long window
+		const uint64_t TESTNET_MWLWMA_W_SHORT                                = 33;   // 30% weight — more reactive on testnet
+		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 34;   // 45% weight — stability
+		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 33;   // 25% weight — trend
 
  	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 

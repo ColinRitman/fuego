@@ -2171,10 +2171,13 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
 
     success_msg_writer() << "Height:        " << deposit.height;
 
-    // Only show unlock height for deposits that can be unlocked
-    // HEAT (burn) deposits are forever and cannot be unlocked, so no unlock height
+    // Show unlock height for non-HEAT deposits; 0 means pending (not yet confirmed)
     if (deposit.depositType != CryptoNote::Deposit::Type::HEAT) {
-      success_msg_writer() << "Unlock Height: " << deposit.unlockHeight;
+      if (deposit.unlockHeight == 0) {
+        success_msg_writer() << "Unlock Height: Pending (not yet confirmed)";
+      } else {
+        success_msg_writer() << "Unlock Height: " << deposit.unlockHeight;
+      }
     }
 
     // Show status
