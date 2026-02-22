@@ -400,6 +400,8 @@ bool check_inputs_overflow(const TransactionPrefix &tx) {
       amount = boost::get<KeyInput>(in).amount;
     } else if (in.type() == typeid(MultisignatureInput)) {
       amount = boost::get<MultisignatureInput>(in).amount;
+    } else if (in.type() == typeid(TransactionInputCommitmentSpend)) {
+      amount = boost::get<TransactionInputCommitmentSpend>(in).amount;
     }
 
     if (money > amount + money)
