@@ -101,6 +101,7 @@ std::unordered_map<std::string, RpcServer::RpcHandler<RpcServer::HandlerFunction
   { "/queryblockslite.bin", { binMethod<COMMAND_RPC_QUERY_BLOCKS_LITE>(&RpcServer::on_query_blocks_lite), false } },
   { "/get_o_indexes.bin", { binMethod<COMMAND_RPC_GET_TX_GLOBAL_OUTPUTS_INDEXES>(&RpcServer::on_get_indexes), false } },
   { "/getrandom_outs.bin", { binMethod<COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS>(&RpcServer::on_get_random_outs), false } },
+  { "/getrandom_commitment_outs.bin", { binMethod<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS>(&RpcServer::on_get_random_commitment_outs), false } },
   { "/get_pool_changes.bin", { binMethod<COMMAND_RPC_GET_POOL_CHANGES>(&RpcServer::onGetPoolChanges), false } },
   { "/get_pool_changes_lite.bin", { binMethod<COMMAND_RPC_GET_POOL_CHANGES_LITE>(&RpcServer::onGetPoolChangesLite), false } },
 
@@ -624,6 +625,18 @@ bool RpcServer::on_get_random_outs(const COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOU
   std::string s = ss.str();
   logger(TRACE) << "COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS: " << ENDL << s;
   res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_random_commitment_outs(const COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::request& req,
+                                               COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::response& res) {
+  res.status = "Failed";
+  if (!m_core.get_random_commitment_outs_for_amount(req.amount, req.outs_count, res.outs)) {
+    return true;
+  }
+  res.status = CORE_RPC_STATUS_OK;
+  logger(TRACE) << "COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS: amount=" << req.amount
+                << " requested=" << req.outs_count << " returned=" << res.outs.size();
   return true;
 }
 

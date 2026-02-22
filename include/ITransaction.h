@@ -25,8 +25,8 @@ namespace CryptoNote {
 
 namespace TransactionTypes {
   
-  enum class InputType : uint8_t { Invalid, Key, Multisignature, Generating };
-  enum class OutputType : uint8_t { Invalid, Key, Multisignature };
+  enum class InputType : uint8_t { Invalid, Key, Multisignature, Generating, CommitmentSpend };
+  enum class OutputType : uint8_t { Invalid, Key, Multisignature, Commitment };
 
   struct GlobalOutput {
     Crypto::PublicKey targetKey;
@@ -114,12 +114,14 @@ public:
   // Inputs/Outputs 
   virtual size_t addInput(const KeyInput& input) = 0;
   virtual size_t addInput(const MultisignatureInput& input) = 0;
+  virtual size_t addInput(const TransactionInputCommitmentSpend& input) = 0;
   virtual size_t addInput(const AccountKeys& senderKeys, const TransactionTypes::InputKeyInfo& info, KeyPair& ephKeys) = 0;
 
   virtual size_t addOutput(uint64_t amount, const AccountPublicAddress& to) = 0;
   virtual size_t addOutput(uint64_t amount, const std::vector<AccountPublicAddress>& to, uint32_t requiredSignatures, uint32_t term = 0) = 0;
   virtual size_t addOutput(uint64_t amount, const KeyOutput& out) = 0;
   virtual size_t addOutput(uint64_t amount, const MultisignatureOutput& out) = 0;
+  virtual size_t addOutput(uint64_t amount, const TransactionOutputCommitment& out) = 0;
 
   // transaction info
   virtual void setTransactionSecretKey(const Crypto::SecretKey& key) = 0;
@@ -128,6 +130,12 @@ public:
   virtual void signInputKey(size_t input, const TransactionTypes::InputKeyInfo& info, const KeyPair& ephKeys) = 0;
   virtual void signInputMultisignature(size_t input, const Crypto::PublicKey& sourceTransactionKey, size_t outputIndex, const AccountKeys& accountKeys) = 0;
   virtual void signInputMultisignature(size_t input, const KeyPair& ephemeralKeys) = 0;
+  // Ring-signature signing for TransactionInputCommitmentSpend.
+  // ringKeys are ordered public keys of all ring members (same order as outputIndexes in the input).
+  // commitmentKeys are {commitKey (public), keyScalar (secret)} for the real spend.
+  // realIndex is position of the real spend within the ring.
+  virtual void signInputCommitmentSpend(size_t input, const std::vector<const Crypto::PublicKey*>& ringKeys,
+                                        const KeyPair& commitmentKeys, size_t realIndex) = 0;
 };
 
 class ITransaction : 

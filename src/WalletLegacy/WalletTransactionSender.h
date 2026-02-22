@@ -76,11 +76,17 @@ std::shared_ptr<WalletRequest> makeSendFusionRequest(TransactionId& transactionI
 
 private:
   std::unique_ptr<WalletRequest> makeGetRandomOutsRequest(std::shared_ptr<SendTransactionContext>&& context, bool isMultisigTransaction, Crypto::SecretKey& transactionSK);
+  std::unique_ptr<WalletRequest> makeGetRandomCommitmentOutsRequest(std::shared_ptr<SendTransactionContext>&& context,
+                                                                     uint64_t amount,
+                                                                     const std::vector<DepositId>& depositIds);
   std::unique_ptr<WalletRequest> doSendTransaction(std::shared_ptr<SendTransactionContext>&& context, std::deque<std::unique_ptr<WalletLegacyEvent>>& events, Crypto::SecretKey& transactionSK);
   std::unique_ptr<WalletRequest> doSendMultisigTransaction(std::shared_ptr<SendTransactionContext>&& context, std::deque<std::unique_ptr<WalletLegacyEvent>>& events);
   std::unique_ptr<WalletRequest> doSendDepositWithdrawTransaction(std::shared_ptr<SendTransactionContext>&& context,
                                                                   std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
                                                                   const std::vector<DepositId>& depositIds);
+  std::unique_ptr<WalletRequest> doSendCommitmentWithdrawTransaction(std::shared_ptr<SendTransactionContext>&& context,
+                                                                     std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
+                                                                     const std::vector<DepositId>& depositIds);
 
   void sendTransactionRandomOutsByAmount(bool isMultisigTransaction,
                                          std::shared_ptr<SendTransactionContext> context,
@@ -88,6 +94,12 @@ private:
                                          std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
                                          std::unique_ptr<WalletRequest>& nextRequest,
                                          std::error_code ec);
+
+  void sendCommitmentWithdrawRandomOutsByAmount(std::shared_ptr<SendTransactionContext> context,
+                                                const std::vector<DepositId> depositIds,
+                                                std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
+                                                std::unique_ptr<WalletRequest>& nextRequest,
+                                                std::error_code ec);
 
   void prepareKeyInputs(const std::vector<TransactionOutputInformation>& selectedTransfers,
                         std::vector<COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::outs_for_amount>& outs,

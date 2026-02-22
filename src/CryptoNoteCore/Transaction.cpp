@@ -102,16 +102,20 @@ namespace CryptoNote {
     // Inputs/Outputs 
     virtual size_t addInput(const KeyInput& input) override;
     virtual size_t addInput(const MultisignatureInput& input) override;
+    virtual size_t addInput(const TransactionInputCommitmentSpend& input) override;
     virtual size_t addInput(const AccountKeys& senderKeys, const TransactionTypes::InputKeyInfo& info, KeyPair& ephKeys) override;
 
     virtual size_t addOutput(uint64_t amount, const AccountPublicAddress& to) override;
     virtual size_t addOutput(uint64_t amount, const std::vector<AccountPublicAddress>& to, uint32_t requiredSignatures, uint32_t term = 0) override;
     virtual size_t addOutput(uint64_t amount, const KeyOutput& out) override;
     virtual size_t addOutput(uint64_t amount, const MultisignatureOutput& out) override;
+    virtual size_t addOutput(uint64_t amount, const TransactionOutputCommitment& out) override;
 
     virtual void signInputKey(size_t input, const TransactionTypes::InputKeyInfo& info, const KeyPair& ephKeys) override;
     virtual void signInputMultisignature(size_t input, const PublicKey& sourceTransactionKey, size_t outputIndex, const AccountKeys& accountKeys) override;
     virtual void signInputMultisignature(size_t input, const KeyPair& ephemeralKeys) override;
+    virtual void signInputCommitmentSpend(size_t input, const std::vector<const Crypto::PublicKey*>& ringKeys,
+                                          const KeyPair& commitmentKeys, size_t realIndex) override;
 
 
     // secret key
@@ -284,6 +288,14 @@ namespace CryptoNote {
     return transaction.inputs.size() - 1;
   }
 
+  size_t TransactionImpl::addInput(const TransactionInputCommitmentSpend& input) {
+    checkIfSigning();
+    transaction.inputs.push_back(input);
+    transaction.version = TRANSACTION_VERSION_2;
+    invalidateHash();
+    return transaction.inputs.size() - 1;
+  }
+
   size_t TransactionImpl::addOutput(uint64_t amount, const AccountPublicAddress& to) {
     checkIfSigning();
 
@@ -336,6 +348,16 @@ namespace CryptoNote {
     return outputIndex;
   }
 
+  size_t TransactionImpl::addOutput(uint64_t amount, const TransactionOutputCommitment& out) {
+    checkIfSigning();
+    size_t outputIndex = transaction.outputs.size();
+    TransactionOutput realOut = { amount, out };
+    transaction.outputs.emplace_back(realOut);
+    transaction.version = TRANSACTION_VERSION_2;
+    invalidateHash();
+    return outputIndex;
+  }
+
   void TransactionImpl::signInputKey(size_t index, const TransactionTypes::InputKeyInfo& info, const KeyPair& ephKeys) {
     const auto& input = boost::get<KeyInput>(getInputChecked(transaction, index, TransactionTypes::InputType::Key));
     Hash prefixHash = getTransactionPrefixHash();
@@ -355,6 +377,26 @@ namespace CryptoNote {
       keysPtrs,
       reinterpret_cast<const SecretKey&>(ephKeys.secretKey),
       info.realOutput.transactionIndex,
+      signatures.data());
+
+    getSignatures(index) = signatures;
+    invalidateHash();
+  }
+
+  void TransactionImpl::signInputCommitmentSpend(size_t index, const std::vector<const Crypto::PublicKey*>& ringKeys,
+                                                  const KeyPair& commitmentKeys, size_t realIndex) {
+    // Verify the input at this index is a TransactionInputCommitmentSpend.
+    const auto& input = boost::get<TransactionInputCommitmentSpend>(
+      getInputChecked(transaction, index, TransactionTypes::InputType::CommitmentSpend));
+    Hash prefixHash = getTransactionPrefixHash();
+
+    std::vector<Signature> signatures(ringKeys.size());
+    generate_ring_signature(
+      reinterpret_cast<const Hash&>(prefixHash),
+      reinterpret_cast<const KeyImage&>(input.keyImage),
+      ringKeys,
+      reinterpret_cast<const SecretKey&>(commitmentKeys.secretKey),
+      realIndex,
       signatures.data());
 
     getSignatures(index) = signatures;

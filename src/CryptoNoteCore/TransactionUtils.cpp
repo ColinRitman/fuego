@@ -72,6 +72,9 @@ TransactionTypes::InputType getTransactionInputType(const TransactionInput& in) 
   if (in.type() == typeid(BaseInput)) {
     return TransactionTypes::InputType::Generating;
   }
+  if (in.type() == typeid(TransactionInputCommitmentSpend)) {
+    return TransactionTypes::InputType::CommitmentSpend;
+  }
   return TransactionTypes::InputType::Invalid;
 }
 
@@ -98,6 +101,9 @@ TransactionTypes::OutputType getTransactionOutputType(const TransactionOutputTar
   }
   if (out.type() == typeid(MultisignatureOutput)) {
     return TransactionTypes::OutputType::Multisignature;
+  }
+  if (out.type() == typeid(TransactionOutputCommitment)) {
+    return TransactionTypes::OutputType::Commitment;
   }
   return TransactionTypes::OutputType::Invalid;
 }

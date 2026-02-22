@@ -288,6 +288,51 @@ std::error_code InProcessNode::doGetRandomOutsByAmounts(std::vector<uint64_t>&& 
   return std::error_code();
 }
 
+void InProcessNode::getRandomCommitmentOutsForAmount(uint64_t amount, uint64_t outsCount,
+    std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry>& result, const Callback& callback)
+{
+  std::unique_lock<std::mutex> lock(mutex);
+  if (state != INITIALIZED) {
+    lock.unlock();
+    callback(make_error_code(CryptoNote::error::NOT_INITIALIZED));
+    return;
+  }
+
+  ioService.post(
+    std::bind(&InProcessNode::getRandomCommitmentOutsForAmountAsync, this, amount, outsCount, std::ref(result), callback)
+  );
+}
+
+void InProcessNode::getRandomCommitmentOutsForAmountAsync(uint64_t amount, uint64_t outsCount,
+    std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry>& result, const Callback& callback)
+{
+  std::error_code ec = doGetRandomCommitmentOutsForAmount(amount, outsCount, result);
+  callback(ec);
+}
+
+std::error_code InProcessNode::doGetRandomCommitmentOutsForAmount(uint64_t amount, uint64_t outsCount,
+    std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry>& result)
+{
+  {
+    std::unique_lock<std::mutex> lock(mutex);
+    if (state != INITIALIZED) {
+      return make_error_code(CryptoNote::error::NOT_INITIALIZED);
+    }
+  }
+
+  try {
+    if (!core.get_random_commitment_outs_for_amount(amount, outsCount, result)) {
+      return make_error_code(CryptoNote::error::REQUEST_ERROR);
+    }
+  } catch (std::system_error& e) {
+    return e.code();
+  } catch (std::exception&) {
+    return make_error_code(CryptoNote::error::INTERNAL_NODE_ERROR);
+  }
+
+  return std::error_code();
+}
+
 
 void InProcessNode::relayTransaction(const CryptoNote::Transaction& transaction, const Callback& callback)
 {

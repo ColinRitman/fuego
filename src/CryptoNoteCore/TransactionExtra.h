@@ -73,6 +73,9 @@
 // 0xEA tag: @ Alias registration (on-chain)
 #define TX_EXTRA_ELDERFIER_ALIAS            0xEA  // @ alias registration for Elderfiers and users
 
+// 0xD5 tag: Encrypted deposit secret (for COLD withdrawal_commitment_output recovery from seed)
+#define TX_EXTRA_DEPOSIT_SECRET             0xD5
+
 #define TX_EXTRA_NONCE_PAYMENT_ID           0x00
 
 namespace CryptoNote {
@@ -196,6 +199,25 @@ struct TransactionExtraColdCommitment {
 
 // Legacy alias for backward compatibility
 using TransactionExtraCDDepositSecret = TransactionExtraColdCommitment;
+
+// ============================================================
+// Fuego Ring-Signature Commitment Key Derivation
+// ============================================================
+
+// Keys derived from a 32-byte depositSecret for commitment outputs.
+// commitKey  = H("fuego_commit_key" || depositSecret) * G  — on-chain public key
+// keyScalar  = the scalar used to produce commitKey          — wallet spend key
+// keyImage   = H_p(commitKey) * keyScalar                   — double-spend nullifier
+struct DepositCommitmentKeys {
+  Crypto::PublicKey commitKey;
+  Crypto::SecretKey keyScalar;
+  Crypto::KeyImage  keyImage;
+};
+
+// Derive commitment keys from a 32-byte deposit secret.
+// For HEAT burns: caller discards keyScalar (permanently non-spendable).
+// For COLD deposits: caller stores depositSecret encrypted in wallet/tx_extra.
+DepositCommitmentKeys deriveCommitmentKeys(const std::array<uint8_t, 32>& depositSecret);
 
 
 typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraAliasRegistration, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraColdCommitment, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;

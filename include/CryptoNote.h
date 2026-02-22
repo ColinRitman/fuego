@@ -48,9 +48,30 @@ struct MultisignatureOutput {
   uint32_t term;
 };
 
-typedef boost::variant<BaseInput, KeyInput, MultisignatureInput> TransactionInput;
+// v10+ ring-signature deposit output.
+// Replaces MultisignatureOutput for ALL deposit types: COLD, HEAT burns, Elderfier stakes.
+// Amount lives in TransactionOutput.amount (same as KeyOutput).
+// HEAT burns use throwaway commitKey (secret discarded) and never withdraw but
+// serve as excellent decoys, bulking up decoy pool for COLD/EF withdrawal rings.
+// Ring selection by amount only so all commitment outputs
+// matching amount are eligible decoys regardless of term.
+struct TransactionOutputCommitment {
+  Crypto::PublicKey commitKey; // = scalar(H("commit_key"||depositSecret)) * G
+  uint32_t term;               // lock term in blocks (same meaning as MultisignatureOutput.term)
+};
 
-typedef boost::variant<KeyOutput, MultisignatureOutput> TransactionOutputTarget;
+// v10+ ring-signature withdrawal input.
+// Replaces MultisignatureInput for COLD/Elderfier withdrawals.
+// outputIndexes are GLOBAL commitment output indices (like KeyInput for key outputs).
+struct TransactionInputCommitmentSpend {
+  uint64_t amount;                      // must match referenced commitment output amount
+  std::vector<uint32_t> outputIndexes;  // ring: global commitment output indices (relative offsets, decoded absolute on verify)
+  Crypto::KeyImage keyImage;            // H_p(commitKey) * keyScalar — double-spend prevention via m_spent_keys
+};
+
+typedef boost::variant<BaseInput, KeyInput, MultisignatureInput, TransactionInputCommitmentSpend> TransactionInput;
+
+typedef boost::variant<KeyOutput, MultisignatureOutput, TransactionOutputCommitment> TransactionOutputTarget;
 
 struct TransactionOutput {
   uint64_t amount;

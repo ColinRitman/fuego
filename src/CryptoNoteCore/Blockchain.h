@@ -52,6 +52,7 @@ namespace CryptoNote {
   struct COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_request;
   struct COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_response;
   struct COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_outs_for_amount;
+  struct COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry;
 
   using CryptoNote::BlockInfo;
   class Blockchain : public CryptoNote::ITransactionValidator {
@@ -110,6 +111,7 @@ namespace CryptoNote {
       uint32_t& totalBlockCount, uint32_t& startBlockIndex);
     bool handleGetObjects(NOTIFY_REQUEST_GET_OBJECTS_request& arg, NOTIFY_RESPONSE_GET_OBJECTS_request& rsp); //Deprecated. Should be removed with CryptoNoteProtocolHandler.
     bool getRandomOutsByAmount(const COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_request& req, COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_response& res);
+    bool getRandomCommitmentOutputsForAmount(uint64_t amount, uint64_t count, std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry>& result);
     bool getBackwardBlocksSize(size_t from_height, std::vector<size_t>& sz, size_t count);
     bool getTransactionOutputGlobalIndexes(const Crypto::Hash& tx_id, std::vector<uint32_t>& indexs);
     bool get_out_by_msig_gindex(uint64_t amount, uint64_t gindex, MultisignatureOutput& out);
@@ -293,6 +295,24 @@ namespace CryptoNote {
     typedef parallel_flat_hash_map<uint64_t, std::vector<std::pair<TransactionIndex, uint16_t>>> outputs_container; //Crypto::Hash - tx hash, size_t - index of out in transaction
     typedef parallel_flat_hash_map<uint64_t, std::vector<MultisignatureOutputUsage>> MultisignatureOutputsContainer;
 
+    // Fuego commitment output index for ring-signature deposit/burn outputs.
+    // indexed by amount (like m_outputs for KeyOutput ring sigs).
+    // stores the commitKey cached for ring signature verification.
+    struct CommitmentOutputRef {
+      TransactionIndex  transactionIndex;
+      uint16_t          outputInTransaction;
+      Crypto::PublicKey commitKey;  // cached for ring signature verification
+      uint32_t          term;       // lock term in blocks; 0xFFFFFFFF = FOREVER (HEAT burns, never unlocked)
+
+      void serialize(ISerializer& s) {
+        s(transactionIndex, "txindex");
+        s(outputInTransaction, "outindex");
+        s(commitKey, "commitKey");
+        s(term, "term");
+      }
+    };
+    typedef parallel_flat_hash_map<uint64_t, std::vector<CommitmentOutputRef>> CommitmentOutputsContainer;
+
     const Currency& m_currency;
     tx_memory_pool& m_tx_pool;
     mutable std::recursive_mutex m_blockchain_lock; // TODO: add here reader/writer lock
@@ -323,6 +343,7 @@ namespace CryptoNote {
     CryptoNote::AliasIndex m_aliasIndex;
     TransactionMap m_transactionMap;
     MultisignatureOutputsContainer m_multisignatureOutputs;
+    CommitmentOutputsContainer     m_commitmentOutputs;
     UpgradeDetector m_upgradeDetectorV2;
     UpgradeDetector m_upgradeDetectorV3;
     UpgradeDetector m_upgradeDetectorV4;
@@ -380,6 +401,7 @@ namespace CryptoNote {
     void popTransaction(const Transaction &transaction, const Crypto::Hash &transactionHash);
     void popTransactions(const BlockEntry &block, const Crypto::Hash &minerTransactionHash);
     bool validateInput(const MultisignatureInput &input, const Crypto::Hash &transactionHash, const Crypto::Hash &transactionPrefixHash, const std::vector<Crypto::Signature> &transactionSignatures);
+    bool checkCommitmentSpendInput(const TransactionInputCommitmentSpend& txin, const Crypto::Hash& tx_prefix_hash, const std::vector<Crypto::Signature>& sig, uint32_t* pmax_related_block_height = nullptr);
     bool removeLastBlock();
     bool checkCheckpoints(uint32_t &lastValidCheckpointHeight);
     bool checkUpgradeHeight(const UpgradeDetector& upgradeDetector);

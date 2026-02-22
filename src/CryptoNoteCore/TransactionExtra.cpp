@@ -19,6 +19,7 @@
 #include "CryptoNoteTools.h"
 #include "CryptoNoteConfig.h"
 #include "crypto/hash.h"
+#include "crypto/crypto.h"
 #include "crypto/chacha8.h"
 #include "Common/int-util.h"
 #include "Common/MemoryInputStream.h"
@@ -2044,5 +2045,34 @@ namespace CryptoNote
     }
     return false;
   }
+
+// ============================================================
+// Fuego DepositCommitment Key Derivation 
+// ============================================================
+DepositCommitmentKeys deriveCommitmentKeys(const std::array<uint8_t, 32>& depositSecret) {
+  DepositCommitmentKeys keys;
+
+  // keyScalar = cn_fast_hash("fuego_commit_key" || depositSecret)
+  // The 16-byte label + 32-byte secret = 48 bytes total preimage.
+  static const char label[] = "fuego_commit_key";  // exactly 16 bytes
+  uint8_t preimage[48];
+  memcpy(preimage,      label,               16);
+  memcpy(preimage + 16, depositSecret.data(), 32);
+
+  Crypto::Hash hashResult = Crypto::cn_fast_hash(preimage, sizeof(preimage));
+
+  // Map hash to Ed25519 scalar: use bytes directly as secret key.
+  // secret_key_to_public_key internally applies sc_reduce32 / clamping.
+  memcpy(keys.keyScalar.data, hashResult.data, 32);
+
+  if (!Crypto::secret_key_to_public_key(keys.keyScalar, keys.commitKey)) {
+    throw std::runtime_error("deriveCommitmentKeys: hash produced an invalid Ed25519 scalar");
+  }
+
+  // keyImage = H_p(commitKey) * keyScalar  — standard Fuego key image
+  Crypto::generate_key_image(keys.commitKey, keys.keyScalar, keys.keyImage);
+
+  return keys;
+}
 
 } // namespace CryptoNote

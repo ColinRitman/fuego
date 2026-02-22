@@ -32,6 +32,7 @@
 #include "INode.h"
 
 #include <Logging/LoggerGroup.h>
+#include <numeric>
 #include <random>
 #include <set>
 #include "CryptoNoteCore/TransactionExtra.h"
@@ -318,15 +319,13 @@ namespace CryptoNote
     }
     throwIf(amount != CryptoNote::parameters::TEST_AMOUNT_TIER_0 && amount < m_currency.depositMinAmount(), error::DEPOSIT_AMOUNT_TOO_SMALL);
 
-    // Enforce minimum mixin for v10+. Deposit callers pass 0 by convention but deposits
-    // spend real key outputs that require proper ring signatures like any other transaction.
-    const size_t requiredMixin = m_currency.minMixin(CryptoNote::BLOCK_MAJOR_VERSION_10);
-    if (mixIn < requiredMixin) {
-      mixIn = static_cast<uint64_t>(requiredMixin);
-    }
+    // use dynamic max mixin; DynamicRingSizeCalculator uses highest achievable ring size
+    // (18, 15, 12, 10, or 8) from whatever daemon actually has available.
+    mixIn = m_currency.maxMixin();
 
     uint64_t neededMoney = getSumWithOverflowCheck(amount, fee);
     std::shared_ptr<SendTransactionContext> context = std::make_shared<SendTransactionContext>();
+    context->dynamicRingSize = true;
     context->dustPolicy.dustThreshold = m_currency.defaultDustThreshold();
 
     context->foundMoney = selectTransfersToSend(neededMoney, false, context->dustPolicy.dustThreshold, context->selectedTransfers);
@@ -364,6 +363,21 @@ namespace CryptoNote
     context->mixIn = 0;
 
     setSpendingTransactionToDeposits(transactionId, depositIds);
+
+    // If any selected transfer is a commitment output, use the ring-sig withdrawal path.
+    bool isCommitment = false;
+    for (const auto& t : context->selectedTransfers) {
+      if (t.type == TransactionTypes::OutputType::Commitment) {
+        isCommitment = true;
+        break;
+      }
+    }
+
+    if (isCommitment) {
+      // All deposits in this withdrawal_ring must share same amount for decoy selection.
+      const uint64_t depositAmount = context->selectedTransfers.empty() ? 0 : context->selectedTransfers[0].amount;
+      return makeGetRandomCommitmentOutsRequest(std::move(context), depositAmount, depositIds);
+    }
 
     return doSendDepositWithdrawTransaction(std::move(context), events, depositIds);
   }
@@ -418,6 +432,63 @@ namespace CryptoNote
     return std::unique_ptr<WalletRequest>(new WalletGetRandomOutsByAmountsRequest(amounts, outsCount, context,
                                                                                   std::bind(&WalletTransactionSender::sendTransactionRandomOutsByAmount, this, isMultisigTransaction, context, std::ref(transactionSK),
                                                                                             std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)));
+  }
+
+  std::unique_ptr<WalletRequest> WalletTransactionSender::makeGetRandomCommitmentOutsRequest(
+      std::shared_ptr<SendTransactionContext>&& context,
+      uint64_t amount,
+      const std::vector<DepositId>& depositIds)
+  {
+    uint64_t outsCount = m_currency.maxMixin() + 1; // probe with max + 1 for real output
+    return std::unique_ptr<WalletRequest>(new WalletGetRandomCommitmentOutsRequest(
+      amount, outsCount, context,
+      std::bind(&WalletTransactionSender::sendCommitmentWithdrawRandomOutsByAmount, this,
+        context, depositIds,
+        std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)));
+  }
+
+  void WalletTransactionSender::sendCommitmentWithdrawRandomOutsByAmount(
+      std::shared_ptr<SendTransactionContext> context,
+      const std::vector<DepositId> depositIds,
+      std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
+      std::unique_ptr<WalletRequest>& nextRequest,
+      std::error_code ec)
+  {
+    if (m_isStoping) {
+      ec = make_error_code(error::TX_CANCELLED);
+    }
+
+    if (ec) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, ec));
+      return;
+    }
+
+    // use DynamicRingSizeCalculator to get optimal ring size from available commitment outputs
+    const size_t available = context->commitmentOuts.size();
+    std::vector<CryptoNote::OutputInfo> outputInfos;
+    outputInfos.emplace_back(0, available);
+
+    size_t ringSize = CryptoNote::DynamicRingSizeCalculator::calculateOptimalRingSize(
+      0, outputInfos,
+      CryptoNote::BLOCK_MAJOR_VERSION_10,
+      m_currency.minMixin(CryptoNote::BLOCK_MAJOR_VERSION_10),
+      m_currency.maxMixin()
+    );
+
+    if (ringSize == 0) {
+      // if not enough commitment outputs yet — fall back to minimum if we have at least 1.
+      // Commitment pool is new; allow single-member ring until pool grows.
+      ringSize = available > 0 ? available : 0;
+    }
+
+    if (ringSize == 0) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId,
+        make_error_code(error::MIXIN_COUNT_TOO_BIG)));
+      return;
+    }
+
+    context->mixIn = static_cast<uint64_t>(ringSize);
+    nextRequest = doSendCommitmentWithdrawTransaction(std::move(context), events, depositIds);
   }
 
   void WalletTransactionSender::sendTransactionRandomOutsByAmount(bool isMultisigTransaction,
@@ -562,10 +633,55 @@ namespace CryptoNote
       std::vector<TransactionTypes::InputKeyInfo> inputs = prepareKeyInputs(context->selectedTransfers, context->outs, context->mixIn);
       std::vector<uint64_t> decomposedChange = splitAmount(context->foundMoney - totalAmount, context->dustPolicy.dustThreshold);
 
-      auto bankingIndex = transaction->addOutput(std::abs(transactionInfo.totalAmount) - transactionInfo.fee,
-                                                 {m_keys.address},
-                                                 1,
-                                                 context->depositTerm);
+      // --- Fuego Ring-Signature Commitment Output ---
+      // Derive the deposit secret deterministically (COLD) or discard it (HEAT burns).
+      //
+      // COLD deposits (finite term): depositSecret = H("fuego_commit_v1" || ECDH || outputIndex)
+      //   where ECDH = txSecretKey * viewPublicKey — the same shared secret used by CryptoNote
+      //   stealth address scanning. The depositor can re-derive this with their view key + the
+      //   tx public key found in the blockchain, so it is fully recoverable from seed.
+      //
+      // HEAT burns (FOREVER term): random ephemeral key is generated and discarded immediately.
+      //   No one knows the keyScalar → output is permanently non-spendable as a ring member only.
+      const uint32_t commitOutputIndex = static_cast<uint32_t>(transaction->getOutputCount());
+      std::array<uint8_t, 32> depositSecret;
+
+      if (context->depositTerm == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+        // Burn path: generate random, discard immediately.
+        Crypto::PublicKey dummyPk;
+        Crypto::SecretKey randomKey;
+        Crypto::generate_keys(dummyPk, randomKey);
+        memcpy(depositSecret.data(), randomKey.data, 32);
+      } else {
+        // COLD deposit path: deterministic ECDH derivation.
+        Crypto::SecretKey txSecretKey;
+        if (!transaction->getTransactionSecretKey(txSecretKey)) {
+          throw std::runtime_error("COLD deposit: could not retrieve tx secret key for commitment derivation");
+        }
+        Crypto::KeyDerivation ecdh;
+        if (!Crypto::generate_key_derivation(m_keys.address.viewPublicKey, txSecretKey, ecdh)) {
+          throw std::runtime_error("COLD deposit: ECDH key derivation failed");
+        }
+        // Mix in output index (LE32) so multiple commitment outputs per tx are independent.
+        uint8_t preimage[36];
+        memcpy(preimage, &ecdh, 32);
+        preimage[32] = commitOutputIndex & 0xFF;
+        preimage[33] = (commitOutputIndex >> 8) & 0xFF;
+        preimage[34] = (commitOutputIndex >> 16) & 0xFF;
+        preimage[35] = (commitOutputIndex >> 24) & 0xFF;
+        Crypto::Hash h = Crypto::cn_fast_hash(preimage, sizeof(preimage));
+        memcpy(depositSecret.data(), h.data, 32);
+      }
+
+      CryptoNote::DepositCommitmentKeys commitKeys = CryptoNote::deriveCommitmentKeys(depositSecret);
+
+      CryptoNote::TransactionOutputCommitment commitOut;
+      commitOut.commitKey = commitKeys.commitKey;
+      commitOut.term      = static_cast<uint32_t>(context->depositTerm);
+
+      auto bankingIndex = transaction->addOutput(
+          std::abs(transactionInfo.totalAmount) - transactionInfo.fee,
+          commitOut);
 
       for (uint64_t changeOut : decomposedChange)
       {
@@ -781,6 +897,146 @@ namespace CryptoNote
     catch (std::exception &)
     {
       events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::INTERNAL_WALLET_ERROR)));
+    }
+
+    return std::unique_ptr<WalletRequest>();
+  }
+
+  std::unique_ptr<WalletRequest> WalletTransactionSender::doSendCommitmentWithdrawTransaction(
+      std::shared_ptr<SendTransactionContext>&& context,
+      std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
+      const std::vector<DepositId>& depositIds)
+  {
+    if (m_isStoping) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::TX_CANCELLED)));
+      return std::unique_ptr<WalletRequest>();
+    }
+
+    try {
+      WalletLegacyTransaction& transactionInfo = m_transactionsCache.getTransaction(context->transactionId);
+      std::unique_ptr<ITransaction> transaction = createTransaction();
+
+      // Split withdrawal proceeds to wallet address.
+      std::vector<uint64_t> outputAmounts = splitAmount(
+          context->foundMoney - transactionInfo.fee, context->dustPolicy.dustThreshold);
+      for (auto amount : outputAmounts) {
+        transaction->addOutput(amount, m_keys.address);
+      }
+      transaction->setUnlockTime(transactionInfo.unlockTime);
+
+      const size_t ringSize = static_cast<size_t>(context->mixIn);
+      const auto& decoys = context->commitmentOuts; // returned by getRandomCommitmentOutsForAmount
+
+      // Select `ringSize` decoys from the returned pool (already randomly chosen by daemon).
+      // The real spend is added at a random position within the ring.
+      for (size_t depositIdx = 0; depositIdx < context->selectedTransfers.size(); ++depositIdx) {
+        const TransactionOutputInformation& transfer = context->selectedTransfers[depositIdx];
+
+        // Re-derive the depositKeyScalar deterministically.
+        // At deposit creation we use: depositSecret = H(ECDH(txSecretKey, viewPubKey) || outputIndex)
+        Crypto::KeyDerivation ecdh;
+        if (!Crypto::generate_key_derivation(transfer.transactionPublicKey, m_keys.viewSecretKey, ecdh)) {
+          throw std::runtime_error("Commitment withdrawal: ECDH derivation failed");
+        }
+        uint8_t preimage[36];
+        memcpy(preimage, &ecdh, 32);
+        const uint32_t outIdx = transfer.outputInTransaction;
+        preimage[32] = outIdx & 0xFF;
+        preimage[33] = (outIdx >> 8) & 0xFF;
+        preimage[34] = (outIdx >> 16) & 0xFF;
+        preimage[35] = (outIdx >> 24) & 0xFF;
+        Crypto::Hash h = Crypto::cn_fast_hash(preimage, sizeof(preimage));
+
+        std::array<uint8_t, 32> depositSecret;
+        memcpy(depositSecret.data(), h.data, 32);
+
+        CryptoNote::DepositCommitmentKeys commitKeys = CryptoNote::deriveCommitmentKeys(depositSecret);
+        KeyPair commitmentKeyPair;
+        commitmentKeyPair.publicKey  = commitKeys.commitKey;
+        commitmentKeyPair.secretKey  = commitKeys.keyScalar;
+
+        // Decide how many decoys we can actually use (capped at ringSize - 1, leaving 1 slot for real).
+        const size_t numDecoys = std::min(decoys.size(), ringSize - 1);
+        const size_t actualRingSize = numDecoys + 1;
+
+        // Pick a random position for the real spend within the ring.
+        const size_t realPos = Crypto::rand<size_t>() % actualRingSize;
+
+        // Build ordered ring of global indices (relative-encoded) and public keys.
+        std::vector<uint32_t> absIndices;
+        std::vector<const Crypto::PublicKey*> ringKeys;
+
+        size_t decoyPos = 0;
+        for (size_t slot = 0; slot < actualRingSize; ++slot) {
+          if (slot == realPos) {
+            // Real spend: global index from the transfer record.
+            absIndices.push_back(transfer.globalOutputIndex);
+            ringKeys.push_back(&commitmentKeyPair.publicKey);
+          } else {
+            absIndices.push_back(decoys[decoyPos].global_amount_index);
+            ringKeys.push_back(&decoys[decoyPos].commit_key);
+            ++decoyPos;
+          }
+        }
+
+        // Sort ring by global index (ascending) — same as KeyInput convention.
+        // Recompute realPos after sort.
+        std::vector<size_t> order(actualRingSize);
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+          return absIndices[a] < absIndices[b];
+        });
+        size_t sortedRealPos = 0;
+        std::vector<uint32_t> sortedAbs(actualRingSize);
+        std::vector<const Crypto::PublicKey*> sortedKeys(actualRingSize);
+        for (size_t s = 0; s < actualRingSize; ++s) {
+          sortedAbs[s]  = absIndices[order[s]];
+          sortedKeys[s] = ringKeys[order[s]];
+          if (order[s] == realPos) sortedRealPos = s;
+        }
+
+        // Convert absolute indices to relative offsets (delta-encoded).
+        std::vector<uint32_t> relOffsets(actualRingSize);
+        relOffsets[0] = sortedAbs[0];
+        for (size_t s = 1; s < actualRingSize; ++s) {
+          relOffsets[s] = sortedAbs[s] - sortedAbs[s - 1];
+        }
+
+        // Build the TransactionInputCommitmentSpend.
+        TransactionInputCommitmentSpend csInput;
+        csInput.amount        = transfer.amount;
+        csInput.outputIndexes = relOffsets;
+        csInput.keyImage      = commitKeys.keyImage;
+        transaction->addInput(csInput);
+
+        // Sign the input.
+        transaction->signInputCommitmentSpend(depositIdx, sortedKeys, commitmentKeyPair, sortedRealPos);
+      }
+
+      transactionInfo.hash = transaction->getTransactionHash();
+
+      Transaction lowlevelTx = convertTransaction(*transaction, static_cast<size_t>(m_upperTransactionSizeLimit));
+
+      uint64_t interestsSum, totalSum;
+      countDepositsTotalSumAndInterestSum(depositIds, m_transactionsCache, totalSum, interestsSum);
+
+      UnconfirmedSpentDepositDetails unconfirmed;
+      unconfirmed.depositsSum = totalSum;
+      unconfirmed.fee         = transactionInfo.fee;
+      unconfirmed.transactionId = context->transactionId;
+      m_transactionsCache.addDepositSpendingTransaction(transaction->getTransactionHash(), unconfirmed);
+
+      return std::unique_ptr<WalletRelayDepositTransactionRequest>(
+        new WalletRelayDepositTransactionRequest(lowlevelTx,
+          std::bind(&WalletTransactionSender::relayDepositTransactionCallback, this,
+            context, depositIds, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)));
+    }
+    catch (std::system_error& err) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, err.code()));
+    }
+    catch (std::exception&) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId,
+        make_error_code(error::INTERNAL_WALLET_ERROR)));
     }
 
     return std::unique_ptr<WalletRequest>();

@@ -312,6 +312,40 @@ struct COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS {
 };
 
 //-----------------------------------------------
+// Random commitment outputs for ring-signature deposit withdrawals.
+// Works like COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS but indexes m_commitmentOutputs.
+#pragma pack(push, 1)
+struct COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry {
+  uint32_t global_amount_index;
+  Crypto::PublicKey commit_key;
+};
+#pragma pack(pop)
+
+struct COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS {
+  struct request {
+    uint64_t amount;
+    uint64_t outs_count;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(amount)
+      KV_MEMBER(outs_count)
+    }
+  };
+
+  struct response {
+    std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry> outs;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      serializeAsBinary(outs, "outs", s);
+      KV_MEMBER(status)
+    }
+  };
+
+  typedef COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry out_entry;
+};
+
+//-----------------------------------------------
 struct COMMAND_RPC_SEND_RAW_TX {
   struct request {
     std::string tx_as_hex;
