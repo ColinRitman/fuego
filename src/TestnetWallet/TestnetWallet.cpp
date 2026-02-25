@@ -362,10 +362,10 @@ namespace CryptoNote
     success_msg_writer() << "";
     success_msg_writer() << "    5 deposits of 80 TEST each  (400 TEST total stake)";
     success_msg_writer() << "    Tagged 0xEF — the Elderfier mark — slashable stake";
-    success_msg_writer() << "    A unique 8-character Elder King name (your on-chain ID)";
+    success_msg_writer() << "    A unique 8-character Ælder King name (your on-chain ID)";
     success_msg_writer() << "    You MUST run an Elderfier node to sign roots & earn fees";
     success_msg_writer() << "";
-    success_msg_writer() << "  Do you accept the calling of the Elder Council?";
+    success_msg_writer() << "  Do you accept the calling of the Ælder Council?";
     success_msg_writer() << "  Do you pledge to be brave, be just, protect the innocent,";
     success_msg_writer() << "  and guard the Realm with all your might and honour?";
     success_msg_writer() << "";
@@ -375,20 +375,20 @@ namespace CryptoNote
     std::getline(std::cin, acceptance);
     if (acceptance.empty() || (acceptance[0] != 'y' && acceptance[0] != 'Y')) {
       success_msg_writer() << "";
-      success_msg_writer() << "  The Elder Council watches. Return when you are ready.";
+      success_msg_writer() << "  The Ælder Council watches. Return when you are ready.";
       success_msg_writer() << "  The Realm awaits those worthy of its flame.";
       success_msg_writer() << "";
       return true;
     }
 
     success_msg_writer() << "";
-    success_msg_writer() << "  The Elder Council nods. You have answered the call.";
+    success_msg_writer() << "  The Ælder Council nods. You have answered the call.";
     success_msg_writer() << "";
 
     // ── PART II: CHOOSE YOUR ELDER KING NAME ──────────────────────────────
-    success_msg_writer() << "  ── CHOOSE YOUR ELDER KING NAME ─────────────────────────";
+    success_msg_writer() << "  ── CHOOSE YOUR ÆLDER KING NAME ─────────────────────────";
     success_msg_writer() << "";
-    success_msg_writer() << "  Your Elder King name is your identity on the Fuego testnet.";
+    success_msg_writer() << "  Your Ælder King name is your identity on the Fuego testnet.";
     success_msg_writer() << "  It will be embedded in all 5 of your stakes and registered";
     success_msg_writer() << "  on-chain when your deposits confirm.";
     success_msg_writer() << "";
@@ -403,7 +403,7 @@ namespace CryptoNote
 
     std::string alias;
     while (true) {
-      success_msg_writer() << "  Enter your Elder King name: ";
+      success_msg_writer() << "  Enter your Ælder King name: ";
       std::getline(std::cin, alias);
       // Trim whitespace
       while (!alias.empty() && std::isspace((unsigned char)alias.front())) alias.erase(alias.begin());
@@ -411,7 +411,7 @@ namespace CryptoNote
 
       if (alias.empty()) {
         success_msg_writer() << "";
-        success_msg_writer() << "  The Elder Council watches. Return when you are ready.";
+        success_msg_writer() << "  The Ælder Council watches. Return when you are ready.";
         return true;
       }
       if (!CryptoNote::AliasIndex::isValidElderfierAlias(alias)) {
@@ -426,12 +426,12 @@ namespace CryptoNote
 
     // ── PART III: THE OATH ─────────────────────────────────────────────────
     success_msg_writer() << "";
-    success_msg_writer() << "  Before the Eternal Flame and the eyes of the Elder Council,";
+    success_msg_writer() << "  Before the Eternal Flame and the eyes of the Ælder Council,";
     success_msg_writer() << "  hear the oath of Elder King " << alias << ":";
     success_msg_writer() << "";
     success_msg_writer() << "  ════════════════════════════════════════════════════════";
     success_msg_writer() << "";
-    success_msg_writer() << "  Elder King " << alias << ", do you vow:";
+    success_msg_writer() << "  Ælder King " << alias << ", do you vow:";
     success_msg_writer() << "";
     success_msg_writer() << "    to be BRAVE in the face of all adversity — to stand";
     success_msg_writer() << "    firm when the network is tested, threatened, or besieged?";
@@ -451,7 +451,7 @@ namespace CryptoNote
     success_msg_writer() << "";
     success_msg_writer() << "  ════════════════════════════════════════════════════════";
     success_msg_writer() << "";
-    success_msg_writer() << "  To seal these vows, enter your Elder King name again: ";
+    success_msg_writer() << "  To seal these vows, enter your Ælder King name again: ";
 
     std::string confirmAlias;
     std::getline(std::cin, confirmAlias);
@@ -467,7 +467,7 @@ namespace CryptoNote
     }
 
     success_msg_writer() << "";
-    success_msg_writer() << "  So be it.  Elder King " << alias << " rises.";
+    success_msg_writer() << "  So be it.  Ælder King " << alias << " rises.";
     success_msg_writer() << "";
 
     // ── RPC: check alias availability ──────────────────────────────────────
@@ -599,10 +599,10 @@ namespace CryptoNote
       // ── Completion ─────────────────────────────────────────────────────
       success_msg_writer() << "";
       success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-      success_msg_writer() << "║          TESTNET CEREMONY COMPLETE — FLAME IGNITED         ║";
+      success_msg_writer() << "║          TESTNET CEREMONY COMPLETE — TESTIFIER IGNITED         ║";
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
-      success_msg_writer() << "  Elder King " << alias << " — all 5 Testifier stakes have been";
+      success_msg_writer() << "  Ælder King " << alias << " — all 5 Testifier stakes have been";
       success_msg_writer() << "  broadcast to the testnet. Your name is embedded in each.";
       success_msg_writer() << "";
       success_msg_writer() << "  When all 5 deposits confirm on-chain, the testnet will";
@@ -610,7 +610,7 @@ namespace CryptoNote
       success_msg_writer() << "  and add you to the active Testifiers registry.";
       success_msg_writer() << "";
       success_msg_writer() << "  Your Elderfire burns bright.";
-      success_msg_writer() << "  Guard the Realm well, Elder King " << alias << ".";
+      success_msg_writer() << "  Guard the Realm well,  " << alias << ".";
       success_msg_writer() << "";
       success_msg_writer() << "  Commands:  list_deposits  |  lookup_alias " << alias;
       success_msg_writer() << "";

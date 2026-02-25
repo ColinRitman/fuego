@@ -1847,7 +1847,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     invokeJsonCommand(httpClient, "/get_alias_by_address", addrReq, addrRes);
     if (addrRes.found) {
       fail_msg_writer() << "  Your address already bears the name @" << addrRes.alias;
-      fail_msg_writer() << "  An Elder King may not be crowned twice. Ceremony aborted.";
+      fail_msg_writer() << "  An Ælder King may not be crowned twice. Ceremony aborted.";
       return true;
     }
   } catch (const ConnectException&) {
@@ -1875,7 +1875,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "";
 
     if (balance < required + (5 * fee)) {
-      fail_msg_writer() << "  The flame requires more fuel.";
+      fail_msg_writer() << "  The flame requires more ħeat.";
       fail_msg_writer() << "  You need " << m_currency.formatAmount(required + (5 * fee) - balance) << " more XFG.";
       fail_msg_writer() << "  Ceremony aborted. Return when your coffers are ready.";
       return true;
@@ -1947,18 +1947,18 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     // ── Completion ───────────────────────────────────────────────────────
     success_msg_writer() << "";
     success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-    success_msg_writer() << "║           CEREMONY COMPLETE — ELDERFIRE IGNITED            ║";
+    success_msg_writer() << "║           CEREMONY COMPLETE — ΞLDERFIER CREATED            ║";
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
-    success_msg_writer() << "  Elder King " << alias << " — all 5 Elderfire stakes have been";
+    success_msg_writer() << "  Ælder King " << alias << " — all 5 Elderfire stakes have been";
     success_msg_writer() << "  broadcast to the network. Your name is embedded in each.";
     success_msg_writer() << "";
     success_msg_writer() << "  When all 5 deposits confirm on-chain, the network will";
-    success_msg_writer() << "  register you as Elder King @" << alias;
-    success_msg_writer() << "  and add you to the active Elderfiers registry.";
+    success_msg_writer() << "  register you as Ælder King @" << alias;
+    success_msg_writer() << "  and add you to the active Ξlderfiers registry.";
     success_msg_writer() << "";
     success_msg_writer() << "  Your Elderfire burns bright.";
-    success_msg_writer() << "  Guard the Realm well, Elder King " << alias << ".";
+    success_msg_writer() << "  Guard the Realm well, King " << alias << ".";
     success_msg_writer() << "";
     success_msg_writer() << "  Commands:  list_deposits  |  lookup_alias " << alias;
     success_msg_writer() << "";

@@ -537,12 +537,24 @@ namespace CryptoNote
     /* Now we add the outputs to the transaction, starting with the deposits output
      which includes the term, and then after that the change outputs */
 
-    /* Add the deposit outputs to the transaction */
+    // Generate a random 32-byte deposit secret
+    std::array<uint8_t, 32> depositSecret;
+    generate_random_bytes(sizeof(depositSecret), depositSecret.data());
+
+    // Derive commitment keys from the deposit secret
+    CryptoNote::DepositCommitmentKeys commitKeys = CryptoNote::deriveCommitmentKeys(depositSecret);
+
+    // Create TransactionOutputCommitment instead of MultisignatureOutput
+    CryptoNote::TransactionOutputCommitment commitOut;
+    commitOut.commitKey = commitKeys.commitKey;
+    commitOut.term = static_cast<uint32_t>(term);
+
+    // Add the commitment output to the transaction
     auto bankingIndex = transaction->addOutput(
         neededMoney - fee,
-        {destAddr},
-        1,
-        term);
+        commitOut);
+
+    // Deposit secret will be stored after inputs are signed (hash is final at that point).
 
     /* Let's add the change outputs to the transaction */
 
@@ -623,30 +635,28 @@ namespace CryptoNote
 
       m_logger(DEBUGGING, BRIGHT_GREEN) << "HEAT commitment added to burn deposit transaction: " << amount << " XFG = " << heatAmount << " HEAT";
     } else {
-      m_logger(DEBUGGING, BRIGHT_GREEN) << "Creating yield deposit with YIELD commitment for " << amount << " XFG";
+      m_logger(DEBUGGING, BRIGHT_GREEN) << "Creating COLD deposit for " << amount << " XFG term=" << term;
 
-      /* Use provided YIELD commitment or generate one */
+      /* Use provided commitment or generate one */
       DepositCommitment finalCommitment = commitment;
       if (commitment.type != CommitmentType::YIELD) {
-        // Generate YIELD commitment automatically
         finalCommitment = DepositCommitmentGenerator::generateYieldCommitment(
           term, amount, commitment.metadata);
 
-        m_logger(DEBUGGING, BRIGHT_GREEN) << "Generated YIELD commitment: " << Common::podToHex(finalCommitment.commitment);
+        m_logger(DEBUGGING, BRIGHT_GREEN) << "Generated COLD commitment: " << Common::podToHex(finalCommitment.commitment);
       }
 
-      /* Add YIELD commitment to transaction extra */
+      /* Add COLD commitment to transaction extra (tag 0xCD) */
       std::vector<uint8_t> extra;
-      std::vector<uint8_t> gift_secret; // Empty gift secret for non-gifted deposits
-      if (!CryptoNote::createTxExtraWithYieldCommitment(finalCommitment.commitment, amount, term, "standard", finalCommitment.metadata, 1, gift_secret, extra))
+      std::vector<uint8_t> gift_secret;
+      if (!CryptoNote::createTxExtraWithColdCommitment(finalCommitment.commitment, amount, term, 1, finalCommitment.metadata, gift_secret, extra))
       {
-        throw std::system_error(make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR), "Failed to create YIELD commitment in transaction extra");
+        throw std::system_error(make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR), "Failed to create COLD commitment in transaction extra");
       }
 
-      /* Append YIELD commitment to transaction extra */
       transaction->appendExtra(extra);
 
-      m_logger(DEBUGGING, BRIGHT_GREEN) << "YIELD commitment added to yield deposit transaction: " << amount << " XFG";
+      m_logger(DEBUGGING, BRIGHT_GREEN) << "COLD commitment (0xCD) added to deposit transaction: " << amount << " XFG term=" << term;
     }
 
     /* Add the transaction extra for messages (if any) */
@@ -673,7 +683,7 @@ namespace CryptoNote
     typedef CryptoNote::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::outs_for_amount outs_for_amount;
     std::vector<outs_for_amount> mixinResult;
     std::vector<InputInfo> keysInfo;
-    prepareInputs(selectedTransfers, mixinResult, 4, keysInfo);
+    prepareInputs(selectedTransfers, mixinResult, m_currency.maxMixin(), keysInfo);
 
     /* Add the inputs to the transaction */
     std::vector<KeyPair> ephKeys;
@@ -689,12 +699,14 @@ namespace CryptoNote
       transaction->signInputKey(i++, input.keyInfo, input.ephKeys);
     }
 
-    /* Return the transaction hash */
+    /* Return the transaction hash — inputs are now signed so hash is final */
     transactionHash = Common::podToHex(transaction->getTransactionHash());
+
+    /* Store deposit secret under the final (post-signing) transaction hash */
+    addBurnDepositSecret(transactionHash, commitKeys.keyScalar, neededMoney - fee, std::vector<uint8_t>());
 
     /* Store staged unlock preference if requested */
     if (useStagedUnlock) {
-      // Store the staged unlock preference for this deposit
       m_stagedUnlocks[transactionHash] = true;
       m_logger(DEBUGGING, BRIGHT_GREEN) << "Deposit created with staged unlock preference: " << transactionHash;
     }
