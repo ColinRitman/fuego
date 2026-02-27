@@ -2330,7 +2330,6 @@ namespace PaymentService
       }
     }
 
-    // Removed getTotalRebornXfg - no longer needed
 
     std::error_code WalletService::getBurnPercentage(double &burnPercentage)
     {
@@ -2345,10 +2344,6 @@ namespace PaymentService
         return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
       }
     }
-
-    // Removed getRebornPercentage - no longer needed
-
-    // Removed getSupplyIncreasePercentage - no longer needed
 
 
         
@@ -2652,3 +2647,4 @@ namespace PaymentService
   }
 
   } //namespace PaymentService
+  }
