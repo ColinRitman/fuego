@@ -2052,24 +2052,23 @@ namespace CryptoNote
 DepositCommitmentKeys deriveCommitmentKeys(const std::array<uint8_t, 32>& depositSecret) {
   DepositCommitmentKeys keys;
 
-  // keyScalar = cn_fast_hash("fuego_commit_key" || depositSecret)
+  // keyScalar = hash_to_scalar("fuego_commit_key" || depositSecret)
+  // hash_to_scalar = cn_fast_hash + sc_reduce32 to always produce a valid Ed25519 scalar.
   // The 16-byte label + 32-byte secret = 48 bytes total preimage.
   static const char label[] = "fuego_commit_key";  // exactly 16 bytes
   uint8_t preimage[48];
   memcpy(preimage,      label,               16);
   memcpy(preimage + 16, depositSecret.data(), 32);
 
-  Crypto::Hash hashResult = Crypto::cn_fast_hash(preimage, sizeof(preimage));
+  // hash_to_scalar applies cn_fast_hash then sc_reduce32 (mod l), so the
+  // result is always < l and is a valid Ed25519 scalar.
+  Crypto::hash_to_scalar(preimage, sizeof(preimage),
+    reinterpret_cast<Crypto::EllipticCurveScalar&>(keys.keyScalar));
 
-  // Map hash to Ed25519 scalar: use bytes directly as secret key.
-  // secret_key_to_public_key internally applies sc_reduce32 / clamping.
-  memcpy(keys.keyScalar.data, hashResult.data, 32);
+  // This can no longer fail because hash_to_scalar guarantees a valid scalar.
+  Crypto::secret_key_to_public_key(keys.keyScalar, keys.commitKey);
 
-  if (!Crypto::secret_key_to_public_key(keys.keyScalar, keys.commitKey)) {
-    throw std::runtime_error("deriveCommitmentKeys: hash produced an invalid Ed25519 scalar");
-  }
-
-  // keyImage = H_p(commitKey) * keyScalar  — standard Fuego key image
+  // keyImage = H_p(commitKey) * keyScalar  for standard Fuego key image
   Crypto::generate_key_image(keys.commitKey, keys.keyScalar, keys.keyImage);
 
   return keys;

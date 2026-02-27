@@ -17,6 +17,7 @@
 
 #include "INode.h"
 #include "crypto/crypto.h" //for rand()
+#include <iostream>
 #include "CryptoNoteCore/Account.h"
 #include "DynamicRingSize.h"
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
@@ -827,10 +828,12 @@ namespace CryptoNote
     }
     catch (std::system_error &ec)
     {
+      std::cerr << "[doSendMultisig] system_error: " << ec.what() << std::endl;
       events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, ec.code()));
     }
-    catch (std::exception &)
+    catch (std::exception &e)
     {
+      std::cerr << "[doSendMultisig] exception: " << e.what() << std::endl;
       events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::INTERNAL_WALLET_ERROR)));
     }
 
