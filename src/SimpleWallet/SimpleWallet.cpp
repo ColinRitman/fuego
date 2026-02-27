@@ -1369,7 +1369,7 @@ bool simple_wallet::list_deposits(const std::vector<std::string> &)
     // Format unlock height
     std::string unlock_str = "";
     if (deposit.locked) {
-      unlock_str = std::to_string(deposit.unlockHeight);
+      unlock_str = (deposit.unlockHeight == 0) ? "Pending" : std::to_string(deposit.unlockHeight);
     } else if (deposit.spendingTransactionId != CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID) {
       unlock_str = "Withdrawn";
     } else {
@@ -1947,6 +1947,9 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
       std::string extraString = std::string(extra.begin(), extra.end());
 
+      CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+      WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
       CryptoNote::TransactionId txId = m_wallet->deposit(
         CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING,
         amount_per_deposit,
@@ -1956,10 +1959,20 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       );
 
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+        removeGuard.removeObserver();
         fail_msg_writer() << "";
         fail_msg_writer() << "  The ritual faltered at flame " << (i + 1) << " of 5.";
         fail_msg_writer() << "  " << i << " stake(s) were forged before it broke.";
         fail_msg_writer() << "  Check your balance and connection, then try again.";
+        return true;
+      }
+
+      std::error_code sendError = sent.wait(txId);
+      removeGuard.removeObserver();
+      if (sendError) {
+        fail_msg_writer() << "";
+        fail_msg_writer() << "  Flame " << (i + 1) << " failed: " << sendError.message();
+        fail_msg_writer() << "  " << i << " stake(s) were forged before this flame broke.";
         return true;
       }
 
@@ -2033,9 +2046,25 @@ bool simple_wallet::withdraw_deposit(const std::vector<std::string> &args)
 
     std::vector<CryptoNote::DepositId> depositIds = {deposit_id};
     uint64_t fee = m_currency.minimumFee();
-    CryptoNote::TransactionId txId = m_wallet->withdrawDeposits(depositIds, fee);
 
-    success_msg_writer(true) << "Deposit withdrawal transaction created successfully!";
+    CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+    WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
+    CryptoNote::TransactionId txId = m_wallet->withdrawDeposits(depositIds, fee);
+    if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+      removeGuard.removeObserver();
+      fail_msg_writer() << "Failed to create withdrawal transaction.";
+      return true;
+    }
+
+    std::error_code sendError = sent.wait(txId);
+    removeGuard.removeObserver();
+    if (sendError) {
+      fail_msg_writer() << "Withdrawal failed: " << sendError.message();
+      return true;
+    }
+
+    success_msg_writer(true) << "Deposit withdrawal transaction sent!";
     success_msg_writer() << "Transaction ID: " << txId;
     success_msg_writer() << "Withdrawn amount: " << m_currency.formatAmount(deposit.amount);
     //if (deposit.amount != CryptoNote::parameters::AMOUNT_TIER_0) {

@@ -601,6 +601,9 @@ namespace CryptoNote
         CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
         std::string extraString = std::string(extra.begin(), extra.end());
 
+        CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+        WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
         CryptoNote::TransactionId txId = m_wallet->deposit(
           CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING,
           amount_per_deposit,
@@ -610,10 +613,20 @@ namespace CryptoNote
         );
 
         if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+          removeGuard.removeObserver();
           fail_msg_writer() << "";
           fail_msg_writer() << "  The ritual faltered at flame " << (i + 1) << " of 5.";
           fail_msg_writer() << "  " << i << " stake(s) were forged before it broke.";
           fail_msg_writer() << "  Check your balance and connection, then try again.";
+          return true;
+        }
+
+        std::error_code sendError = sent.wait(txId);
+        removeGuard.removeObserver();
+        if (sendError) {
+          fail_msg_writer() << "";
+          fail_msg_writer() << "  Flame " << (i + 1) << " failed: " << sendError.message();
+          fail_msg_writer() << "  " << i << " stake(s) were forged before this flame broke.";
           return true;
         }
 
