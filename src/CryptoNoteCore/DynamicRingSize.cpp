@@ -52,8 +52,19 @@ size_t DynamicRingSizeCalculator::calculateOptimalRingSize(
     }
   }
 
-  // If no approved ring sizes are achievable, reject transaction
-  // Return 0 to indicate transaction should be rejected and optimizer recommended
+  // No approved ring size ({18,15,12,10,8}) is achievable with current decoy pool.
+  // On testnet (minRingSize == 0) allow any ring size so fresh chains can bootstrap.
+  if (minRingSize == 0) {
+    size_t available = 0;
+    for (const auto& output : availableOutputs) {
+      available = std::max(available, output.availableCount);
+    }
+    if (available > 0) {
+      return std::min(available, maxRingSize);
+    }
+  }
+
+  // Mainnet: reject — insufficient decoys for any approved ring size.
   return 0;
 }
 

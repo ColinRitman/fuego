@@ -95,7 +95,8 @@ public:
   size_t minMixin() const { return m_minMixin; }
   size_t minMixin(uint8_t blockMajorVersion) const {
     if (blockMajorVersion >= BLOCK_MAJOR_VERSION_10) {
-      return parameters::MIN_TX_MIXIN_SIZE_V10; // Maxmix min: 8 starting from BMV10
+      // Testnet allows mixin=0 so fresh chains can bootstrap before the decoy pool fills up
+      return m_testnet ? 0 : parameters::MIN_TX_MIXIN_SIZE_V10;
     } else if (blockMajorVersion >= BLOCK_MAJOR_VERSION_7) {
       return parameters::MIN_TX_MIXIN_SIZE_V2;  // Legacy mixin: 2 for BMV7-BMV9
     } else {
