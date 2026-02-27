@@ -554,6 +554,9 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("register_alias", boost::bind(&simple_wallet::register_alias, this, boost::arg<1>()), "register_alias <alias> - Register an @ alias (8 chars [a-z0-9&], costs 1 XFG). EFier aliases [A-Z0-9&] via elderking_ceremony.");
   m_consoleHandler.setHandler("lookup_alias", boost::bind(&simple_wallet::lookup_alias, this, boost::arg<1>()), "lookup_alias <alias_or_address> - Look up an @ alias by name or wallet address");
   m_consoleHandler.setHandler("list_aliases", boost::bind(&simple_wallet::list_aliases, this, boost::arg<1>()), "list_aliases - List all registered @ aliases on the network");
+  // Hidden command — empty usage string keeps it out of help output.
+  // Only shows content to registered Elderfiers.
+  m_consoleHandler.setHandler("elderfier_panel", boost::bind(&simple_wallet::elderfier_panel, this, boost::arg<1>()), "");
 }
 
 bool simple_wallet::show_dust(const std::vector<std::string>& args) {
@@ -1944,6 +1947,20 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       elderfierDeposit.signature.clear();
       elderfierDeposit.isSlashable        = true;
 
+      // First flame also carries the 0xEA alias registration so the daemon
+      // registers the alias in AliasIndex with addressHash = cn_fast_hash(walletAddress).
+      // This makes lookup_alias and the "already registered" ceremony check work correctly.
+      if (i == 0) {
+        CryptoNote::TransactionExtraAliasRegistration aliasReg;
+        aliasReg.alias = alias;
+        aliasReg.aliasHash = Crypto::cn_fast_hash(alias.data(), alias.size());
+        std::string walletAddr = m_wallet->getAddress();
+        aliasReg.addressHash = Crypto::cn_fast_hash(walletAddr.data(), walletAddr.size());
+        aliasReg.ownerAddress = "";  // privacy — never stored on-chain
+        aliasReg.aliasType = 0;     // Elderfier
+        CryptoNote::addAliasToExtra(extra, aliasReg);
+      }
+
       CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
       std::string extraString = std::string(extra.begin(), extra.end());
 
@@ -2005,6 +2022,131 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     fail_msg_writer() << "Error during Elderfire ceremony: " << e.what();
     return true;
   }
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
+{
+  // ── Gate: must be a registered Elderfier ────────────────────────────────
+  std::string myAddress = m_wallet->getAddress();
+  std::string registeredAlias;
+  uint32_t registeredBlock = 0;
+
+  try {
+    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+    COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request addrReq;
+    COMMAND_RPC_GET_ALIAS_BY_ADDRESS::response addrRes;
+    addrReq.address = myAddress;
+    invokeJsonCommand(httpClient, "/get_alias_by_address", addrReq, addrRes);
+
+    if (!addrRes.found || addrRes.alias_type != 0) {
+      fail_msg_writer() << "Command not found.";
+      return true;
+    }
+    registeredAlias = addrRes.alias;
+    registeredBlock = addrRes.registered_block;
+  } catch (const ConnectException&) {
+    printConnectionError();
+    return true;
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Error: " << e.what();
+    return true;
+  }
+
+  // ── Header ───────────────────────────────────────────────────────────────
+  success_msg_writer() << "";
+  success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+  success_msg_writer() << "║   ΞLDERFIER PANEL  ·  @" << std::left << std::setw(36) << registeredAlias << "║";
+  success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+  success_msg_writer() << "";
+  success_msg_writer() << "  Alias:          @" << registeredAlias;
+  success_msg_writer() << "  Registered:     Block " << registeredBlock;
+  success_msg_writer() << "";
+
+  // ── Stakes ───────────────────────────────────────────────────────────────
+  success_msg_writer() << "  ── ELDERFIRE STAKES (5 × 800 XFG) ──────────────────────";
+  success_msg_writer() << "";
+
+  size_t depositCount = m_wallet->getDepositCount();
+  int stakeCount = 0;
+  uint64_t totalStaked = 0;
+
+  for (CryptoNote::DepositId id = 0; id < depositCount; ++id) {
+    CryptoNote::Deposit deposit;
+    if (!m_wallet->getDeposit(id, deposit)) continue;
+    if (deposit.depositType != CryptoNote::Deposit::Type::ELDERFIER) continue;
+
+    ++stakeCount;
+    totalStaked += deposit.amount;
+
+    std::string statusStr = deposit.locked ? "Locked" :
+      (deposit.spendingTransactionId == CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID
+        ? "Unlocked" : "Withdrawn");
+    std::string heightStr = (deposit.unlockHeight == 0) ? "Pending" : std::to_string(deposit.unlockHeight);
+
+    success_msg_writer() << "  Stake #" << stakeCount << ":  "
+      << m_currency.formatAmount(deposit.amount) << " XFG"
+      << "  |  " << statusStr
+      << "  |  Block: " << (deposit.height > 0 ? std::to_string(deposit.height) : "Pending")
+      << "  |  " << Common::podToHex(deposit.transactionHash).substr(0, 16) << "...";
+  }
+
+  if (stakeCount == 0) {
+    fail_msg_writer() << "  No ELDERFIER stakes found in this wallet.";
+  } else {
+    success_msg_writer() << "";
+    success_msg_writer() << "  Stakes:         " << stakeCount << " / 5";
+    success_msg_writer() << "  Total staked:   " << m_currency.formatAmount(totalStaked) << " XFG";
+  }
+  success_msg_writer() << "";
+
+  // ── Consensus + network (optional, requires daemon) ──────────────────────
+  try {
+    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+
+    COMMAND_RPC_GET_ELDERFIER_CONSENSUS_STATUS::request consReq;
+    COMMAND_RPC_GET_ELDERFIER_CONSENSUS_STATUS::response consRes;
+    invokeJsonCommand(httpClient, "/elderfier_consensus_status", consReq, consRes);
+
+    success_msg_writer() << "  ── CURRENT CONSENSUS ROUND ─────────────────────────────";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Merkle root:    " << consRes.current_merkle_root.substr(0, 32) << "...";
+    success_msg_writer() << "  Block height:   " << consRes.current_block_height;
+    success_msg_writer() << "  Signatures:     " << consRes.elderfiers_signed
+                         << " / " << consRes.total_registered_elderfiers
+                         << "  (" << static_cast<int>(consRes.consensus_percentage) << "%)";
+    success_msg_writer() << "  Threshold met:  " << (consRes.meets_69_percent ? "YES" : "NO — awaiting signatures");
+    success_msg_writer() << "  Claims ready:   " << (consRes.ready_for_user_claim ? "YES" : "NO")
+                         << "  (" << consRes.blocks_until_next_flush << " blocks to next flush)";
+    if (!consRes.signed_by.empty()) {
+      std::string ids;
+      for (auto eid : consRes.signed_by) ids += std::to_string(eid) + " ";
+      success_msg_writer() << "  Signed by IDs:  [" << ids << "]";
+    }
+    success_msg_writer() << "";
+
+    COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::request netReq;
+    COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::response netRes;
+    invokeJsonCommand(httpClient, "/elderfier_network_stats", netReq, netRes);
+
+    success_msg_writer() << "  ── NETWORK ─────────────────────────────────────────────";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Active EFiers:  " << netRes.total_registered_elderfiers;
+    success_msg_writer() << "  Fees in escrow: " << m_currency.formatAmount(netRes.total_fees_pending_in_escrow) << " XFG";
+    success_msg_writer() << "  Fees paid out:  " << m_currency.formatAmount(netRes.total_fees_distributed_all_time) << " XFG";
+    success_msg_writer() << "";
+
+  } catch (const ConnectException&) {
+    fail_msg_writer() << "  (daemon offline — consensus data unavailable)";
+    success_msg_writer() << "";
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "  (consensus error: " << e.what() << ")";
+    success_msg_writer() << "";
+  }
+
+  success_msg_writer() << "  Guard the Realm, King " << registeredAlias << ".";
+  success_msg_writer() << "";
+  return true;
 }
 
 //----------------------------------------------------------------------------------------------------

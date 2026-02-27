@@ -134,6 +134,7 @@ namespace CryptoNote
     // USER-FACING: Proof generation from deposits
     // Users generate STARKs from deposit transactions for L2 claims
     bool generate_proof(const std::vector<std::string> &args);
+    bool elderfier_panel(const std::vector<std::string> &args);
 
     bool ask_wallet_create_if_needed();
     std::string resolveAlias(const std::string& aliasUrl);

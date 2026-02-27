@@ -175,6 +175,7 @@ std::string ConsoleHandler::getUsage() const {
       return a.first.size() < b.first.size(); })->first.size();
 
   for (auto& x : m_handlers) {
+    if (x.second.second.empty()) continue;  // hidden commands (no usage string)
     ss << std::left << std::setw(maxlen + 3) << x.first << x.second.second << std::endl;
   }
 

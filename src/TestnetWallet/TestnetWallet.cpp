@@ -50,6 +50,7 @@
 #include "Rpc/HttpClient.h"
 #include "CryptoNoteCore/CryptoNoteTools.h"
 #include "CryptoNoteCore/AliasIndex.h"
+#include "CryptoNoteCore/TransactionExtra.h"
 
 namespace CryptoNote
 {
@@ -597,6 +598,17 @@ namespace CryptoNote
         elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(), alias.begin(), alias.end());
         elderfierDeposit.signature.clear();
         elderfierDeposit.isSlashable        = true;
+
+        if (i == 0) {
+          CryptoNote::TransactionExtraAliasRegistration aliasReg;
+          aliasReg.alias = alias;
+          aliasReg.aliasHash = Crypto::cn_fast_hash(alias.data(), alias.size());
+          std::string walletAddr = m_wallet->getAddress();
+          aliasReg.addressHash = Crypto::cn_fast_hash(walletAddr.data(), walletAddr.size());
+          aliasReg.ownerAddress = "";
+          aliasReg.aliasType = 0;
+          CryptoNote::addAliasToExtra(extra, aliasReg);
+        }
 
         CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
         std::string extraString = std::string(extra.begin(), extra.end());
