@@ -330,34 +330,21 @@ namespace CryptoNote
       DepositId depositId,
       std::string &transactionHash)
   {
-
     throwIfNotInitialized();
     throwIfTrackingMode();
     throwIfStopped();
 
-    /* Check for the existance of the deposit */
-    if (m_deposits.size() <= depositId)
-    {
+    if (m_deposits.size() <= depositId) {
       throw std::system_error(make_error_code(CryptoNote::error::DEPOSIT_DOESNOT_EXIST));
     }
 
-    /* Get the details of the deposit, and the address */
     Deposit deposit = getDeposit(depositId);
     WalletTransfer firstTransfer = getTransactionTransfer(deposit.creatingTransactionId, 0);
     std::string address = firstTransfer.address;
 
-    uint64_t blockCount = getBlockCount();
-
-    /* Is the deposit unlocked */
-    if (deposit.unlockHeight > blockCount)
-    {
+    if (deposit.unlockHeight > getBlockCount()) {
       throw std::system_error(make_error_code(CryptoNote::error::DEPOSIT_LOCKED));
     }
-
-    /* Create the transaction */
-    std::unique_ptr<ITransaction> transaction = createTransaction();
-
-    std::vector<TransactionOutputInformation> selectedTransfers;
 
     const auto &wallet = getWalletRecord(address);
     ITransfersContainer *container = wallet.container;
@@ -365,60 +352,139 @@ namespace CryptoNote
     ITransfersContainer::TransferState state;
     TransactionOutputInformation transfer;
 
-    uint64_t foundMoney = 0;
-    foundMoney += deposit.amount;
-    m_logger(DEBUGGING, WHITE) << "found money " << foundMoney;
-
     container->getTransfer(deposit.transactionHash, deposit.outputInTransaction, transfer, state);
 
-    if (state != ITransfersContainer::TransferState::TransferAvailable)
-    {
+    if (state != ITransfersContainer::TransferState::TransferAvailable) {
       throw std::system_error(make_error_code(CryptoNote::error::DEPOSIT_LOCKED));
     }
 
-    selectedTransfers.push_back(std::move(transfer));
-    m_logger(DEBUGGING, BRIGHT_WHITE) << "Withdraw deposit, id " << depositId << " found transfer for " << transfer.amount << " with a global output index of " << transfer.globalOutputIndex;
+    m_logger(DEBUGGING, BRIGHT_WHITE) << "Withdraw deposit id=" << depositId
+      << " amount=" << deposit.amount
+      << " globalOutputIndex=" << transfer.globalOutputIndex
+      << " type=" << static_cast<int>(transfer.type);
 
-    std::vector<MultisignatureInput> inputs = prepareMultisignatureInputs(selectedTransfers);
+    std::unique_ptr<ITransaction> transaction = createTransaction();
 
-    for (const auto &input : inputs)
-    {
-      transaction->addInput(input);
-    }
-
-    std::vector<uint64_t> outputAmounts = split(foundMoney - 10, parameters::DEFAULT_DUST_THRESHOLD);
-
-    for (auto amount : outputAmounts)
-    {
+    // Outputs: deposit amount minus fee, split back to spendable key outputs.
+    const uint64_t fee = m_currency.minimumFee();
+    std::vector<uint64_t> outputAmounts = split(deposit.amount - fee, m_currency.defaultDustThreshold());
+    for (auto amount : outputAmounts) {
       transaction->addOutput(amount, account.address);
     }
-
     transaction->setUnlockTime(0);
-    Crypto::SecretKey transactionSK;
-    transaction->getTransactionSecretKey(transactionSK);
 
-    /* Add the transaction extra */
-    std::vector<WalletMessage> messages;
-    Crypto::PublicKey publicKey = transaction->getTransactionPublicKey();
-    CryptoNote::KeyPair kp = {publicKey, transactionSK};
-    for (size_t i = 0; i < messages.size(); ++i)
-    {
-      CryptoNote::AccountPublicAddress addressBin;
-      if (!m_currency.parseAccountAddressString(messages[i].address, addressBin))
-        continue;
-      CryptoNote::tx_extra_message tag;
-      if (!tag.encrypt(i, messages[i].message, &addressBin, kp))
-        continue;
-      BinaryArray ba;
-      toBinaryArray(tag, ba);
-      ba.insert(ba.begin(), TX_EXTRA_MESSAGE_TAG);
-      transaction->appendExtra(ba);
-    }
+    if (transfer.type == TransactionTypes::OutputType::Commitment) {
+      // --- v10+ ring-signature commitment withdrawal ---
 
-    assert(inputs.size() == selectedTransfers.size());
-    for (size_t i = 0; i < inputs.size(); ++i)
-    {
-      transaction->signInputMultisignature(i, selectedTransfers[i].transactionPublicKey, selectedTransfers[i].outputInTransaction, account);
+      // Retrieve keyScalar stored at deposit creation time.
+      Crypto::SecretKey keyScalar;
+      uint64_t storedAmount;
+      std::vector<uint8_t> meta;
+      std::string txHashHex = Common::podToHex(deposit.transactionHash);
+
+      if (!getBurnDepositSecret(txHashHex, keyScalar, storedAmount, meta)) {
+        throw std::system_error(make_error_code(CryptoNote::error::DEPOSIT_LOCKED),
+          "Commitment deposit secret not found — deposit may be a HEAT burn or secret was lost");
+      }
+
+      // Re-derive commitKey and keyImage from keyScalar.
+      Crypto::PublicKey commitKey;
+      if (!Crypto::secret_key_to_public_key(keyScalar, commitKey)) {
+        throw std::system_error(make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR),
+          "Failed to derive commitment public key from keyScalar");
+      }
+      Crypto::KeyImage keyImage;
+      Crypto::generate_key_image(commitKey, keyScalar, keyImage);
+
+      // Fetch ring decoys from daemon.
+      std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry> decoys;
+      System::Event requestFinished(m_dispatcher);
+      std::error_code nodeError;
+
+      throwIfStopped();
+      m_node.getRandomCommitmentOutsForAmount(deposit.amount, m_currency.maxMixin(), decoys,
+        [&requestFinished, &nodeError, this](std::error_code ec) {
+          nodeError = ec;
+          this->m_dispatcher.remoteSpawn(std::bind(asyncRequestCompletion, std::ref(requestFinished)));
+        });
+      requestFinished.wait();
+
+      if (nodeError) {
+        throw std::system_error(nodeError);
+      }
+
+      // Remove any decoy that duplicates the real output's global index.
+      decoys.erase(std::remove_if(decoys.begin(), decoys.end(),
+        [&](const CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry& d) {
+          return d.global_amount_index == transfer.globalOutputIndex;
+        }), decoys.end());
+
+      const size_t numDecoys    = std::min(decoys.size(), static_cast<size_t>(m_currency.maxMixin() - 1));
+      const size_t actualRing   = numDecoys + 1;
+      const size_t realPos      = Crypto::rand<size_t>() % actualRing;
+
+      std::vector<uint32_t>              absIndices;
+      std::vector<const Crypto::PublicKey*> ringKeys;
+      absIndices.reserve(actualRing);
+      ringKeys.reserve(actualRing);
+
+      size_t decoyPos = 0;
+      for (size_t slot = 0; slot < actualRing; ++slot) {
+        if (slot == realPos) {
+          absIndices.push_back(transfer.globalOutputIndex);
+          ringKeys.push_back(&commitKey);
+        } else {
+          absIndices.push_back(decoys[decoyPos].global_amount_index);
+          ringKeys.push_back(&decoys[decoyPos].commit_key);
+          ++decoyPos;
+        }
+      }
+
+      // Sort ring by ascending global index; track new real position.
+      std::vector<size_t> order(actualRing);
+      std::iota(order.begin(), order.end(), 0);
+      std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+        return absIndices[a] < absIndices[b];
+      });
+      size_t sortedRealPos = 0;
+      std::vector<uint32_t>              sortedAbs(actualRing);
+      std::vector<const Crypto::PublicKey*> sortedKeys(actualRing);
+      for (size_t s = 0; s < actualRing; ++s) {
+        sortedAbs[s]  = absIndices[order[s]];
+        sortedKeys[s] = ringKeys[order[s]];
+        if (order[s] == realPos) sortedRealPos = s;
+      }
+
+      // Delta-encode absolute indices to relative offsets.
+      std::vector<uint32_t> relOffsets(actualRing);
+      relOffsets[0] = sortedAbs[0];
+      for (size_t s = 1; s < actualRing; ++s) {
+        relOffsets[s] = sortedAbs[s] - sortedAbs[s - 1];
+      }
+
+      TransactionInputCommitmentSpend csInput;
+      csInput.amount        = deposit.amount;
+      csInput.outputIndexes = relOffsets;
+      csInput.keyImage      = keyImage;
+      transaction->addInput(csInput);
+
+      KeyPair commitmentKeyPair{ commitKey, keyScalar };
+      transaction->signInputCommitmentSpend(0, sortedKeys, commitmentKeyPair, sortedRealPos);
+
+      m_logger(DEBUGGING, BRIGHT_GREEN) << "Commitment withdrawal ring size=" << actualRing
+        << " realPos=" << sortedRealPos;
+
+    } else {
+      // --- Legacy MultisignatureInput withdrawal path (pre-v10 deposits) ---
+      std::vector<TransactionOutputInformation> selectedTransfers = { transfer };
+      std::vector<MultisignatureInput> inputs = prepareMultisignatureInputs(selectedTransfers);
+      for (const auto &input : inputs) {
+        transaction->addInput(input);
+      }
+      for (size_t i = 0; i < inputs.size(); ++i) {
+        transaction->signInputMultisignature(i, selectedTransfers[i].transactionPublicKey,
+                                              selectedTransfers[i].outputInTransaction, account);
+      }
     }
 
     transactionHash = Common::podToHex(transaction->getTransactionHash());
