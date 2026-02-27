@@ -1104,9 +1104,10 @@ double Currency::getBurnPercentage() const {
 	static uint64_t calculateLWMA(
 		const std::vector<uint64_t>& timestamps,
 		const std::vector<difficulty_type>& cumulativeDifficulties,
-		uint64_t N,  // window size
-		uint64_t T,  // target time
-		uint64_t minDifficulty) {
+		uint64_t N,            // window size
+		uint64_t T,            // target time
+		uint64_t minDifficulty,
+		uint64_t minSolveTime = 0) {  // lower clamp: 0 = disabled; use T/8 for testnet
 
 		if (timestamps.size() < 2) return minDifficulty;
 
@@ -1127,8 +1128,11 @@ double Currency::getBurnPercentage() const {
 
 			uint64_t solveTime = this_timestamp - previous_timestamp;
 
-			// Clamp solve time (max 6*T as in original LWMA)
+			// Clamp solve time: upper bound 6*T (original LWMA-1), lower bound minSolveTime.
+			// The lower clamp (T/8 on testnet) prevents burst-mined 1-6s blocks from
+			// spiking the short window and creating unnecessary difficulty oscillation.
 			if (solveTime > 6 * T) solveTime = 6 * T;
+			if (minSolveTime > 0 && solveTime < minSolveTime) solveTime = minSolveTime;
 
 			L += i * solveTime;
 			previous_timestamp = this_timestamp;
@@ -1165,23 +1169,33 @@ double Currency::getBurnPercentage() const {
 		const uint64_t T = difficultyTarget();
 		const uint64_t minDifficulty = isTestnet() ? 1000 : 1000000;
 
-		const uint64_t N_short  = isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_SHORT  : parameters::MWLWMA_N_SHORT;
-		const uint64_t N_medium = isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_MEDIUM : parameters::MWLWMA_N_MEDIUM;
-		const uint64_t N_long   = isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_LONG   : parameters::MWLWMA_N_LONG;
+		// Testnet activates updated N/W/clamp params at TESTNET_MWLWMA_V2_HEIGHT (800).
+		// Below that height the original params are used so blocks 43-799 re-validate cleanly.
+		// Mainnet always uses the configured params (no v10 blocks exist yet at launch).
+		const bool useV2 = !isTestnet() || (height >= CryptoNote::TESTNET_MWLWMA_V2_HEIGHT);
 
-		const uint64_t W_short  = isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_SHORT  : parameters::MWLWMA_W_SHORT;
-		const uint64_t W_medium = isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_MEDIUM : parameters::MWLWMA_W_MEDIUM;
-		const uint64_t W_long   = isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_LONG   : parameters::MWLWMA_W_LONG;
+		const uint64_t N_short  = (isTestnet() && !useV2) ? 9  : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_SHORT  : parameters::MWLWMA_N_SHORT);
+		const uint64_t N_medium = (isTestnet() && !useV2) ? 33 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_MEDIUM : parameters::MWLWMA_N_MEDIUM);
+		const uint64_t N_long   = (isTestnet() && !useV2) ? 69 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_LONG   : parameters::MWLWMA_N_LONG);
+
+		const uint64_t W_short  = (isTestnet() && !useV2) ? 33 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_SHORT  : parameters::MWLWMA_W_SHORT);
+		const uint64_t W_medium = (isTestnet() && !useV2) ? 34 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_MEDIUM : parameters::MWLWMA_W_MEDIUM);
+		const uint64_t W_long   = (isTestnet() && !useV2) ? 33 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_LONG   : parameters::MWLWMA_W_LONG);
 
 		// Sanity checks
 		if (timestamps.size() != cumulativeDifficulties.size() || timestamps.size() < 3) {
 			return minDifficulty;
 		}
 
+		// Lower solve-time clamp: active on testnet v2 params only.
+		// Prevents burst-mined 1-6s blocks from spiking the short window and causing oscillation.
+		// Disabled on mainnet (multi-miner competition smooths variance naturally).
+		const uint64_t minSolveTime = (isTestnet() && useV2) ? T / 8 : 0;
+
 		// Calculate LWMA for each window
-		uint64_t D_short = calculateLWMA(timestamps, cumulativeDifficulties, N_short, T, minDifficulty);
-		uint64_t D_medium = calculateLWMA(timestamps, cumulativeDifficulties, N_medium, T, minDifficulty);
-		uint64_t D_long = calculateLWMA(timestamps, cumulativeDifficulties, N_long, T, minDifficulty);
+		uint64_t D_short  = calculateLWMA(timestamps, cumulativeDifficulties, N_short,  T, minDifficulty, minSolveTime);
+		uint64_t D_medium = calculateLWMA(timestamps, cumulativeDifficulties, N_medium, T, minDifficulty, minSolveTime);
+		uint64_t D_long   = calculateLWMA(timestamps, cumulativeDifficulties, N_long,   T, minDifficulty, minSolveTime);
 
 		// Weighted average (integer math to avoid floating point)
 		uint64_t next_D = (D_short * W_short + D_medium * W_medium + D_long * W_long) / (W_short + W_medium + W_long);
