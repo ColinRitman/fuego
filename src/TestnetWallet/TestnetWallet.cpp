@@ -142,7 +142,7 @@ namespace CryptoNote
       success_msg_writer() << "Confirm? (1) OK  (2) No ";
 
       std::string confirm;
-      std::getline(std::cin, confirm);
+      m_consoleHandler.readLine(confirm);
 
       if (confirm != "1" && confirm != "OK" && confirm != "Ok" && confirm != "ok") {
         success_msg_writer() << "Cancelled.";
@@ -165,10 +165,22 @@ namespace CryptoNote
       std::string extraString = std::string(extra.begin(), extra.end());
 
       success_msg_writer() << "Creating TEST burn (HEAT): " << m_currency.formatAmount(burn_amount) << " TEST";
+
+      CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+      WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
       CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
 
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
         fail_msg_writer() << "Sending deposit transaction failed";
+        return true;
+      }
+
+      std::error_code sendError = sent.wait(txId);
+      removeGuard.removeObserver();
+
+      if (sendError) {
+        fail_msg_writer() << "Burn transaction failed: " << sendError.message();
         return true;
       }
 
@@ -266,7 +278,7 @@ namespace CryptoNote
       success_msg_writer() << "Confirm? (1) OK  (2) NO  ";
 
       std::string confirm;
-      std::getline(std::cin, confirm);
+      m_consoleHandler.readLine(confirm);
 
       if (confirm != "1" && confirm != "OK" && confirm != "Ok" && confirm != "ok") {
         success_msg_writer() << "Cancelled.";
@@ -290,10 +302,22 @@ namespace CryptoNote
       std::string extraString = std::string(extra.begin(), extra.end());
 
       success_msg_writer() << "Creating COLD transaction: " << m_currency.formatAmount(cold_amount) << " XFG for " << term_label;
+
+      CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+      WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
       CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee, extraString, 0);
 
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
         fail_msg_writer() << "Sending deposit transaction failed";
+        return true;
+      }
+
+      std::error_code sendError = sent.wait(txId);
+      removeGuard.removeObserver();
+
+      if (sendError) {
+        fail_msg_writer() << "COLD transaction failed: " << sendError.message();
         return true;
       }
 
@@ -372,7 +396,7 @@ namespace CryptoNote
     success_msg_writer() << "  Type 'yes' to step forward, or Enter to walk away: ";
 
     std::string acceptance;
-    std::getline(std::cin, acceptance);
+    m_consoleHandler.readLine(acceptance);
     if (acceptance.empty() || (acceptance[0] != 'y' && acceptance[0] != 'Y')) {
       success_msg_writer() << "";
       success_msg_writer() << "  The Ælder Council watches. Return when you are ready.";
@@ -404,7 +428,7 @@ namespace CryptoNote
     std::string alias;
     while (true) {
       success_msg_writer() << "  Enter your Ælder King name: ";
-      std::getline(std::cin, alias);
+      m_consoleHandler.readLine(alias);
       // Trim whitespace
       while (!alias.empty() && std::isspace((unsigned char)alias.front())) alias.erase(alias.begin());
       while (!alias.empty() && std::isspace((unsigned char)alias.back()))  alias.pop_back();
@@ -454,7 +478,7 @@ namespace CryptoNote
     success_msg_writer() << "  To seal these vows, enter your Ælder King name again: ";
 
     std::string confirmAlias;
-    std::getline(std::cin, confirmAlias);
+    m_consoleHandler.readLine(confirmAlias);
     while (!confirmAlias.empty() && std::isspace((unsigned char)confirmAlias.front())) confirmAlias.erase(confirmAlias.begin());
     while (!confirmAlias.empty() && std::isspace((unsigned char)confirmAlias.back()))  confirmAlias.pop_back();
 

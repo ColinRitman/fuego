@@ -66,7 +66,12 @@ public:
 
   void start(bool startThread = true, const std::string& prompt = "", Console::Color promptColor = Console::Color::Default);
   void stop();
-  void wait(); 
+  void wait();
+
+  // Read one line of user input from within a command handler.
+  // Uses the same queue as handlerThread so there is no race with
+  // AsyncConsoleReader::consoleThread (which owns std::cin).
+  bool readLine(std::string& line) { return m_consoleReader.getline(line); }
 
 private:
 
