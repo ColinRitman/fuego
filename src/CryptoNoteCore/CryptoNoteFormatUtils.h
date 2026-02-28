@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -18,12 +18,12 @@
 #pragma once
 
 #include <boost/utility/value_init.hpp>
-#include <CryptoNote.h>
+#include "../../include/CryptoNote.h"
 #include "CryptoNoteBasic.h"
 #include "CryptoNoteSerialization.h"
 
-#include "Serialization/BinaryOutputStreamSerializer.h"
-#include "Serialization/BinaryInputStreamSerializer.h"
+#include "../Serialization/BinaryOutputStreamSerializer.h"
+#include "../Serialization/BinaryInputStreamSerializer.h"
 
 namespace Logging {
 class ILogger;

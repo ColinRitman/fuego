@@ -1,4 +1,5 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2020-2026 Elderfire Privacy Group
 //
 // This file is part of Fuego.
 //
@@ -14,9 +15,9 @@
 
 #pragma once
 
-#include "Common/JsonValue.h"
-#include "crypto/crypto.h"
-#include "Serialization/ISerializer.h"
+#include "../Common/JsonValue.h"
+#include "../crypto/crypto.h"
+#include "../Serialization/ISerializer.h"
 
 namespace CryptoNote {
 

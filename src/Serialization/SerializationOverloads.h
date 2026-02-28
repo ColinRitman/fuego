@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -31,7 +31,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <stdexcept>
-#include <parallel_hashmap/phmap.h>
+#include "../../external/parallel_hashmap/phmap.h"
 
 using phmap::flat_hash_map;
 using phmap::parallel_flat_hash_map;

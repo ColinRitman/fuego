@@ -64,7 +64,7 @@ namespace CryptoNote
 		const uint64_t TEST_BANK_FEE_TIER_1 = UINT64_C(8000);   /* 0.1% of 0.8 TEST (8,000,000 atomic) = 8,000 atomic */
 		const uint64_t TEST_BANK_FEE_TIER_2 = UINT64_C(80000);  /* 0.1% of 8 TEST (80,000,000 atomic) = 80,000 atomic */
 		const uint64_t TEST_BANK_FEE_TIER_3 = UINT64_C(800000); /* 0.1% of 80 TEST (800,000,000 atomic) = 800,000 atomic */
-
+///remove alias option for regular network users
 		// Fire Alias registration fee: 1 XFG for regular users, free for Elderfiers
 		const uint64_t ALIAS_REGISTRATION_FEE = COIN;  /* 1 XFG sent to Fuego Development Fund */
 
@@ -280,21 +280,15 @@ namespace CryptoNote
 		};
 
  	// TESTNET DEFAULTS
- 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101c5860468e4e6e7ff4ec84f37846dac2927ed1635072ff5c12783099686478d83";
+ 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd08807121015a534c87389da289c362d6370bd6f455af7f89af836f6687c2a336762eab2876";
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */
 
-//	const uint64_t TESTNET_BURN_AMOUNT_800 =   8000000000;  //  800 TEST (8,000,000 atomic units)
-
-
 	const uint32_t TESTNET_DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
-   // const uint32_t TESTNET_DEPOSIT_TERM_YIELD = TESTNET_COLD_MIN_TERM;
 
-
-
-	//__________________________________________________________________________________________________________________________
+//__________________________________________________________________________________________________________________________
                                      	// TESTNET MWLWMA parameters
 //--------------------------------------------------------------------------------------------------------------------------
 	// Analysis of testnet blocks 43-596 identified three issues:
@@ -310,7 +304,7 @@ namespace CryptoNote
 		const uint64_t TESTNET_MWLWMA_W_SHORT                                = 20;   // 20% weight — reduced; burst-mining spikes were distorting difficulty
 		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 55;   // 55% weight — primary stability anchor
 		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 25;   // 25% weight — trend smoothing
-		const uint32_t TESTNET_MWLWMA_V2_HEIGHT                              = 42;  // Activation height for v2 params; old params used below this to preserve existing block validation
+		const uint32_t TESTNET_MWLWMA_V2_HEIGHT                              = 21;  // Activation height for v2 params; old params used below this to preserve existing block validation
 
  	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 

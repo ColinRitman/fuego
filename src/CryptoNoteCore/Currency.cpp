@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -16,7 +16,6 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "Currency.h"
-#include "AdaptiveDifficulty.h"
 #include <cctype>
 #include <numeric>
 #include <boost/algorithm/string/trim.hpp>
@@ -25,7 +24,7 @@
 #include "../Common/Base58.h"
 #include "../Common/int-util.h"
 #include "../Common/StringTools.h"
-#include "CryptoNoteConfig.h"
+#include "../CryptoNoteConfig.h"
 #include "Account.h"
 #include "CryptoNoteBasicImpl.h"
 #include "CryptoNoteFormatUtils.h"
@@ -86,13 +85,13 @@ namespace CryptoNote
 			m_upgradeHeightV4 = 4;
 			m_upgradeHeightV5 = 5;
 			m_upgradeHeightV6 = 6;
-			m_upgradeHeightV7 = 7;
-			m_upgradeHeightV8 = 8;
-			m_upgradeHeightV9 = 9;
-			m_upgradeHeightV10 = 42;
+			m_upgradeHeightV7 = 17;
+			m_upgradeHeightV8 = 18;
+			m_upgradeHeightV9 = 19;
+			m_upgradeHeightV10 = 20;
 
       m_blocksFileName = "testnet_" + m_blocksFileName;
-      m_blocksCacheFileName = "testnet_" + m_blocksCacheFileName;
+      m_blocksCacheFileName = "tesnet_" + m_blocksCacheFileName; // find 2x testnet_
       m_blockIndexesFileName = "testnet_" + m_blockIndexesFileName;
       m_txPoolFileName = "testnet_" + m_txPoolFileName;
       m_blockchinIndicesFileName = "testnet_" + m_blockchinIndicesFileName;
@@ -127,7 +126,7 @@ namespace CryptoNote
     m_genesisBlock.nonce = 70;
     if (m_testnet)
     {
-      m_genesisBlock.nonce = 72; // New nonce for testnet genesis
+      m_genesisBlock.nonce = 76; // New nonce for testnet genesis
     }
 
     //miner::find_nonce_for_given_block(bl, 1, 0);

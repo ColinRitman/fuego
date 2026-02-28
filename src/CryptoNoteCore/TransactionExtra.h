@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -22,9 +22,9 @@
 #include <vector>
 #include <boost/variant.hpp>
 
-#include <CryptoNote.h>
+#include "../../include/CryptoNote.h"
 #include "ProofStructures.h"
-#include "../include/EldernodeIndexTypes.h"
+#include "../../include/EldernodeIndexTypes.h"
 
 #define TX_EXTRA_PADDING_MAX_COUNT          255
 #define TX_EXTRA_NONCE_MAX_COUNT            255

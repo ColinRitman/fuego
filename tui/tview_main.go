@@ -698,8 +698,8 @@ func uiWithdrawForm() {
 			id := depID.GetText()
 			if id == "" { msgBox("Enter a deposit ID"); return }
 			go func() {
-				lines := walletExec("withdraw_deposit "+id, 5)
-				appState.app.QueueUpdateDraw(func() { msgBox("Withdraw Result\n\n" + strings.Join(lines, "\n")) })
+				lines := walletExec("withdraw_cold "+id, 5)
+				appState.app.QueueUpdateDraw(func() { msgBox("Withdrawal Result\n\n" + strings.Join(lines, "\n")) })
 			}()
 		}).
 		AddButton("Cancel", func() { appState.pages.SwitchToPage("main") })

@@ -956,8 +956,18 @@ namespace CryptoNote
         commitmentKeyPair.publicKey  = commitKeys.commitKey;
         commitmentKeyPair.secretKey  = commitKeys.keyScalar;
 
+        // Filter decoys: exclude the real output's global index to prevent duplicate
+        // ring members (daemon returns all outputs including the real when pool is small).
+        std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry> filteredDecoys;
+        filteredDecoys.reserve(decoys.size());
+        for (const auto& d : decoys) {
+          if (d.global_amount_index != static_cast<uint32_t>(transfer.globalOutputIndex)) {
+            filteredDecoys.push_back(d);
+          }
+        }
+
         // Decide how many decoys we can actually use (capped at ringSize - 1, leaving 1 slot for real).
-        const size_t numDecoys = std::min(decoys.size(), ringSize - 1);
+        const size_t numDecoys = std::min(filteredDecoys.size(), ringSize - 1);
         const size_t actualRingSize = numDecoys + 1;
 
         // Pick a random position for the real spend within the ring.
@@ -974,8 +984,8 @@ namespace CryptoNote
             absIndices.push_back(transfer.globalOutputIndex);
             ringKeys.push_back(&commitmentKeyPair.publicKey);
           } else {
-            absIndices.push_back(decoys[decoyPos].global_amount_index);
-            ringKeys.push_back(&decoys[decoyPos].commit_key);
+            absIndices.push_back(filteredDecoys[decoyPos].global_amount_index);
+            ringKeys.push_back(&filteredDecoys[decoyPos].commit_key);
             ++decoyPos;
           }
         }

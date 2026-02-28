@@ -20,8 +20,8 @@
 #include <vector>
 #include <string>
 #include <chrono>
-#include "crypto/hash.h"
-#include "crypto/crypto.h"
+#include "../src/crypto/hash.h"
+#include "../src/crypto/crypto.h"
 
 namespace CryptoNote {
 

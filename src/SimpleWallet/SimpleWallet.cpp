@@ -2404,15 +2404,16 @@ bool simple_wallet::cold_info(const std::vector<std::string> &args)
         typeDescription = "Unknown deposit type";
     }
 
-    // Display term (user-defined unlock time, independent of deposit type)
+    // Display term — disambiguate using deposit type so TESTNET_COLD_MIN_TERM=8
+    // doesn't collide with DEPOSIT_TERM_ELDERFIER_STAKING=8.
     if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
       success_msg_writer() << "Term:          FOREVER";
-    } else if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING) {
+    } else if (deposit.depositType == CryptoNote::Deposit::Type::ELDERFIER) {
       success_msg_writer() << "Term:          Ξlderfier Staking (unstakeable on demand, " << CryptoNote::parameters::ELDERFIER_STAKING_REVIEW_WINDOW << "-block review)";
-    } else if (deposit.term == CryptoNote::parameters::COLD_MIN_TERM) {
-      success_msg_writer() << "Term:          3 months (16,000 blocks)";
-    } else if (deposit.term == CryptoNote::parameters::COLD_MAX_TERM) {
-      success_msg_writer() << "Term:          1 year (65,000 blocks)";
+    } else if (deposit.term == m_currency.depositMinTerm()) {
+      success_msg_writer() << "Term:          3 months (" << m_currency.depositMinTerm() << " blocks)";
+    } else if (deposit.term == m_currency.depositMaxTerm()) {
+      success_msg_writer() << "Term:          1 year (" << m_currency.depositMaxTerm() << " blocks)";
     } else {
       success_msg_writer() << "Term:          " << deposit.term << " blocks";
     }
