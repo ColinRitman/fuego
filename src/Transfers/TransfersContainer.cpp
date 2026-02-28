@@ -387,6 +387,48 @@ bool TransfersContainer::addTransactionInputs(const TransactionBlockInfo& block,
 
         inputsAdded = true;
       }
+    } else if (inputType == TransactionTypes::InputType::CommitmentSpend) {
+      // Commitment withdrawal: lookup by keyImage (same as Key inputs)
+      auto inputs = tx.getInputs();
+      const auto& csInput = boost::get<TransactionInputCommitmentSpend>(inputs[i]);
+
+      SpentOutputDescriptor descriptor(&csInput.keyImage);
+      auto spentRange = m_spentTransfers.get<SpentOutputDescriptorIndex>().equal_range(descriptor);
+      if (std::distance(spentRange.first, spentRange.second) > 0) {
+        throw std::runtime_error("Spending already spent commitment transfer");
+      }
+
+      auto availableRange = m_availableTransfers.get<SpentOutputDescriptorIndex>().equal_range(descriptor);
+      auto unconfirmedRange = m_unconfirmedTransfers.get<SpentOutputDescriptorIndex>().equal_range(descriptor);
+      size_t availableCount = std::distance(availableRange.first, availableRange.second);
+      size_t unconfirmedCount = std::distance(unconfirmedRange.first, unconfirmedRange.second);
+
+      if (availableCount == 0) {
+        if (unconfirmedCount > 0) {
+          throw std::runtime_error("Spending unconfirmed commitment transfer");
+        } else {
+          continue;
+        }
+      }
+
+      auto& outputDescriptorIndex = m_availableTransfers.get<SpentOutputDescriptorIndex>();
+      auto availableOutputsRange = outputDescriptorIndex.equal_range(SpentOutputDescriptor(&csInput.keyImage));
+
+      auto iteratorList = createTransferIteratorList(availableOutputsRange);
+      iteratorList.sort();
+      auto spendingTransferIt = iteratorList.findFirstByAmount(csInput.amount);
+
+      if (spendingTransferIt == availableOutputsRange.second) {
+        throw std::runtime_error("CommitmentSpend input has invalid amount, corresponding output isn't found");
+      }
+
+      assert(spendingTransferIt->keyImage == csInput.keyImage);
+      deleteUnlockJob(*spendingTransferIt);
+      copyToSpent(block, tx, i, *spendingTransferIt);
+      outputDescriptorIndex.erase(spendingTransferIt);
+      updateTransfersVisibility(csInput.keyImage);
+
+      inputsAdded = true;
     } else {
       assert(inputType == TransactionTypes::InputType::Generating);
     }
