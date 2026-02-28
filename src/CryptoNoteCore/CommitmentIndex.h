@@ -146,7 +146,18 @@ public:
 
   // Fee tracking and epoch management (Phase 5)
   void addElderfierFee(uint64_t feeAmount);
-  void finalizeEpoch(uint64_t currentBlockHeight);
+
+  // Per-block banking fee tracking (for coinbase split)
+  void addBlockBankingFee(uint64_t height, uint64_t fee);
+  uint64_t getBlockBankingFee(uint64_t height) const;
+
+  // Finalize epoch at boundary. Returns EFier reward distribution for coinbase outputs.
+  // If no signers, fees carry over to next epoch (only signing EFiers receive rewards).
+  std::vector<std::pair<AccountPublicAddress, uint64_t>> finalizeEpoch(uint64_t currentBlockHeight);
+
+  // Check if height is an epoch boundary
+  bool isEpochBoundary(uint64_t height) const;
+
   uint64_t getCurrentEpoch(uint64_t blockHeight) const;
   std::vector<uint8_t> getActiveElderfiers(uint64_t epochNumber) const;
   uint64_t getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const;
@@ -221,6 +232,7 @@ private:
   uint64_t m_currentEpochStartBlock = 0;
   uint64_t m_currentEpochTotalFees = 0;
   std::map<uint8_t, std::string> m_elderfierAddresses;   // EFiD -> wallet address mapping
+  std::map<uint64_t, uint64_t> m_blockBankingFees;       // height -> banking fee sum for that block
 
   // Elderfier registration and unstaking status tracking
   std::map<std::string, ElderfierRegistration> m_elderfierRegistrations;  // address -> registration

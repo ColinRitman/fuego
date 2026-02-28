@@ -101,14 +101,16 @@ void findMyOutputs(
      }
 
     } else if (outType == TransactionTypes::OutputType::Commitment) {
-      // COLD deposits (finite term): re-derive commitKey via ECDH and compare.
+      // Re-derive commitKey via ECDH and compare (works for COLD, HEAT, Elderfier).
       // depositSecret = cn_fast_hash(derivation || outputIndex_LE32)
-      // HEAT burns (DEPOSIT_TERM_FOREVER) use a discarded random secret — skip.
       uint64_t amount;
       TransactionOutputCommitment out;
       tx.getOutput(idx, out, amount);
 
-      if (out.term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+      // All commitment types (COLD, HEAT/FOREVER, Elderfier) use deterministic ECDH:
+      // depositSecret = H(ECDH(txSecretKey, viewPubKey) || outputIndex_LE32)
+      // so all are recoverable on rescan. No term filter needed.
+      {
         uint8_t preimage[36];
         memcpy(preimage, &derivation, 32);
         uint32_t outIdx = static_cast<uint32_t>(idx);

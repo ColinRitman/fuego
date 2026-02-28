@@ -119,16 +119,16 @@ namespace CryptoNote
 
       uint32_t burn_term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
 
-      // Determine banking fee based on amount tier
+      // Determine banking fee based on amount tier (testnet rates: 0.1% of TEST_AMOUNT_TIER)
       uint64_t banking_fee = 0;
       if (burn_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_0) {
-        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_0;
+        banking_fee = CryptoNote::parameters::TEST_BANK_FEE_TIER_0;
       } else if (burn_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_1) {
-        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
+        banking_fee = CryptoNote::parameters::TEST_BANK_FEE_TIER_1;
       } else if (burn_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_2) {
-        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
+        banking_fee = CryptoNote::parameters::TEST_BANK_FEE_TIER_2;
       } else if (burn_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_3) {
-        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
+        banking_fee = CryptoNote::parameters::TEST_BANK_FEE_TIER_3;
       }
       uint64_t fee = m_currency.minimumFee();
 
@@ -170,7 +170,7 @@ namespace CryptoNote
       CryptoNote::WalletHelper::SendCompleteResultObserver sent;
       WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
 
-      CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
+      CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee + banking_fee, extraString, 0);
 
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
         fail_msg_writer() << "Sending deposit transaction failed";
@@ -252,17 +252,16 @@ namespace CryptoNote
         return true;
       }
 
-      // Determine banking fee based on amount tier
+      // Determine banking fee based on amount tier (testnet rates: 0.1% of TEST_AMOUNT_TIER)
       uint64_t banking_fee = 0;
       if (cold_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_0) {
-        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_0;
+        banking_fee = CryptoNote::parameters::TEST_BANK_FEE_TIER_0;
       } else if (cold_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_1) {
-        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_1;
+        banking_fee = CryptoNote::parameters::TEST_BANK_FEE_TIER_1;
       } else if (cold_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_2) {
-        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_2;
-      } else if
-          (cold_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_3) {
-        banking_fee = CryptoNote::parameters::BANK_FEE_TIER_3;
+        banking_fee = CryptoNote::parameters::TEST_BANK_FEE_TIER_2;
+      } else if (cold_amount == CryptoNote::parameters::TEST_AMOUNT_TIER_3) {
+        banking_fee = CryptoNote::parameters::TEST_BANK_FEE_TIER_3;
       }
       // Fee = minimum fee
       uint64_t fee = m_currency.minimumFee();
@@ -307,7 +306,7 @@ namespace CryptoNote
       CryptoNote::WalletHelper::SendCompleteResultObserver sent;
       WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
 
-      CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee, extraString, 0);
+      CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee + banking_fee, extraString, 0);
 
       if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
         fail_msg_writer() << "Sending deposit transaction failed";

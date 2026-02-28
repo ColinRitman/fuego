@@ -1516,7 +1516,7 @@ bool simple_wallet::burn(const std::vector<std::string> &args)
     CryptoNote::WalletHelper::SendCompleteResultObserver sent;
     WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
 
-    CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee, extraString, 0);
+    CryptoNote::TransactionId txId = m_wallet->deposit(burn_term, burn_amount, fee + banking_fee, extraString, 0);
 
     if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
       fail_msg_writer() << "Sending burn transaction failed";
@@ -1669,7 +1669,7 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
     CryptoNote::WalletHelper::SendCompleteResultObserver sent;
     WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
 
-    CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee, extraString, 0);
+    CryptoNote::TransactionId txId = m_wallet->deposit(cold_term, cold_amount, fee + banking_fee, extraString, 0);
 
     if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
       fail_msg_writer() << "Sending deposit transaction failed";

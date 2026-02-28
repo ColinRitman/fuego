@@ -533,21 +533,38 @@ void CommitmentIndex::addElderfierFee(uint64_t feeAmount) {
   m_currentEpochTotalFees += feeAmount;
 }
 
-void CommitmentIndex::finalizeEpoch(uint64_t currentBlockHeight) {
+void CommitmentIndex::addBlockBankingFee(uint64_t height, uint64_t fee) {
   std::lock_guard<std::mutex> lock(m_mutex);
+  m_blockBankingFees[height] = fee;
+}
+
+uint64_t CommitmentIndex::getBlockBankingFee(uint64_t height) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  auto it = m_blockBankingFees.find(height);
+  return (it != m_blockBankingFees.end()) ? it->second : 0;
+}
+
+bool CommitmentIndex::isEpochBoundary(uint64_t height) const {
+  return height > 0 && (height / EPOCH_DURATION_BLOCKS) > ((height - 1) / EPOCH_DURATION_BLOCKS);
+}
+
+std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::finalizeEpoch(uint64_t currentBlockHeight) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::vector<std::pair<AccountPublicAddress, uint64_t>> efierRewards;
 
   // Check if we're at an epoch boundary
   uint64_t currentEpoch = getCurrentEpoch(currentBlockHeight);
 
-  if (m_epochHistory.empty()) {
+  if (m_epochHistory.empty() && m_currentEpochStartBlock == 0) {
     m_currentEpochStartBlock = currentBlockHeight;
-    return;  // First epoch, nothing to finalize yet
+    return efierRewards;  // First epoch, nothing to finalize yet
   }
 
   // Only finalize if we're entering a new epoch
   uint64_t lastEpoch = getCurrentEpoch(m_currentEpochStartBlock);
   if (currentEpoch <= lastEpoch) {
-    return;  // Not at epoch boundary yet
+    return efierRewards;  // Not at epoch boundary yet
   }
 
   // Finalize the completed epoch
@@ -557,10 +574,8 @@ void CommitmentIndex::finalizeEpoch(uint64_t currentBlockHeight) {
   epochRewards.epochEndBlock = currentBlockHeight - 1;
   epochRewards.totalFeesCollected = m_currentEpochTotalFees;
 
-  if (!m_elderfier_ids.empty() && m_currentEpochTotalFees > 0) {
-    // Get all elderfiers who signed during this epoch (from signature cache)
-    // Elderfiers who signed get paid pro-rata
-    // Elderfiers who didn't sign get 0 fees
+  if (m_currentEpochTotalFees > 0) {
+    // Only signing EFiers receive rewards
     epochRewards.activeElderfiers = getSignedElderfierIds();
 
     if (!epochRewards.activeElderfiers.empty()) {
@@ -572,18 +587,31 @@ void CommitmentIndex::finalizeEpoch(uint64_t currentBlockHeight) {
         uint8_t efid = epochRewards.activeElderfiers[i];
         uint64_t share = feePerElderfier;
         if (i < remainder) {
-          share += 1;  // Distribute remainder 1 satoshi per signer
+          share += 1;  // Distribute remainder 1 atomic unit per signer
         }
         epochRewards.distribution[efid] = share;
+
+        // Build coinbase reward output if we have the EFier's address
+        auto addrIt = m_elderfierAddresses.find(efid);
+        if (addrIt != m_elderfierAddresses.end()) {
+          AccountPublicAddress addr;
+          if (m_currency.parseAccountAddressString(addrIt->second, addr)) {
+            efierRewards.push_back({addr, share});
+          }
+        }
       }
+
+      // Reset fees only when successfully distributed to signers
+      m_currentEpochTotalFees = 0;
     }
+    // If no signers: DON'T reset m_currentEpochTotalFees — carry over to next epoch
   }
 
   m_epochHistory.push_back(epochRewards);
 
   // Reset for next epoch
   m_currentEpochStartBlock = currentBlockHeight;
-  m_currentEpochTotalFees = 0;
+  return efierRewards;
 }
 
 uint64_t CommitmentIndex::getCurrentEpoch(uint64_t blockHeight) const {

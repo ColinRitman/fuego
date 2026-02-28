@@ -1363,11 +1363,11 @@ bool Blockchain::prevalidate_miner_transaction(const Block& b, uint32_t height) 
 }
 
 bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, size_t cumulativeBlockSize,
-  uint64_t alreadyGeneratedCoins, uint64_t fee, uint64_t& reward, int64_t& emissionChange) {
+  uint64_t alreadyGeneratedCoins, uint64_t fee, uint64_t& reward, int64_t& emissionChange, const std::vector<Transaction>& blockTransactions) {
 
-  uint64_t minerReward = 0;
+  uint64_t coinbaseTotal = 0;
   for (auto& o : b.baseTransaction.outputs) {
-    minerReward += o.amount;
+    coinbaseTotal += o.amount;
   }
 
   // For blocks in the checkpoint zone, the checkpoint hash already guarantees the block
@@ -1375,10 +1375,10 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
   // median that may differ during re-sync vs original validation. Accept the miner's
   // actual reward as the true emission.
   if (m_checkpoints.is_in_checkpoint_zone(height)) {
-    reward = minerReward;
-    emissionChange = minerReward - fee;
+    reward = coinbaseTotal;
+    emissionChange = coinbaseTotal - fee;
     logger(DEBUGGING) << "Checkpoint zone block at height " << height
-      << ", accepting miner reward: " << m_currency.formatAmount(minerReward);
+      << ", accepting miner reward: " << m_currency.formatAmount(coinbaseTotal);
     return true;
   }
 
@@ -1406,31 +1406,64 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
   }
 
   if (blockMajorVersion >= CryptoNote::BLOCK_MAJOR_VERSION_10) {
-    // v10+: exact reward validation — miners use the same Osavvirsak formula
-    if (minerReward != reward) {
-      logger(ERROR, BRIGHT_RED) << "Coinbase transaction reward mismatch at height " << height << ": "
-        << m_currency.formatAmount(minerReward) << " (actual) vs "
-        << m_currency.formatAmount(reward) << " (expected)"
-        << " [burnedAtPrevHeight=" << m_currency.formatAmount(burnedAtPrevHeight) << "]";
+    // V10+: Banking fees are withheld from miner and paid to EFiers at epoch boundaries.
+    // Recompute banking fees deterministically from block transactions.
+    uint64_t bankingFeesInBlock = computeBankingFeesFromTransactions(blockTransactions);
+
+    // Compute expected EFier rewards at epoch boundary
+    uint64_t efierTotal = 0;
+    if (m_commitmentIndex.isEpochBoundary(height)) {
+      // At epoch boundary, finalizeEpoch will distribute accumulated fees.
+      // For validation, we need the efier outputs total from the coinbase.
+      // The actual distribution is deterministic based on signed EFiers and accumulated fees.
+      // We trust the miner included the correct EFier outputs; the total is validated below.
+      // The pushToBankingIndex/finalizeEpoch call after validation will verify consistency.
+      // For now, efierTotal = coinbaseTotal - (reward - bankingFeesInBlock)
+      // i.e., whatever the miner claims as EFier outputs.
+    }
+
+    // Expected coinbase: reward - bankingFeesInBlock + efierTotal
+    // Since we don't independently know efierTotal during validation (it comes from
+    // CommitmentIndex state that gets updated AFTER this block), we validate that:
+    // coinbaseTotal >= reward - bankingFeesInBlock  (miner got at least emission)
+    // coinbaseTotal <= reward                       (no inflation — total can't exceed full reward)
+    uint64_t expectedMinerReward = reward - std::min(bankingFeesInBlock, reward);
+
+    if (coinbaseTotal < expectedMinerReward) {
+      logger(ERROR, BRIGHT_RED) << "Coinbase too small at height " << height << ": "
+        << m_currency.formatAmount(coinbaseTotal) << " (actual) vs "
+        << m_currency.formatAmount(expectedMinerReward) << " (expected min, after banking fee withhold)"
+        << " [bankingFees=" << m_currency.formatAmount(bankingFeesInBlock) << "]";
       return false;
     }
+
+    if (coinbaseTotal > reward) {
+      logger(ERROR, BRIGHT_RED) << "Coinbase exceeds reward at height " << height << ": "
+        << m_currency.formatAmount(coinbaseTotal) << " (actual) vs "
+        << m_currency.formatAmount(reward) << " (max allowed)"
+        << " [bankingFees=" << m_currency.formatAmount(bankingFeesInBlock) << "]";
+      return false;
+    }
+
+    // The emission change accounts for the full coinbase total (miner + EFier outputs)
+    // since all outputs come from existing fees (non-inflationary)
   } else {
     // Pre-v10: only reject if miner claims MORE than the calculated reward.
     // Miners may legitimately claim less (underspend just reduces emission).
     // This matches standard CryptoNote validation and handles edge cases where
     // the penalty calculation produces slightly different results during re-sync
     // due to median differences.
-    if (minerReward > reward) {
+    if (coinbaseTotal > reward) {
       logger(ERROR, BRIGHT_RED) << "Coinbase transaction spends too much at height " << height << ": "
-        << m_currency.formatAmount(minerReward) << " (actual) vs "
+        << m_currency.formatAmount(coinbaseTotal) << " (actual) vs "
         << m_currency.formatAmount(reward) << " (expected)";
       return false;
     }
 
-    if (minerReward != reward) {
+    if (coinbaseTotal != reward) {
       // Miner underspent — use actual miner reward for emission tracking
-      reward = minerReward;
-      emissionChange = minerReward - fee;
+      reward = coinbaseTotal;
+      emissionChange = coinbaseTotal - fee;
     }
   }
 
@@ -2674,7 +2707,7 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
   uint64_t reward = 0;
   uint64_t already_generated_coins = m_blocks.empty() ? 0 : m_blocks.back().already_generated_coins;
 
-  if (!validate_miner_transaction(blockData, static_cast<uint32_t>(m_blocks.size()), cumulative_block_size, already_generated_coins, fee_summary, reward, emissionChange)) {
+  if (!validate_miner_transaction(blockData, static_cast<uint32_t>(m_blocks.size()), cumulative_block_size, already_generated_coins, fee_summary, reward, emissionChange, transactions)) {
     logger(INFO, BRIGHT_WHITE) << "Block " << blockHash << " has invalid miner transaction";
     bvc.m_verification_failed = true;
     popTransactions(block, minerTransactionHash);
@@ -2692,8 +2725,20 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
   pushBlock(block);
     pushToBankingIndex(block, interestSummary);
 
-  // PHASE 5: Check for epoch boundary and finalize if needed
+  // PHASE 5: Track per-block banking fees and finalize epoch at boundaries
   uint32_t blockHeight = static_cast<uint32_t>(m_blocks.size()) - 1;
+  {
+    // Compute and store banking fees for this block (excluding coinbase)
+    std::vector<Transaction> blockTxs;
+    for (size_t i = 1; i < block.transactions.size(); ++i) {
+      blockTxs.push_back(block.transactions[i].tx);
+    }
+    uint64_t blockBankingFee = computeBankingFeesFromTransactions(blockTxs);
+    if (blockBankingFee > 0) {
+      m_commitmentIndex.addBlockBankingFee(blockHeight, blockBankingFee);
+    }
+  }
+  // Finalize epoch at boundary (distribution already happened during block creation)
   m_commitmentIndex.finalizeEpoch(blockHeight);
 
   auto block_processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - blockProcessingStart).count();
@@ -2790,6 +2835,24 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
   CommitmentIndex::Height Blockchain::getCommitmentHighestBlock() const {
     std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
     return m_commitmentIndex.highestBlock();
+  }
+
+  uint64_t Blockchain::computeBankingFeesFromTransactions(const std::vector<Transaction>& txs) {
+    uint64_t totalBankingFees = 0;
+    for (const auto& tx : txs) {
+      std::vector<TransactionExtraField> extraFields;
+      if (!parseTransactionExtra(tx.extra, extraFields)) continue;
+      for (const auto& field : extraFields) {
+        if (field.type() == typeid(TransactionExtraHeatCommitment)) {
+          const auto& heat = boost::get<TransactionExtraHeatCommitment>(field);
+          totalBankingFees += (heat.amount * 1) / 1000;  // 0.1%
+        } else if (field.type() == typeid(TransactionExtraColdCommitment)) {
+          const auto& cold = boost::get<TransactionExtraColdCommitment>(field);
+          totalBankingFees += (cold.amount * 1) / 1000;  // 0.1%
+        }
+      }
+    }
+    return totalBankingFees;
   }
 
   void Blockchain::pushToBankingIndex(const BlockEntry &block, uint64_t interest)

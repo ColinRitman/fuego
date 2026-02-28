@@ -146,6 +146,13 @@ namespace CryptoNote {
     int64_t getCommitmentLeafIndex(const Crypto::Hash& commitment) const;
     CommitmentIndex::Height getCommitmentHighestBlock() const;
 
+    // Banking fee computation: scan transactions for HEAT/COLD commitments, return 0.1% sum
+    static uint64_t computeBankingFeesFromTransactions(const std::vector<Transaction>& txs);
+
+    // Access CommitmentIndex for epoch boundary checks and fee tracking
+    CommitmentIndex& getCommitmentIndex() { return m_commitmentIndex; }
+    const CommitmentIndex& getCommitmentIndex() const { return m_commitmentIndex; }
+
     template <class visitor_t>
     bool scanOutputKeysForIndexes(const KeyInput &tx_in_to_key, visitor_t &vis, uint32_t *pmax_related_block_height = NULL);
 
@@ -372,7 +379,7 @@ namespace CryptoNote {
     difficulty_type get_next_difficulty_for_alternative_chain(const std::list<blocks_ext_by_hash::iterator> &alt_chain, BlockEntry &bei);
     void pushToBankingIndex(const BlockEntry &block, uint64_t interest);
     bool prevalidate_miner_transaction(const Block &b, uint32_t height);
-    bool validate_miner_transaction(const Block &b, uint32_t height, size_t cumulativeBlockSize, uint64_t alreadyGeneratedCoins, uint64_t fee, uint64_t &reward, int64_t &emissionChange);
+    bool validate_miner_transaction(const Block &b, uint32_t height, size_t cumulativeBlockSize, uint64_t alreadyGeneratedCoins, uint64_t fee, uint64_t &reward, int64_t &emissionChange, const std::vector<Transaction>& blockTransactions = {});
     bool rollback_blockchain_switching(std::list<Block> &original_chain, size_t rollback_height);
     bool get_last_n_blocks_sizes(std::vector<size_t> &sz, size_t count);
     bool add_out_to_get_random_outs(std::vector<std::pair<TransactionIndex, uint16_t>> &amount_outs, COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_outs_for_amount &result_outs, uint64_t amount, size_t i);
