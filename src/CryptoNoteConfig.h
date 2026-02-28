@@ -303,7 +303,7 @@ namespace CryptoNote
 		const uint64_t TESTNET_MWLWMA_W_SHORT                                = 20;   // 20% weight — reduced; burst-mining spikes were distorting difficulty
 		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 55;   // 55% weight — primary stability anchor
 		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 25;   // 25% weight — trend smoothing
-		const uint32_t TESTNET_MWLWMA_V2_HEIGHT                              = 800;  // Activation height for v2 params; old params used below this to preserve existing block validation
+		const uint32_t TESTNET_MWLWMA_V2_HEIGHT                              = 818;  // Activation height for v2 params; old params used below this to preserve existing block validation
 
  	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 
