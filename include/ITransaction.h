@@ -80,6 +80,7 @@ public:
   virtual TransactionTypes::OutputType getOutputType(size_t index) const = 0;
   virtual void getOutput(size_t index, KeyOutput& output, uint64_t& amount) const = 0;
   virtual void getOutput(size_t index, MultisignatureOutput& output, uint64_t& amount) const = 0;
+  virtual void getOutput(size_t index, TransactionOutputCommitment& output, uint64_t& amount) const = 0;
 
   // signatures
   virtual size_t getRequiredSignaturesCount(size_t inputIndex) const = 0;

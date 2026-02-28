@@ -1357,13 +1357,22 @@ bool simple_wallet::list_deposits(const std::vector<std::string> &)
     // Format amount (interest handled off-chain via L2)
     std::string amount_str = m_currency.formatAmount(deposit.amount);
 
-    // Format term
+    // Format term (network-aware: testnet EFier=2, mainnet EFier=8)
+    uint32_t eFierTerm  = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING
+                                                  : CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING;
+    uint32_t coldMin    = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM
+                                                  : CryptoNote::parameters::COLD_MIN_TERM;
+    uint32_t coldMax    = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM
+                                                  : CryptoNote::parameters::COLD_MAX_TERM;
+
     std::string term_str = "";
     if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
       term_str = "HEAT (forever)";
-    } else if (deposit.term == CryptoNote::parameters::COLD_MIN_TERM) {
+    } else if (deposit.term == eFierTerm) {
+      term_str = "EFier Stake";
+    } else if (deposit.term == coldMin) {
       term_str = "3 months";
-    } else if (deposit.term == CryptoNote::parameters::COLD_MAX_TERM) {
+    } else if (deposit.term == coldMax) {
       term_str = "1 year";
     } else {
       term_str = std::to_string(deposit.term) + " blocks";
@@ -2040,7 +2049,25 @@ bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
     invokeJsonCommand(httpClient, "/get_alias_by_address", addrReq, addrRes);
 
     if (!addrRes.found || addrRes.alias_type != 0) {
-      fail_msg_writer() << "Command not found.";
+      // Not yet a confirmed EFier — check if ceremony is pending
+      uint32_t efTerm = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING
+                                                : CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING;
+      size_t pendingStakes = 0;
+      size_t depositCount = m_wallet->getDepositCount();
+      for (CryptoNote::DepositId i = 0; i < depositCount; ++i) {
+        CryptoNote::Deposit d;
+        if (!m_wallet->getDeposit(i, d)) continue;
+        if (d.term == efTerm) ++pendingStakes;
+      }
+      if (pendingStakes > 0) {
+        success_msg_writer() << "";
+        success_msg_writer() << "  EFier ceremony pending (" << pendingStakes << "/5 stakes tracked).";
+        success_msg_writer() << "  elderfier_panel will be available once all 5 confirm and your alias is registered.";
+        success_msg_writer() << "  Check: list_deposits  |  lookup_alias <your_alias>";
+        success_msg_writer() << "";
+      } else {
+        fail_msg_writer() << "Command not found.";
+      }
       return true;
     }
     registeredAlias = addrRes.alias;
@@ -2074,7 +2101,9 @@ bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
   for (CryptoNote::DepositId id = 0; id < depositCount; ++id) {
     CryptoNote::Deposit deposit;
     if (!m_wallet->getDeposit(id, deposit)) continue;
-    if (deposit.depositType != CryptoNote::Deposit::Type::ELDERFIER) continue;
+    uint32_t efStakeTerm = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING
+                                                   : CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING;
+    if (deposit.term != efStakeTerm) continue;
 
     ++stakeCount;
     totalStaked += deposit.amount;

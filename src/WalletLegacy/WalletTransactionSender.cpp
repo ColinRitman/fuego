@@ -647,21 +647,19 @@ namespace CryptoNote
       const uint32_t commitOutputIndex = static_cast<uint32_t>(transaction->getOutputCount());
       std::array<uint8_t, 32> depositSecret;
 
-      if (context->depositTerm == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
-        // Burn path: generate random, discard immediately.
-        Crypto::PublicKey dummyPk;
-        Crypto::SecretKey randomKey;
-        Crypto::generate_keys(dummyPk, randomKey);
-        memcpy(depositSecret.data(), randomKey.data, 32);
-      } else {
-        // COLD deposit path: deterministic ECDH derivation.
+      // All deposit types (COLD, HEAT/burn, Elderfier) use deterministic ECDH derivation.
+      // depositSecret = H(ECDH(txSecretKey, viewPubKey) || outputIndex_LE32)
+      // This makes every commitment output re-detectable on wallet rescan using the view key.
+      // HEAT burns are "permanent" because term=FOREVER has no withdrawal path in the UI,
+      // not because the secret is unrecoverable.
+      {
         Crypto::SecretKey txSecretKey;
         if (!transaction->getTransactionSecretKey(txSecretKey)) {
-          throw std::runtime_error("COLD deposit: could not retrieve tx secret key for commitment derivation");
+          throw std::runtime_error("deposit: could not retrieve tx secret key for commitment derivation");
         }
         Crypto::KeyDerivation ecdh;
         if (!Crypto::generate_key_derivation(m_keys.address.viewPublicKey, txSecretKey, ecdh)) {
-          throw std::runtime_error("COLD deposit: ECDH key derivation failed");
+          throw std::runtime_error("deposit: ECDH key derivation failed");
         }
         // Mix in output index (LE32) so multiple commitment outputs per tx are independent.
         uint8_t preimage[36];

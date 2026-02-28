@@ -103,7 +103,7 @@ namespace {
 
     uint32_t unlockTime = static_cast<uint32_t>(output.unlockTime == 0 ? output.blockHeight : output.unlockTime);
 
-    if (output.type == TransactionTypes::OutputType::Multisignature && output.term != 0) {
+    if ((output.type == TransactionTypes::OutputType::Multisignature || output.type == TransactionTypes::OutputType::Commitment) && output.term != 0) {
       job.unlockHeight = std::max({ unlockTime, output.blockHeight + output.term, output.blockHeight + transactionSpendableAge + 1 });
     } else {
       job.unlockHeight = std::max(unlockTime, output.blockHeight + transactionSpendableAge + 1);
@@ -137,6 +137,9 @@ SpentOutputDescriptor::SpentOutputDescriptor(const TransactionOutputInformationI
   } else if (m_type == TransactionTypes::OutputType::Multisignature) {
     m_amount = transactionInfo.amount;
     m_globalOutputIndex = transactionInfo.globalOutputIndex;
+  } else if (m_type == TransactionTypes::OutputType::Commitment) {
+    // Commitment outputs use keyImage for double-spend tracking (same as Key).
+    m_keyImage = &transactionInfo.keyImage;
   } else {
     assert(false);
   }
@@ -170,6 +173,8 @@ bool SpentOutputDescriptor::operator==(const SpentOutputDescriptor& other) const
     return other.m_type == m_type && *other.m_keyImage == *m_keyImage;
   } else if (m_type == TransactionTypes::OutputType::Multisignature) {
     return other.m_type == m_type && other.m_amount == m_amount && other.m_globalOutputIndex == m_globalOutputIndex;
+  } else if (m_type == TransactionTypes::OutputType::Commitment) {
+    return other.m_type == m_type && *other.m_keyImage == *m_keyImage;
   } else {
     assert(false);
     return false;
@@ -184,6 +189,9 @@ size_t SpentOutputDescriptor::hash() const {
     size_t hashValue = boost::hash_value(m_amount);
     boost::hash_combine(hashValue, m_globalOutputIndex);
     return hashValue;
+  } else if (m_type == TransactionTypes::OutputType::Commitment) {
+    static_assert(sizeof(size_t) < sizeof(*m_keyImage), "sizeof(size_t) < sizeof(*m_keyImage)");
+    return *reinterpret_cast<const size_t*>(m_keyImage->data);
   } else {
     assert(false);
     return 0;
@@ -287,7 +295,8 @@ bool TransfersContainer::addTransactionOutputs(const TransactionBlockInfo& block
       (void)result; // Disable unused warning
       assert(result.second);
     } else {
-      if (info.type == TransactionTypes::OutputType::Multisignature) {
+      if (info.type == TransactionTypes::OutputType::Multisignature ||
+          info.type == TransactionTypes::OutputType::Commitment) {
         SpentOutputDescriptor descriptor(transfer);
         if (m_availableTransfers.get<SpentOutputDescriptorIndex>().count(descriptor) > 0 ||
             m_spentTransfers.get<SpentOutputDescriptorIndex>().count(descriptor) > 0) {
@@ -942,7 +951,7 @@ bool TransfersContainer::isSpendTimeUnlocked(const TransactionOutputInformationE
     return current_time + m_currency.lockedTxAllowedDeltaSeconds_v2() >= info.unlockTime;
   }
 
-  if (isOuputUnlocked && info.type == TransactionTypes::OutputType::Multisignature && info.term != 0) {
+  if (isOuputUnlocked && (info.type == TransactionTypes::OutputType::Multisignature || info.type == TransactionTypes::OutputType::Commitment) && info.term != 0) {
     isOuputUnlocked = m_currentHeight + 1 >= info.blockHeight + info.term;
   }
 
@@ -968,7 +977,8 @@ bool TransfersContainer::isIncluded(const TransactionOutputInformationEx& output
     (
     ((flags & IncludeTypeKey) != 0            && output.type == TransactionTypes::OutputType::Key) ||
     ((flags & IncludeTypeMultisignature) != 0 && output.type == TransactionTypes::OutputType::Multisignature && output.term == 0) ||
-    ((flags & IncludeTypeDeposit) != 0        && output.type == TransactionTypes::OutputType::Multisignature && output.term > 0)
+    ((flags & IncludeTypeDeposit) != 0        && output.type == TransactionTypes::OutputType::Multisignature && output.term > 0) ||
+    ((flags & IncludeTypeDeposit) != 0        && output.type == TransactionTypes::OutputType::Commitment && output.term > 0)
     )
     &&
     // filter by state

@@ -351,7 +351,11 @@ double Currency::getBurnPercentage() const {
         return multisignatureInput.amount + calculateInterest(multisignatureInput.amount, multisignatureInput.term, height);
       }
     }
-      else if (in.type() == typeid(BaseInput))
+      else if (in.type() == typeid(TransactionInputCommitmentSpend))
+    {
+      return boost::get<TransactionInputCommitmentSpend>(in).amount;
+    }
+    else if (in.type() == typeid(BaseInput))
     {
       return 0;
     }
