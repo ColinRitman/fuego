@@ -537,10 +537,10 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // TODO: Re-enable burn and cold commands in next release
   // m_consoleHandler.setHandler("burn", boost::bind(&simple_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
   // m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
-  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begin the Elderfire StayKing Ceremony to become an Elderfier (interactive, 5x 800 XFG stakes).");
+  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begin the Elderfire StayKing Ceremony to become an Ξlderfier (interactive, 5x 800 XFG stakes req'd).");
   m_consoleHandler.setHandler("withdraw_deposit", boost::bind(&simple_wallet::withdraw_deposit, this, boost::arg<1>()), "withdraw_deposit <id> - Withdraw a deposit");
-  m_consoleHandler.setHandler("list_deposits", boost::bind(&simple_wallet::list_deposits, this, boost::arg<1>()), "list_deposits - List all COLD or Elderfier deposits");
-  m_consoleHandler.setHandler("deposit_info", boost::bind(&simple_wallet::deposit_info, this, boost::arg<1>()), "deposit_info <id> - Get detailed info for deposit");
+  m_consoleHandler.setHandler("list_cold", boost::bind(&simple_wallet::list_cold, this, boost::arg<1>()), "list_cold - List all COLD txns and Elderfier deposits");
+  m_consoleHandler.setHandler("cold_info", boost::bind(&simple_wallet::cold_info, this, boost::arg<1>()), "cold_info <id> - Get detailed info on your Certificate of Ledger Deposits");
   m_consoleHandler.setHandler("list_burns", boost::bind(&simple_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all XFG burn transactions (HEAT)");
   m_consoleHandler.setHandler("burn_info", boost::bind(&simple_wallet::burn_info, this, boost::arg<1>()), "burn_info <id> - Get detailed info of burn by ID");
 
@@ -1326,7 +1326,7 @@ bool simple_wallet::save(const std::vector<std::string> &args)
 }
 
 //----------------------------------------------------------------------------------------------------
-bool simple_wallet::list_deposits(const std::vector<std::string> &)
+bool simple_wallet::list_cold(const std::vector<std::string> &)
 {
   size_t deposit_count = m_wallet->getDepositCount();
 
@@ -2021,7 +2021,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "  Your Elderfire burns bright.";
     success_msg_writer() << "  Guard the Realm well, King " << alias << ".";
     success_msg_writer() << "";
-    success_msg_writer() << "  Commands:  list_deposits  |  lookup_alias " << alias;
+    success_msg_writer() << "  Commands:  list_cold  |  lookup_alias " << alias;
     success_msg_writer() << "";
 
     return true;
@@ -2063,7 +2063,7 @@ bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
         success_msg_writer() << "";
         success_msg_writer() << "  EFier ceremony pending (" << pendingStakes << "/5 stakes tracked).";
         success_msg_writer() << "  elderfier_panel will be available once all 5 confirm and your alias is registered.";
-        success_msg_writer() << "  Check: list_deposits  |  lookup_alias <your_alias>";
+        success_msg_writer() << "  Check: list_cold  |  lookup_alias <your_alias>";
         success_msg_writer() << "";
       } else {
         fail_msg_writer() << "Command not found.";
@@ -2091,7 +2091,7 @@ bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
   success_msg_writer() << "";
 
   // ── Stakes ───────────────────────────────────────────────────────────────
-  success_msg_writer() << "  ── ELDERFIRE STAKES (5 × 800 XFG) ──────────────────────";
+  success_msg_writer() << "  ── ΞLDERFIRE STAKES (5 × 800 XFG) ──────────────────────";
   success_msg_writer() << "";
 
   size_t depositCount = m_wallet->getDepositCount();
@@ -2121,7 +2121,7 @@ bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
   }
 
   if (stakeCount == 0) {
-    fail_msg_writer() << "  No ELDERFIER stakes found in this wallet.";
+    fail_msg_writer() << "  No ΞLDERFIER stakes found in this wallet.";
   } else {
     success_msg_writer() << "";
     success_msg_writer() << "  Stakes:         " << stakeCount << " / 5";
@@ -2160,7 +2160,7 @@ bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
 
     success_msg_writer() << "  ── NETWORK ─────────────────────────────────────────────";
     success_msg_writer() << "";
-    success_msg_writer() << "  Active EFiers:  " << netRes.total_registered_elderfiers;
+    success_msg_writer() << "  Active Ξlderfiers:  " << netRes.total_registered_elderfiers;
     success_msg_writer() << "  Fees in escrow: " << m_currency.formatAmount(netRes.total_fees_pending_in_escrow) << " XFG";
     success_msg_writer() << "  Fees paid out:  " << m_currency.formatAmount(netRes.total_fees_distributed_all_time) << " XFG";
     success_msg_writer() << "";
@@ -2173,7 +2173,7 @@ bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
     success_msg_writer() << "";
   }
 
-  success_msg_writer() << "  Guard the Realm, King " << registeredAlias << ".";
+  success_msg_writer() << "  Guard the Realm well, King " << registeredAlias << ".";
   success_msg_writer() << "";
   return true;
 }
@@ -2329,7 +2329,7 @@ bool simple_wallet::generate_proof(const std::vector<std::string> &args) {
            success_msg_writer() << "Amount: " << m_currency.formatAmount(coldDeposit.amount);
            success_msg_writer() << "Term: " << coldDeposit.term << " blocks";
 
-           std::cout << "\n=== YOUR XFG CERTIFICATE OF LEDGER DEPOSIT PROOF ===" << std::endl;
+           std::cout << "\n=== XFG CERTIFICATE OF LEDGER DEPOSIT PROOF ===" << std::endl;
            std::cout << "Transaction Hash: " << tx_hash << std::endl;
            std::cout << "Commitment: " << Common::podToHex(coldDeposit.commitment) << std::endl;
            std::cout << "Amount: " << coldDeposit.amount << " heat (atomic XFG)" << std::endl;
@@ -2355,11 +2355,11 @@ bool simple_wallet::generate_proof(const std::vector<std::string> &args) {
 
 
 //----------------------------------------------------------------------------------------------------
-bool simple_wallet::deposit_info(const std::vector<std::string> &args)
+bool simple_wallet::cold_info(const std::vector<std::string> &args)
 {
   if (args.size() != 1)
   {
-    fail_msg_writer() << "Usage: deposit_info <id>";
+    fail_msg_writer() << "Usage: cold_info <id>";
     return true;
   }
 
@@ -2396,8 +2396,8 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
         typeDescription = "Off-chain (CD) interest deposit - locked for your specified term";
         break;
       case CryptoNote::Deposit::Type::ELDERFIER:
-        depositType = "ELDERFIER Stake (0xEF)";
-        typeDescription = "Staking deposit for Elderfier - unstakeable with 8-day review window";
+        depositType = "ΞLDERFIER Stake (0xEF)";
+        typeDescription = "Staking deposit for Ξlderfier - unstakeable with 8-day review window";
         break;
       default:
         depositType = "Unknown";
@@ -2408,7 +2408,7 @@ bool simple_wallet::deposit_info(const std::vector<std::string> &args)
     if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
       success_msg_writer() << "Term:          FOREVER";
     } else if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING) {
-      success_msg_writer() << "Term:          Elderfier Staking (unstakeable on demand, " << CryptoNote::parameters::ELDERFIER_STAKING_REVIEW_WINDOW << "-block review)";
+      success_msg_writer() << "Term:          Ξlderfier Staking (unstakeable on demand, " << CryptoNote::parameters::ELDERFIER_STAKING_REVIEW_WINDOW << "-block review)";
     } else if (deposit.term == CryptoNote::parameters::COLD_MIN_TERM) {
       success_msg_writer() << "Term:          3 months (16,000 blocks)";
     } else if (deposit.term == CryptoNote::parameters::COLD_MAX_TERM) {
@@ -2486,7 +2486,7 @@ bool simple_wallet::list_burns(const std::vector<std::string> &)
   }
 
   success_msg_writer() << "";
-  success_msg_writer() << "=== HEAT Burn Transactions ===";
+  success_msg_writer() << "=== XFG (HEAT) Burn Transactions ===";
   success_msg_writer() << "";
   success_msg_writer() << "ID    | Amount             | Height        | TX Hash                          | Status";
   success_msg_writer() << "------|--------------------|---------------|----------------------------------|--------";
@@ -2559,12 +2559,12 @@ bool simple_wallet::burn_info(const std::vector<std::string> &args)
 
     // Verify this is actually a burn (FOREVER term)
     if (deposit.term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
-      fail_msg_writer() << "Deposit " << deposit_id << " is not a burn transaction (use 'deposit_info' instead).";
+      fail_msg_writer() << "Deposit " << deposit_id << " is not a burn transaction (use 'cold_info' instead).";
       return true;
     }
 
     success_msg_writer() << "";
-    success_msg_writer() << "=== Burn (HEAT) Information ===";
+    success_msg_writer() << "=== XFG Burn Info ===";
     success_msg_writer() << "ID:            " << deposit_id;
     success_msg_writer() << "Amount:        " << m_currency.formatAmount(deposit.amount);
     success_msg_writer() << "Type:          XFG Burn (HEAT/0x08)";

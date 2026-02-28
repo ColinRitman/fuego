@@ -3015,6 +3015,11 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             deposit -= multisign.amount;
           }
         }
+        // Commitment withdrawals (ring-sig COLD/EFier): reduce deposit balance
+        else if (in.type() == typeid(TransactionInputCommitmentSpend))
+        {
+          deposit -= boost::get<TransactionInputCommitmentSpend>(in).amount;
+        }
       }
       for (const auto &out : tx.tx.outputs)
       {
@@ -3022,6 +3027,15 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
         {
           auto &multisign = boost::get<MultisignatureOutput>(out.target);
           if (multisign.term > 0)
+          {
+            deposit += out.amount;
+          }
+        }
+        // COLD commitment outputs: add to deposit balance (HEAT/FOREVER burns tracked separately)
+        else if (out.target.type() == typeid(TransactionOutputCommitment))
+        {
+          const auto& commitment = boost::get<TransactionOutputCommitment>(out.target);
+          if (commitment.term != parameters::DEPOSIT_TERM_FOREVER)
           {
             deposit += out.amount;
           }

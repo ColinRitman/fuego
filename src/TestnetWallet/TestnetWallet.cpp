@@ -660,7 +660,7 @@ namespace CryptoNote
       success_msg_writer() << "  Your Elderfire burns bright.";
       success_msg_writer() << "  Guard the Realm well,  " << alias << ".";
       success_msg_writer() << "";
-      success_msg_writer() << "  Commands:  list_deposits  |  lookup_alias " << alias;
+      success_msg_writer() << "  Commands:  list_cold  |  lookup_alias " << alias;
       success_msg_writer() << "";
 
       return true;
