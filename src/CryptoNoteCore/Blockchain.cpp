@@ -64,7 +64,7 @@ bool operator<(const Crypto::KeyImage& keyImage1, const Crypto::KeyImage& keyIma
 }
 }
 
-#define CURRENT_BLOCKCACHE_STORAGE_ARCHIVE_VER 5
+#define CURRENT_BLOCKCACHE_STORAGE_ARCHIVE_VER 6
 #define CURRENT_BLOCKCHAININDICES_STORAGE_ARCHIVE_VER 1
 
 namespace CryptoNote {
@@ -778,6 +778,7 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
     m_multisignatureOutputs.clear();
     m_commitmentOutputs.clear();
     m_commitmentIndex.clear();
+    m_bankingIndex = BankingIndex(static_cast<BankingIndex::DepositHeight>(m_blocks.size()));
     for (uint32_t b = 0; b < m_blocks.size(); ++b)
     {
       if (b % 1000 == 0)
