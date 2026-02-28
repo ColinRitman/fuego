@@ -88,6 +88,7 @@ namespace CryptoNote
 		const uint64_t MWLWMA_W_SHORT                                 = 25;   // 25% weight — responsiveness
 		const uint64_t MWLWMA_W_MEDIUM                                = 50;   // 50% weight — stability anchor
 		const uint64_t MWLWMA_W_LONG                                  = 25;   // 25% weight — trend dampening
+		const size_t   MWLWMA_DIFFICULTY_WINDOW                       = 92;   // N_long+2 = 90+2; replaces DIFFICULTY_WINDOW_V4 for v10+
 
         // MIXIN
 		const uint64_t MIN_TX_MIXIN_SIZE_V2                          = 2;  // Legacy mixin
@@ -289,12 +290,20 @@ namespace CryptoNote
 	//__________________________________________________________________________________________________________________________
                                      	// TESTNET MWLWMA parameters
 //--------------------------------------------------------------------------------------------------------------------------
-		const uint64_t TESTNET_MWLWMA_N_SHORT                                =  9;   // Short window
-		const uint64_t TESTNET_MWLWMA_N_MEDIUM                               = 33;   // Medium window
-		const uint64_t TESTNET_MWLWMA_N_LONG                                 = 69;   // Long window
-		const uint64_t TESTNET_MWLWMA_W_SHORT                                = 33;   // 30% weight — more reactive on testnet
-		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 34;   // 45% weight — stability
-		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 33;   // 25% weight — trend
+	// Analysis of testnet blocks 43-596 identified three issues:
+	// 1. DIFFICULTY_WINDOW_V4=45 silently capped N_long to effectiveN=45 (N_long=69 never used)
+	// 2. Equal weights (33/34/33) slowed crash recovery (~37 blocks for a 5x hashrate drop)
+	// 3. No lower clamp — burst-mined 1-6s blocks spiked the short window, causing oscillation
+	// v2 params activate at TESTNET_MWLWMA_V2_HEIGHT (800) so blocks 43-799 re-validate cleanly.
+	// N_short raised 9→17 (less reactive to burst), N_long set to 45 (was already capped there),
+	// weights shifted to medium-dominant (20/55/25), lower clamp T/8 added in nextDifficultyV6.
+		const uint64_t TESTNET_MWLWMA_N_SHORT                                = 17;   // Short window (was 9; 17 reduces burst-mining oscillation)
+		const uint64_t TESTNET_MWLWMA_N_MEDIUM                               = 33;   // Medium window (unchanged)
+		const uint64_t TESTNET_MWLWMA_N_LONG                                 = 45;   // Long window (was 69, but capped to 45 by DIFFICULTY_WINDOW_V4 — now explicit)
+		const uint64_t TESTNET_MWLWMA_W_SHORT                                = 20;   // 20% weight — reduced; burst-mining spikes were distorting difficulty
+		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 55;   // 55% weight — primary stability anchor
+		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 25;   // 25% weight — trend smoothing
+		const uint32_t TESTNET_MWLWMA_V2_HEIGHT                              = 800;  // Activation height for v2 params; old params used below this to preserve existing block validation
 
  	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 
