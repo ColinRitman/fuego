@@ -538,7 +538,7 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // m_consoleHandler.setHandler("burn", boost::bind(&simple_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
   // m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
   m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begin the Elderfire StayKing Ceremony to become an Ξlderfier (interactive, 5x 800 XFG stakes req'd).");
-  m_consoleHandler.setHandler("withdraw_cold", boost::bind(&simple_wallet::withdraw_cold, this, boost::arg<1>()), "withdraw_cold <id> - Withdraw a deposit");
+  m_consoleHandler.setHandler("withdraw", boost::bind(&simple_wallet::withdraw, this, boost::arg<1>()), "withdraw <id> - Withdraw a deposit");
   m_consoleHandler.setHandler("list_cold", boost::bind(&simple_wallet::list_cold, this, boost::arg<1>()), "list_cold - List all COLD txns and Elderfier deposits");
   m_consoleHandler.setHandler("cold_info", boost::bind(&simple_wallet::cold_info, this, boost::arg<1>()), "cold_info <id> - Get detailed info on your Certificate of Ledger Deposits");
   m_consoleHandler.setHandler("list_burns", boost::bind(&simple_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all XFG burn transactions (HEAT)");
@@ -2179,11 +2179,11 @@ bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
 }
 
 //----------------------------------------------------------------------------------------------------
-bool simple_wallet::withdraw_cold(const std::vector<std::string> &args)
+bool simple_wallet::withdraw(const std::vector<std::string> &args)
 {
   if (args.size() != 1)
   {
-    fail_msg_writer() << "Usage: withdraw_cold <id>";
+    fail_msg_writer() << "Usage: withdraw <id>";
     return true;
   }
 

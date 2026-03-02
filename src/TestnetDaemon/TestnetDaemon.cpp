@@ -36,7 +36,7 @@
 #include "P2p/NetNodeConfig.h"
 #include "Rpc/RpcServer.h"
 #include "Rpc/RpcServerConfig.h"
-#include "version.h"
+#include "../version.h.in"
 
 #include "Logging/ConsoleLogger.h"
 #include <Logging/LoggerManager.h>
@@ -83,7 +83,7 @@ void generate_new_testnet_genesis() {
   Logging::ConsoleLogger logger;
   CryptoNote::CurrencyBuilder currencyBuilder(logger);
   currencyBuilder.testnet(true);
-  
+
   // Generate new genesis transaction
   CryptoNote::Transaction tx = currencyBuilder.generateGenesisTransaction();
   CryptoNote::BinaryArray txb = CryptoNote::toBinaryArray(tx);
@@ -242,7 +242,7 @@ int main(int argc, char* argv[])
 " ██       ██████  ███████  ██████   ██████  \n"
 #endif
 			"\n"
-			<< "             "  PROJECT_VERSION_LONG "\n"
+			<< "             "  TESTNET_DAEMON_VERSION "\n"
 			"\n";
 
     if (command_line_preprocessor(vm, logger)) {
