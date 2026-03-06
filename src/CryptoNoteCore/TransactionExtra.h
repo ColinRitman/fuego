@@ -205,19 +205,83 @@ using TransactionExtraCDDepositSecret = TransactionExtraColdCommitment;
 // ============================================================
 
 // Keys derived from a 32-byte depositSecret for commitment outputs.
-// commitKey  = H("fuego_commit_key" || depositSecret) * G  — on-chain public key
-// keyScalar  = the scalar used to produce commitKey          — wallet spend key
-// keyImage   = H_p(commitKey) * keyScalar                   — double-spend nullifier
+// All values are deterministic from depositSecret — nothing extra needs storing.
+//
+//   commitKey  = H("fuego_commit_key"  || depositSecret) * G  — on-chain spend key
+//   keyScalar  = the scalar for commitKey                      — spend secret
+//   keyImage   = H_p(commitKey) * keyScalar                   — double-spend nullifier
+//   amountMask = H("fuego_amount_mask" || depositSecret) mod l — Pedersen blinding factor
+//   termMask   = H("fuego_term_mask"   || depositSecret) mod l — term Pedersen blinding factor
 struct DepositCommitmentKeys {
-  Crypto::PublicKey commitKey;
-  Crypto::SecretKey keyScalar;
-  Crypto::KeyImage  keyImage;
+  Crypto::PublicKey       commitKey;
+  Crypto::SecretKey       keyScalar;
+  Crypto::KeyImage        keyImage;
+  Crypto::EllipticCurveScalar amountMask; // blinding factor for amountCommitment
+  Crypto::EllipticCurveScalar termMask;   // blinding factor for termCommitment
 };
 
-// Derive commitment keys from a 32-byte deposit secret.
+// Derive all commitment keys from a 32-byte deposit secret.
 // For HEAT burns: caller discards keyScalar (permanently non-spendable).
-// For COLD deposits: caller stores depositSecret encrypted in wallet/tx_extra.
+// For COLD/EFier: store depositSecret encrypted in tx_extra (TX_EXTRA_DEPOSIT_SECRET).
+// The masks let the wallet compute + verify amountCommitment and termCommitment.
 DepositCommitmentKeys deriveCommitmentKeys(const std::array<uint8_t, 32>& depositSecret);
+
+// ============================================================
+// Unified Deposit Secret for v10+ Commitment Outputs (0xD5)
+// ============================================================
+// All v10+ deposit types (COLD, HEAT, EFier, Yield) write a SINGLE 0xD5 tag.
+// The deposit type is encoded inside the encrypted payload — no type-revealing
+// tag appears on-chain. Old tags (0x08, 0xCD, 0xEF) remain for legacy multisig
+// deposits only.
+
+enum class DepositType : uint8_t {
+  COLD      = 0x01,  // COLD CD deposit — withdrawable after term
+  HEAT      = 0x02,  // HEAT burn — permanent, key discarded
+  ELDERFIER = 0x03,  // Elderfier stake — review window on unstake
+  YIELD     = 0x04,  // Yield / CIA deposit
+};
+
+// Fixed-size plaintext payload encrypted under the wallet's view key.
+// 46 bytes total, encrypted with chacha8.
+#pragma pack(push, 1)
+struct DepositSecretPayload {
+  uint8_t  depositType;        // DepositType enum (type-erased for on-chain privacy)
+  uint64_t amount;             // deposit amount in atomic units (wallet display)
+  uint32_t term;               // lock term in blocks (wallet display)
+  uint8_t  depositSecret[32];  // random 32-byte secret (source of all derived keys)
+};
+#pragma pack(pop)
+static_assert(sizeof(DepositSecretPayload) == 45, "DepositSecretPayload size mismatch");
+
+// On-chain representation: raw encrypted bytes.
+// Node stores without decrypting; only the owning wallet can read.
+struct TransactionExtraDepositSecret {
+  std::vector<uint8_t> encryptedPayload; // exactly 45 bytes (sizeof DepositSecretPayload)
+};
+
+// Encrypt a DepositSecretPayload into TransactionExtraDepositSecret.
+// Encryption: chacha8(key=ECDH(recipientViewPub, txSecKey), iv=txPubKey[0:8])
+// The txPubKey is already in tx_extra (0x01) so no extra on-chain data needed.
+bool encryptDepositSecret(const DepositSecretPayload& plaintext,
+                          const Crypto::PublicKey& recipientViewPubKey,
+                          const Crypto::SecretKey& txSecKey,
+                          const Crypto::PublicKey& txPubKey,
+                          TransactionExtraDepositSecret& out);
+
+// Decrypt a TransactionExtraDepositSecret using the wallet's view key.
+// txPubKey is recovered from TX_EXTRA_TAG_PUBKEY (already in tx_extra).
+bool decryptDepositSecret(const TransactionExtraDepositSecret& encrypted,
+                          const Crypto::PublicKey& txPubKey,
+                          const Crypto::SecretKey& walletViewSecKey,
+                          DepositSecretPayload& out);
+
+// Write a TransactionExtraDepositSecret into tx_extra bytes (tag 0xD5 + len + ciphertext).
+bool addDepositSecretToExtra(std::vector<uint8_t>& tx_extra,
+                             const TransactionExtraDepositSecret& secret);
+
+// Find and return the first 0xD5 record from tx_extra bytes (encrypted, not decrypted).
+bool getDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra,
+                               TransactionExtraDepositSecret& out);
 
 
 typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraAliasRegistration, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraColdCommitment, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;

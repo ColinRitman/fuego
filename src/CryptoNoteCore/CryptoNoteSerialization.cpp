@@ -194,8 +194,8 @@ bool serialize(EllipticCurvePoint& ecPoint, Common::StringView name, CryptoNote:
   return serializePod(ecPoint, name, serializer);
 }
 
-bool serialize(TierProof& tierProof, Common::StringView name, CryptoNote::ISerializer& serializer) {
-  return serializePod(tierProof, name, serializer);
+bool serialize(MembershipProof& proof, Common::StringView name, CryptoNote::ISerializer& serializer) {
+  return serializePod(proof, name, serializer);
 }
 
 }
@@ -342,7 +342,9 @@ void serialize(TransactionOutputCommitment& out, ISerializer& serializer) {
   serializer(out.commitKey, "key");
   serializer(out.term, "term");
   serializePod(out.amountCommitment, "amount_commitment", serializer);
-  serializePod(out.tierProof, "tier_proof", serializer);
+  serializePod(out.amountProof,      "amount_proof",      serializer);
+  serializePod(out.termCommitment,   "term_commitment",   serializer);
+  serializePod(out.termProof,        "term_proof",        serializer);
 }
 
 void serialize(ParentBlockSerializer& pbs, ISerializer& serializer) {

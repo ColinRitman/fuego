@@ -18,7 +18,8 @@
 #include <stdint.h>
 #include <string.h>
 
-#define FUEGO_TIER_COUNT 4
+// Max N for MembershipProof — covers 4 amount tiers AND 4 deposit terms.
+#define FUEGO_MEMBERSHIP_N 4
 
 #ifdef __cplusplus
 namespace Crypto {
@@ -62,11 +63,14 @@ struct Signature {
   uint8_t data[64];
 };
 
-// 1-of-N OR proof that a Pedersen commitment hides one of N known tier amounts.
-// Used as a lightweight range proof for tiered deposit outputs.
-struct TierProof {
-  struct EllipticCurveScalar e[FUEGO_TIER_COUNT]; // challenge shares (sum to Fiat-Shamir challenge)
-  struct EllipticCurveScalar s[FUEGO_TIER_COUNT]; // Schnorr responses
+// 1-of-N OR proof (Cramer-Damgard-Schoenmakers sigma protocol) proving a
+// Pedersen commitment C = v*H + mask*G hides one of N known values.
+// Used for both amount privacy (v ∈ {TIER_0..TIER_3}) and term privacy
+// (v ∈ {3mo, 1yr, FOREVER, EFier}).
+// Proof size: N * 64 bytes = 256 bytes for N=4.
+struct MembershipProof {
+  struct EllipticCurveScalar e[FUEGO_MEMBERSHIP_N]; // challenge shares (sum = Fiat-Shamir challenge)
+  struct EllipticCurveScalar s[FUEGO_MEMBERSHIP_N]; // Schnorr responses
 };
 
 const struct EllipticCurveScalar I = {{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00} };

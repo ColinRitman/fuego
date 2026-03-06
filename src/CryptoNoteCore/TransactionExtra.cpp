@@ -264,6 +264,18 @@ namespace CryptoNote
           }
           break;
         }
+
+        case TX_EXTRA_DEPOSIT_SECRET:
+        {
+          // 0xD5: encrypted deposit secret. Read directly via getDepositSecretFromExtra();
+          // parser skips bytes here so unknown-tag early exit doesn't occur.
+          uint8_t dsLen = read<uint8_t>(iss);
+          if (dsLen > 0) {
+            for (uint8_t i = 0; i < dsLen; ++i)
+              read<uint8_t>(iss);
+          }
+          break;
+        }
       }
     }
     }
@@ -2139,7 +2151,130 @@ DepositCommitmentKeys deriveCommitmentKeys(const std::array<uint8_t, 32>& deposi
   // keyImage = H_p(commitKey) * keyScalar  for standard Fuego key image
   Crypto::generate_key_image(keys.commitKey, keys.keyScalar, keys.keyImage);
 
+  // amountMask = hash_to_scalar("fuego_amount_mask" || depositSecret) mod l
+  {
+    static const char amLabel[] = "fuego_amount_mask";  // 17 bytes
+    uint8_t amPre[49];
+    memcpy(amPre,      amLabel,              17);
+    memcpy(amPre + 17, depositSecret.data(), 32);
+    Crypto::hash_to_scalar(amPre, sizeof(amPre),
+      reinterpret_cast<Crypto::EllipticCurveScalar&>(keys.amountMask));
+  }
+
+  // termMask = hash_to_scalar("fuego_term_mask" || depositSecret) mod l
+  {
+    static const char tmLabel[] = "fuego_term_mask";    // 15 bytes
+    uint8_t tmPre[47];
+    memcpy(tmPre,      tmLabel,              15);
+    memcpy(tmPre + 15, depositSecret.data(), 32);
+    Crypto::hash_to_scalar(tmPre, sizeof(tmPre),
+      reinterpret_cast<Crypto::EllipticCurveScalar&>(keys.termMask));
+  }
+
   return keys;
+}
+
+// ============================================================
+// Unified Deposit Secret Encryption (0xD5 tag)
+// ============================================================
+//
+// Key derivation: ECDH shared secret via generate_key_derivation, then
+//   cn_fast_hash(derivation || domain_tag) → 32-byte chacha8 key.
+// IV: first 8 bytes of txPubKey (already on-chain as tag 0x01 — no extra data).
+
+namespace {
+
+struct DepositKeyData {
+  Crypto::KeyDerivation derivation;
+  uint8_t tag[2];  // domain separator: {0xD5, 0x00}
+};
+static_assert(sizeof(DepositKeyData) == sizeof(Crypto::KeyDerivation) + 2, "");
+
+// Derive chacha8 key from ECDH derivation.
+static Crypto::chacha8_key depositEncKey(const Crypto::KeyDerivation& derivation) {
+  DepositKeyData kd;
+  kd.derivation = derivation;
+  kd.tag[0] = 0xD5;
+  kd.tag[1] = 0x00;
+  Crypto::Hash h = Crypto::cn_fast_hash(&kd, sizeof(kd));
+  Crypto::chacha8_key out;
+  memcpy(out.data, &h, sizeof(out.data));
+  return out;
+}
+
+// IV = first 8 bytes of txPubKey.
+static Crypto::chacha8_iv depositEncIV(const Crypto::PublicKey& txPubKey) {
+  Crypto::chacha8_iv iv;
+  memcpy(iv.data, &txPubKey, sizeof(iv.data));
+  return iv;
+}
+
+} // anonymous namespace
+
+bool encryptDepositSecret(const DepositSecretPayload& plaintext,
+                          const Crypto::PublicKey& recipientViewPubKey,
+                          const Crypto::SecretKey& txSecKey,
+                          const Crypto::PublicKey& txPubKey,
+                          TransactionExtraDepositSecret& out) {
+  Crypto::KeyDerivation derivation;
+  if (!Crypto::generate_key_derivation(recipientViewPubKey, txSecKey, derivation))
+    return false;
+
+  Crypto::chacha8_key encKey = depositEncKey(derivation);
+  Crypto::chacha8_iv  encIV  = depositEncIV(txPubKey);
+
+  out.encryptedPayload.resize(sizeof(DepositSecretPayload));
+  Crypto::chacha8(&plaintext, sizeof(DepositSecretPayload),
+                  encKey, encIV,
+                  reinterpret_cast<char*>(out.encryptedPayload.data()));
+  return true;
+}
+
+bool decryptDepositSecret(const TransactionExtraDepositSecret& encrypted,
+                          const Crypto::PublicKey& txPubKey,
+                          const Crypto::SecretKey& walletViewSecKey,
+                          DepositSecretPayload& out) {
+  if (encrypted.encryptedPayload.size() != sizeof(DepositSecretPayload))
+    return false;
+
+  Crypto::KeyDerivation derivation;
+  if (!Crypto::generate_key_derivation(txPubKey, walletViewSecKey, derivation))
+    return false;
+
+  Crypto::chacha8_key encKey = depositEncKey(derivation);
+  Crypto::chacha8_iv  encIV  = depositEncIV(txPubKey);
+
+  Crypto::chacha8(encrypted.encryptedPayload.data(), sizeof(DepositSecretPayload),
+                  encKey, encIV,
+                  reinterpret_cast<char*>(&out));
+  return true;
+}
+
+bool addDepositSecretToExtra(std::vector<uint8_t>& tx_extra,
+                             const TransactionExtraDepositSecret& secret) {
+  if (secret.encryptedPayload.size() > 255)
+    return false;
+  tx_extra.push_back(TX_EXTRA_DEPOSIT_SECRET);
+  tx_extra.push_back(static_cast<uint8_t>(secret.encryptedPayload.size()));
+  tx_extra.insert(tx_extra.end(),
+                  secret.encryptedPayload.begin(),
+                  secret.encryptedPayload.end());
+  return true;
+}
+
+bool getDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra,
+                               TransactionExtraDepositSecret& out) {
+  for (size_t i = 0; i + 1 < tx_extra.size(); ++i) {
+    if (tx_extra[i] != TX_EXTRA_DEPOSIT_SECRET)
+      continue;
+    uint8_t len = tx_extra[i + 1];
+    if (i + 2 + len > tx_extra.size())
+      return false;
+    out.encryptedPayload.assign(tx_extra.begin() + i + 2,
+                                tx_extra.begin() + i + 2 + len);
+    return true;
+  }
+  return false;
 }
 
 } // namespace CryptoNote
