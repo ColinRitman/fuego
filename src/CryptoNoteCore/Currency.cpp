@@ -127,7 +127,7 @@ namespace CryptoNote
     m_genesisBlock.nonce = 70;
     if (m_testnet)
     {
-      m_genesisBlock.nonce = 77; // New nonce for testnet genesis
+      m_genesisBlock.nonce = 78; // New nonce for testnet genesis
     }
 
     //miner::find_nonce_for_given_block(bl, 1, 0);
