@@ -10,7 +10,9 @@
 #include <cstdint>
 #include "../../include/CryptoTypes.h"
 
-struct ge_p3;
+extern "C" {
+#include "crypto-ops.h"
+}
 
 namespace Crypto {
 

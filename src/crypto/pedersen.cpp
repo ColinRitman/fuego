@@ -8,7 +8,6 @@
 #include <cstring>
 
 extern "C" {
-#include "crypto-ops.h"
 #include "hash-ops.h"
 }
 
