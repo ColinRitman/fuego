@@ -194,6 +194,10 @@ bool serialize(EllipticCurvePoint& ecPoint, Common::StringView name, CryptoNote:
   return serializePod(ecPoint, name, serializer);
 }
 
+bool serialize(TierProof& tierProof, Common::StringView name, CryptoNote::ISerializer& serializer) {
+  return serializePod(tierProof, name, serializer);
+}
+
 }
 
 namespace CryptoNote {
@@ -337,6 +341,8 @@ void serialize(TransactionInputCommitmentSpend& in, ISerializer& serializer) {
 void serialize(TransactionOutputCommitment& out, ISerializer& serializer) {
   serializer(out.commitKey, "key");
   serializer(out.term, "term");
+  serializePod(out.amountCommitment, "amount_commitment", serializer);
+  serializePod(out.tierProof, "tier_proof", serializer);
 }
 
 void serialize(ParentBlockSerializer& pbs, ISerializer& serializer) {

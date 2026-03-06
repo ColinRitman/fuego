@@ -32,6 +32,7 @@ bool serialize(KeyImage &keyImage, Common::StringView name, CryptoNote::ISeriali
 bool serialize(Signature& sig, Common::StringView name, CryptoNote::ISerializer& serializer);
 bool serialize(EllipticCurveScalar& ecScalar, Common::StringView name, CryptoNote::ISerializer& serializer);
 bool serialize(EllipticCurvePoint& ecPoint, Common::StringView name, CryptoNote::ISerializer& serializer);
+bool serialize(TierProof& tierProof, Common::StringView name, CryptoNote::ISerializer& serializer);
 
 }
 

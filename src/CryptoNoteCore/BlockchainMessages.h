@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -19,7 +19,7 @@
 
 #include <vector>
 
-#include <CryptoNote.h>
+#include "../../include/CryptoNote.h"
 
 namespace CryptoNote {
 

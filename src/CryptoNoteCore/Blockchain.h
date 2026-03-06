@@ -20,29 +20,29 @@
 
 #include <atomic>
 
-#include <parallel_hashmap/phmap.h>
+#include "../../external/parallel_hashmap/phmap.h"
 
-#include "Common/ObserverManager.h"
-#include "Common/Util.h"
-#include "CryptoNoteCore/BlockIndex.h"
-#include "CryptoNoteCore/Checkpoints.h"
-#include "CryptoNoteCore/Currency.h"
-#include "CryptoNoteCore/BankingIndex.h"
-#include "CryptoNoteCore/CommitmentIndex.h"
-#include "CryptoNoteCore/IBlockchainStorageObserver.h"
-#include "CryptoNoteCore/ITransactionValidator.h"
-#include "CryptoNoteCore/SwappedVector.h"
-#include "CryptoNoteCore/UpgradeDetector.h"
-#include "CryptoNoteCore/CryptoNoteFormatUtils.h"
-#include "CryptoNoteCore/TransactionPool.h"
-#include "CryptoNoteCore/AliasIndex.h"
-#include "CryptoNoteCore/BlockchainIndices.h"
+#include "../Common/ObserverManager.h"
+#include "../Common/Util.h"
+#include "BlockIndex.h"
+#include "Checkpoints.h"
+#include "Currency.h"
+#include "BankingIndex.h"
+#include "CommitmentIndex.h"
+#include "IBlockchainStorageObserver.h"
+#include "ITransactionValidator.h"
+#include "SwappedVector.h"
+#include "UpgradeDetector.h"
+#include "CryptoNoteFormatUtils.h"
+#include "TransactionPool.h"
+#include "AliasIndex.h"
+#include "BlockchainIndices.h"
 
-#include "CryptoNoteCore/MessageQueue.h"
-#include "CryptoNoteCore/BlockchainMessages.h"
-#include "CryptoNoteCore/IntrusiveLinkedList.h"
+#include "MessageQueue.h"
+#include "BlockchainMessages.h"
+#include "IntrusiveLinkedList.h"
 
-#include <Logging/LoggerRef.h>
+#include "../Logging/LoggerRef.h"
 
 #undef ERROR
 using phmap::parallel_flat_hash_map;

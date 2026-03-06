@@ -13,15 +13,16 @@
 // You should have received a copy of the GNU General Public License
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
-#include "CommitmentIndex.h"
-#include "Serialization/ISerializer.h"
-#include "Common/StringTools.h"
-#include "TransactionExtra.h"
-#include "crypto/hash.h"
-#include "CryptoNoteConfig.h"
 #include <set>
 #include <algorithm>
 #include <cstring>
+
+#include "CommitmentIndex.h"
+#include "TransactionExtra.h"
+#include "../Serialization/ISerializer.h"
+#include "../Common/StringTools.h"
+#include "../crypto/hash.h"
+#include "../CryptoNoteConfig.h"
 
 namespace CryptoNote {
 
@@ -545,7 +546,8 @@ uint64_t CommitmentIndex::getBlockBankingFee(uint64_t height) const {
 }
 
 bool CommitmentIndex::isEpochBoundary(uint64_t height) const {
-  return height > 0 && (height / EPOCH_DURATION_BLOCKS) > ((height - 1) / EPOCH_DURATION_BLOCKS);
+  uint64_t epochDur = getEpochDuration();
+  return height > 0 && (height / epochDur) > ((height - 1) / epochDur);
 }
 
 std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::finalizeEpoch(uint64_t currentBlockHeight) {
@@ -575,8 +577,17 @@ std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::finalize
   epochRewards.totalFeesCollected = m_currentEpochTotalFees;
 
   if (m_currentEpochTotalFees > 0) {
-    // Only signing EFiers receive rewards
-    epochRewards.activeElderfiers = getSignedElderfierIds();
+    // Only signing EFiers receive rewards (inline to avoid deadlock — we already hold m_mutex)
+    {
+      std::string current_root_hex = Common::podToHex(m_current_merkle_root);
+      std::set<uint8_t> seen;
+      for (auto it = m_signatures.begin(); it != m_signatures.end(); ++it) {
+        if (it->first.second == current_root_hex && it->second.is_valid && seen.find(it->first.first) == seen.end()) {
+          epochRewards.activeElderfiers.push_back(it->first.first);
+          seen.insert(it->first.first);
+        }
+      }
+    }
 
     if (!epochRewards.activeElderfiers.empty()) {
       // Distribute fees equally among signers only
@@ -617,7 +628,7 @@ std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::finalize
 uint64_t CommitmentIndex::getCurrentEpoch(uint64_t blockHeight) const {
   // Each epoch is 1000 blocks
   // Epoch 0: blocks 0-999, Epoch 1: blocks 1000-1999, etc.
-  return blockHeight / EPOCH_DURATION_BLOCKS;
+  return blockHeight / getEpochDuration();
 }
 
 std::vector<uint8_t> CommitmentIndex::getActiveElderfiers(uint64_t epochNumber) const {

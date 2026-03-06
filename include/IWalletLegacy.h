@@ -26,8 +26,8 @@
 #include <list>
 #include <boost/optional.hpp>
 #include "CryptoNote.h"
-#include "CryptoNoteCore/CryptoNoteBasic.h"
-#include "Rpc/CoreRpcServerCommandsDefinitions.h"
+#include "../src/CryptoNoteCore/CryptoNoteBasic.h"
+#include "../src/Rpc/CoreRpcServerCommandsDefinitions.h"
 #include "ITransfersContainer.h"
 #include "IWallet.h"
 

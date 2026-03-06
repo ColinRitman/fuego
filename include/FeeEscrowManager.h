@@ -1,5 +1,5 @@
-// Copyright (c) 2017-2025 Fuego Developers
-// Copyright (c) 2020-2025 Elderfire Privacy Group
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2020-2026 Elderfire Privacy Group
 //
 // This file is part of Fuego.
 //
@@ -20,8 +20,8 @@
 #include <mutex>
 #include <cstdint>
 #include <memory>
-#include "Logging/ILogger.h"
-#include "Logging/LoggerRef.h"
+#include "../src/Logging/ILogger.h"
+#include "../src/Logging/LoggerRef.h"
 
 namespace CryptoNote {
 

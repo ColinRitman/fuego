@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2025 Fuego Developers
+// Copyright (c) 2019-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -20,26 +20,26 @@
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 
-#include "Daemon/DaemonCommandsHandler.h"
+#include "../Daemon/DaemonCommandsHandler.h"
 
-#include "Common/SignalHandler.h"
-#include "Common/PathTools.h"
-#include "crypto/hash.h"
-#include "CryptoNoteCore/Core.h"
-#include "CryptoNoteCore/CoreConfig.h"
-#include "CryptoNoteCore/CryptoNoteTools.h"
-#include "CryptoNoteCore/Currency.h"
-#include "CryptoNoteCore/MinerConfig.h"
-#include "CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
-#include "CryptoNoteProtocol/ICryptoNoteProtocolQuery.h"
-#include "P2p/NetNode.h"
-#include "P2p/NetNodeConfig.h"
-#include "Rpc/RpcServer.h"
-#include "Rpc/RpcServerConfig.h"
+#include "../Common/SignalHandler.h"
+#include "../Common/PathTools.h"
+#include "../crypto/hash.h"
+#include "../CryptoNoteCore/Core.h"
+#include "../CryptoNoteCore/CoreConfig.h"
+#include "../CryptoNoteCore/CryptoNoteTools.h"
+#include "../CryptoNoteCore/Currency.h"
+#include "../CryptoNoteCore/MinerConfig.h"
+#include "../CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
+#include "../CryptoNoteProtocol/ICryptoNoteProtocolQuery.h"
+#include "../P2p/NetNode.h"
+#include "../P2p/NetNodeConfig.h"
+#include "../Rpc/RpcServer.h"
+#include "../Rpc/RpcServerConfig.h"
 #include "../version.h.in"
 
-#include "Logging/ConsoleLogger.h"
-#include <Logging/LoggerManager.h>
+#include "../Logging/ConsoleLogger.h"
+#include "../Logging/LoggerManager.h"
 
 #if defined(WIN32)
 #include <crtdbg.h>

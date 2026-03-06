@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -18,12 +18,12 @@
 #include "CryptoNoteBasicImpl.h"
 #include "CryptoNoteFormatUtils.h"
 #include "CryptoNoteTools.h"
-#include "CryptoNoteConfig.h"
-#include "CryptoNoteSerialization.h"
+#include "../CryptoNoteConfig.h"
+// #include "CryptoNoteSerialization.h"
 
-#include "Common/Base58.h"
-#include "crypto/hash.h"
-#include "Common/int-util.h"
+#include "../Common/Base58.h"
+#include "../crypto/hash.h"
+#include "../Common/int-util.h"
 
 using namespace Crypto;
 using namespace Common;

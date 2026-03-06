@@ -24,13 +24,13 @@
 #include <cstdio>
 #include <cmath>
 #include <boost/foreach.hpp>
-#include "Common/Math.h"
-#include "Common/int-util.h"
-#include "Common/ShuffleGenerator.h"
-#include "Common/StdInputStream.h"
-#include "Common/StdOutputStream.h"
-#include "Rpc/CoreRpcServerCommandsDefinitions.h"
-#include "Serialization/BinarySerializationTools.h"
+#include "../Common/Math.h"
+#include "../Common/int-util.h"
+#include "../Common/ShuffleGenerator.h"
+#include "../Common/StdInputStream.h"
+#include "../Common/StdOutputStream.h"
+#include "../Rpc/CoreRpcServerCommandsDefinitions.h"
+#include "../Serialization/BinarySerializationTools.h"
 #include "CryptoNoteTools.h"
 #include "TransactionExtra.h"
 #include "CommitmentIndex.h"
@@ -1407,16 +1407,16 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
   }
 
   if (blockMajorVersion >= CryptoNote::BLOCK_MAJOR_VERSION_10) {
-    // V10+: Banking fees are withheld from miner and paid to EFiers at epoch boundaries.
+    // V10+: Banking fees are paid to EFiers at epoch boundaries.
     // Recompute banking fees deterministically from block transactions.
     uint64_t bankingFeesInBlock = computeBankingFeesFromTransactions(blockTransactions);
 
-    // Compute expected EFier rewards at epoch boundary
+    // Compute expected EFier fees at epoch boundary
     uint64_t efierTotal = 0;
     if (m_commitmentIndex.isEpochBoundary(height)) {
       // At epoch boundary, finalizeEpoch will distribute accumulated fees.
       // For validation, we need the efier outputs total from the coinbase.
-      // The actual distribution is deterministic based on signed EFiers and accumulated fees.
+      // The actual distribution is deterministic based on SIGNED EFiers and accumulated fees.
       // We trust the miner included the correct EFier outputs; the total is validated below.
       // The pushToBankingIndex/finalizeEpoch call after validation will verify consistency.
       // For now, efierTotal = coinbaseTotal - (reward - bankingFeesInBlock)
@@ -1424,7 +1424,7 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
     }
 
     // Expected coinbase: reward - bankingFeesInBlock + efierTotal
-    // Since we don't independently know efierTotal during validation (it comes from
+    // Since we don't independently know Efier Total during validation (it comes from
     // CommitmentIndex state that gets updated AFTER this block), we validate that:
     // coinbaseTotal >= reward - bankingFeesInBlock  (miner got at least emission)
     // coinbaseTotal <= reward                       (no inflation — total can't exceed full reward)
@@ -1433,7 +1433,7 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
     if (coinbaseTotal < expectedMinerReward) {
       logger(ERROR, BRIGHT_RED) << "Coinbase too small at height " << height << ": "
         << m_currency.formatAmount(coinbaseTotal) << " (actual) vs "
-        << m_currency.formatAmount(expectedMinerReward) << " (expected min, after banking fee withhold)"
+        << m_currency.formatAmount(expectedMinerReward) << " (expected min, after banking fee)"
         << " [bankingFees=" << m_currency.formatAmount(bankingFeesInBlock) << "]";
       return false;
     }
@@ -1446,14 +1446,11 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
       return false;
     }
 
-    // The emission change accounts for the full coinbase total (miner + EFier outputs)
-    // since all outputs come from existing fees (non-inflationary)
+    // The emission change accounts for full coinbase total (miner + EFier outputs)
+    // since all outputs come from existing fees (no inflation)
   } else {
     // Pre-v10: only reject if miner claims MORE than the calculated reward.
     // Miners may legitimately claim less (underspend just reduces emission).
-    // This matches standard CryptoNote validation and handles edge cases where
-    // the penalty calculation produces slightly different results during re-sync
-    // due to median differences.
     if (coinbaseTotal > reward) {
       logger(ERROR, BRIGHT_RED) << "Coinbase transaction spends too much at height " << height << ": "
         << m_currency.formatAmount(coinbaseTotal) << " (actual) vs "
@@ -2316,7 +2313,7 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
   // Degenerate-ring guard: if every member is FOREVER-term, no valid real spend
   // is possible (all keyScalars were discarded for burns). Reject immediately.
   if (!hasNonForever) {
-    logger(INFO) << "CommitmentSpend: all ring members are FOREVER-term (burn outputs) — no valid real spend possible";
+    logger(INFO) << "CommitmentSpend: all ring members are burned outputs — no valid real spend possible";
     return false;
   }
 
@@ -2850,6 +2847,9 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
         } else if (field.type() == typeid(TransactionExtraColdCommitment)) {
           const auto& cold = boost::get<TransactionExtraColdCommitment>(field);
           totalBankingFees += (cold.amount * 1) / 1000;  // 0.1%
+        } else if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
+          const auto& ef = boost::get<TransactionExtraElderfierDeposit>(field);
+          totalBankingFees += (ef.depositAmount * 1) / 1000;  // 0.1%
         }
       }
     }
@@ -2868,6 +2868,19 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
       // Parse transaction extra to detect burn types (0X08 0xEF)
       std::vector<TransactionExtraField> extraFields;
       if (parseTransactionExtra(tx.tx.extra, extraFields)) {
+        logger(INFO, "Blockchain") << "Transaction " << getObjectHash(tx.tx)
+                                 << " extra: Found " << extraFields.size() << " fields";
+        for (size_t i = 0; i < extraFields.size(); ++i) {
+          if (extraFields[i].type() == typeid(TransactionExtraElderfierDeposit)) {
+            logger(INFO, "Blockchain") << "  Field " << i << ": TransactionExtraElderfierDeposit";
+          } else if (extraFields[i].type() == typeid(TransactionExtraAliasRegistration)) {
+            logger(INFO, "Blockchain") << "  Field " << i << ": TransactionExtraAliasRegistration";
+          } else if (extraFields[i].type() == typeid(TransactionExtraPublicKey)) {
+            logger(INFO, "Blockchain") << "  Field " << i << ": TransactionExtraPublicKey";
+          } else {
+            logger(INFO, "Blockchain") << "  Field " << i << ": Unknown type";
+          }
+        }
         for (const auto& field : extraFields) {
           // Check for HEAT commitment (0x08) - permanent burn
           if (field.type() == typeid(TransactionExtraHeatCommitment)) {
@@ -2942,12 +2955,26 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             entry.targetChainId = 0;  // No cross-chain claim for staking
             entry.senderAddress = Common::podToHex(elderfierDeposit.elderfierCommitment);
 
-            // Extract ceremony alias from metadata (0xEA tag + 8 bytes)
-            if (elderfierDeposit.metadata.size() == 9 && elderfierDeposit.metadata[0] == 0xEA) {
-              entry.ceremonyAlias = std::string(elderfierDeposit.metadata.begin() + 1, elderfierDeposit.metadata.end());
+            // Extract ceremony alias from metadata (0xEA tag + variable length)
+            std::string ceremonyAlias;
+            if (elderfierDeposit.metadata.size() >= 2 && elderfierDeposit.metadata[0] == 0xEA) {
+              ceremonyAlias = std::string(elderfierDeposit.metadata.begin() + 1, elderfierDeposit.metadata.end());
             }
 
+            // Use alias as ceremony identifier (groups all 5 deposits)
+            if (!ceremonyAlias.empty()) {
+              entry.senderAddress = "CEREMONY:" + ceremonyAlias;
+            }
+            entry.ceremonyAlias = ceremonyAlias;
+
             m_commitmentIndex.addCommitment(entry);
+
+            // Extract 0.1% banking fee for elderfier distribution (EF staking deposits)
+            uint64_t efFee = (elderfierDeposit.depositAmount * 1) / 1000;  // 0.1% = 1/1000
+            if (efFee > 0) {
+              m_commitmentIndex.addElderfierFee(efFee);
+              logger(DEBUGGING) << "EF fee extracted: " << efFee << " heat (0.1% of " << elderfierDeposit.depositAmount << ")";
+            }
 
             logger(DEBUGGING) << "Elderfier staking deposit indexed: " << Common::podToHex(elderfierDeposit.depositHash)
                              << " amount=" << elderfierDeposit.depositAmount

@@ -1,11 +1,12 @@
+// Copyright (c) 2017-2026  Fuego Developers
 // Copyright (c) 2012-2016, The CryptoNote developers, The Bytecoin developers
 // Copyright (c) 2016-2025, The Karbo developers
 
 #pragma once
 
-#include <System/TcpConnection.h>
-#include <System/Dispatcher.h>
-#include <System/Ipv4Address.h>
+#include "TcpConnection.h"
+#include "Dispatcher.h"
+#include "Ipv4Address.h"
 
 namespace System {
 

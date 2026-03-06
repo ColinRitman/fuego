@@ -493,7 +493,7 @@ func cmdAddress() {
 func cmdBcHeight() {
 	if !needWallet() { return }
 	go func() {
-		lines := walletExec("bc_height", 2)
+		lines := walletExec("height", 2)
 		appState.app.QueueUpdateDraw(func() { msgBox("Blockchain Height\n\n" + strings.Join(lines, "\n")) })
 	}()
 }
@@ -637,8 +637,8 @@ func uiGenerateProofForm() {
 			hash := txHash.GetText()
 			if hash == "" { msgBox("Enter a transaction hash"); return }
 			go func() {
-				lines := walletExec("generate_proof "+hash, 5)
-				appState.app.QueueUpdateDraw(func() { scrollBox("STARK Proof", lines) })
+				lines := walletExec("gen_proof "+hash, 5)
+				appState.app.QueueUpdateDraw(func() { scrollBox("use xfg-stark-cli for actual STARK Proof", lines) })
 			}()
 		}).
 		AddButton("Cancel", func() { appState.pages.SwitchToPage("main") })

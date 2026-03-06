@@ -18,7 +18,7 @@
 #pragma once
 #include <map>
 #include "CryptoNoteBasicImpl.h"
-#include <Logging/LoggerRef.h>
+#include "../Logging/LoggerRef.h"
 #include "Currency.h"
 
 namespace CryptoNote

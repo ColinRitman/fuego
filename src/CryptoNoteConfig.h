@@ -89,13 +89,36 @@ namespace CryptoNote
 		const size_t   DIFFICULTY_WINDOW_V4                          = 45;  // blocks  Zawy-LWMA1 Fuego (~180 block per day)
 
 		// MWLWMA (Multi-Window LWMA) MAINNET parameters — 3 Ns and 3 weights
-		const uint64_t MWLWMA_N_SHORT                                 = 30;   // Short window (~4 hours at T=480)
-		const uint64_t MWLWMA_N_MEDIUM                                = 60;   // Medium window (~8 hours) — Zawy-recommended N for T≈480
+		const uint64_t MWLWMA_N_SHORT                                 = 21;   // Short window (~4 hours at T=480)
+		const uint64_t MWLWMA_N_MEDIUM                                = 45;   // Medium window (~8 hours) — Zawy-recommended N for T≈480
 		const uint64_t MWLWMA_N_LONG                                  = 90;   // Long window (~12 hours)
 		const uint64_t MWLWMA_W_SHORT                                 = 25;   // 25% weight — responsiveness
 		const uint64_t MWLWMA_W_MEDIUM                                = 50;   // 50% weight — stability anchor
 		const uint64_t MWLWMA_W_LONG                                  = 25;   // 25% weight — trend dampening
 		const size_t   MWLWMA_DIFFICULTY_WINDOW                       = 92;   // N_long+2 = 90+2; replaces DIFFICULTY_WINDOW_V4 for v10+
+
+		// DMWDA MAINNET parameters
+		const uint32_t DMWDA_SHORT_WINDOW                            = 15;   // Rapid response window
+		const uint32_t DMWDA_MEDIUM_WINDOW                           = 45;   // Stability window
+		const uint32_t DMWDA_LONG_WINDOW                             = 120;  // Trend analysis window
+		const uint32_t DMWDA_EMERGENCY_WINDOW                        = 5;    // Emergency response window
+		const double   DMWDA_MIN_ADJUSTMENT                          = 0.5;  // Minimum difficulty adjustment (50%)
+		const double   DMWDA_MAX_ADJUSTMENT                          = 4.0;  // Maximum difficulty adjustment (400%)
+		const double   DMWDA_EMERGENCY_THRESHOLD                     = 0.1;  // Emergency threshold (10%)
+		const double   DMWDA_SMOOTHING_FACTOR                        = 0.3;  // Smoothing factor for oscillations prevention
+		const double   DMWDA_CONFIDENCE_MIN                          = 0.1;  // Minimum confidence score
+		const double   DMWDA_CONFIDENCE_MAX                          = 1.0;  // Maximum confidence score
+		const double   DMWDA_ADJUSTMENT_RANGE                        = 0.3;  // Adjustment range for confidence-based bounds
+		const double   DMWDA_WEIGHT_SHORT                            = 0.4;  // Weight for short window
+		const double   DMWDA_WEIGHT_MEDIUM                           = 0.4;  // Weight for medium window
+		const double   DMWDA_WEIGHT_LONG                             = 0.2;  // Weight for long window
+		const double   DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 10.0; // Hash rate change threshold for anomaly detection
+		const double   DMWDA_DEFAULT_CONFIDENCE                      = 0.5;  // Default confidence score
+		const uint32_t DMWDA_RECENT_WINDOW_SIZE                      = 5;    // Recent window size for anomaly detection
+		const uint32_t DMWDA_HISTORICAL_WINDOW_SIZE                  = 20;   // Historical window size for anomaly detection
+		const uint32_t DMWDA_BLOCK_STEALING_CHECK_BLOCKS             = 5;    // Number of blocks to check for stealing attempts
+		const uint32_t DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
+		const double   DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.05; // 5% of target time threshold for fast blocks
 
         // MIXIN
 		const uint64_t MIN_TX_MIXIN_SIZE_V2                          = 2;  // Legacy mixin
@@ -115,14 +138,18 @@ namespace CryptoNote
         const uint64_t TEST_AMOUNT_TIER_2 =   80000000;  // 8 TEST (80,000,000 atomic units)
         const uint64_t TEST_AMOUNT_TIER_3 =  800000000;  // 80 TEST (800,000,000 atomic units)
 
- 	    // Elderfier constants
+ 	    // ELDERFIER constants
         const uint64_t ELDERKING_CEREMONY_AMOUNT = UINT64_C(5) * AMOUNT_TIER_3;  /* 4000 XFG (40,000,000,000 atomic units) (5 x amount_tier_3 deposits) */
         const uint32_t DEPOSIT_TERM_ELDERFIER_STAKING = 8;  // 0xEF deposits: term=8-block minimum, then unstakeable on demand, 1000-block review
         const uint32_t ELDERFIER_STAKING_REVIEW_WINDOW = 1000;  // 1000 blocks (~5.5 days) for review before unstaking completes
         // TESTIFIER - TESTNET Elderiers
-	    const uint64_t TESTIFIER_CEREMONY_AMOUNT = UINT64_C(5) * TEST_AMOUNT_TIER_3;  /* 400 XFG in atomic units (5 x amount_tier_3 deposits) */
+	    const uint64_t TESTIFIER_CEREMONY_AMOUNT = UINT64_C(5) * TEST_AMOUNT_TIER_1;  /* 4 TEST in atomic units (5 x amount_tier_0 [0.8] deposits) */
 	    const uint32_t TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING = 2;  // 0xEF deposits: term=0 (unstakeable on demand), 10-block review window
         const uint32_t TESTNET_ELDERFIER_STAKING_REVIEW_WINDOW = 10;  // 10 blocks (fast review for testing)
+
+        // Epoch duration for EFier fee distribution
+        const uint64_t EPOCH_DURATION_BLOCKS = 1000;             // Mainnet: 1000 blocks (~5.5 days)
+        const uint64_t TESTNET_EPOCH_DURATION_BLOCKS = 10;       // Testnet: 10 blocks (fast epochs for testing)
 
         // MAINNET DEPOSITS
         const uint64_t DEPOSIT_MIN_AMOUNT = AMOUNT_TIER_0;   // 0.8 XFG
@@ -200,7 +227,7 @@ namespace CryptoNote
 
 	} // namespace parameters
 
-	// Developer Team wallet that receives alias registration fees. investigate mullet-cig opt for 3/5 access
+	// Development wallet that receives alias registration fees. investigate mullet-cig opt for 3/5 access
 	const char FUEGO_DEV_FUND_ADDRESS[] = "fireVHx639SLMhzmBoJ8drTXbVyv2eRG6A8aMLc1taTiRNwk8pnwXpBDUSjH1dT5fg7yVVZrKkvm31CmigAMdVDg7sgxJmAUNp";
 
     const char CRYPTONOTE_NAME[] = "fuego";
@@ -305,6 +332,34 @@ namespace CryptoNote
 		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 55;   // 55% weight — primary stability anchor
 		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 25;   // 25% weight — trend smoothing
 		const uint32_t TESTNET_MWLWMA_V2_HEIGHT                              = 21;  // Activation height for v2 params; old params used below this to preserve existing block validation
+		const uint32_t TESTNET_DMWDA_ACTIVATION_HEIGHT                        = 600; // Switch from MWLWMA to DMWDA at this testnet height
+
+
+ 	// TESTNET DMWDA parameters
+//--------------------------------------------------------------------------------------------------------------------------
+ 		const uint32_t TESTNET_DMWDA_SHORT_WINDOW                            = 30;   // Rapid response window
+ 		const uint32_t TESTNET_DMWDA_MEDIUM_WINDOW                           = 69;   // Stability window
+ 		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 180;  // Trend analysis window
+ 		const uint32_t TESTNET_DMWDA_EMERGENCY_WINDOW                        = 3;    // Emergency response window
+ 		const double   TESTNET_DMWDA_MIN_ADJUSTMENT                          = 0.5;  // Minimum difficulty adjustment (50%)
+ 		const double   TESTNET_DMWDA_MAX_ADJUSTMENT                          = 3.0;  // Maximum difficulty adjustment (300%) — needs headroom for single-miner recovery
+ 		const double   TESTNET_DMWDA_EMERGENCY_THRESHOLD                     = 0.45;  // Emergency threshold (45%)
+ 		const double   TESTNET_DMWDA_SMOOTHING_FACTOR                        = 0.8;  // Smoothing factor for oscillations prevention 80/20 prev/new
+ 		const double   TESTNET_DMWDA_CONFIDENCE_MIN                          = 0.2;  // Minimum confidence score
+ 		const double   TESTNET_DMWDA_CONFIDENCE_MAX                          = 1.0;  // Maximum confidence score
+ 	    const double   TESTNET_DMWDA_DEFAULT_CONFIDENCE                      = 0.5;  // Default confidence score
+
+    const double   TESTNET_DMWDA_WEIGHT_SHORT                            = 0.5;  // Weight for short window
+ 	const double   TESTNET_DMWDA_WEIGHT_MEDIUM                           = 0.3;  // Weight for medium window
+ 	const double   TESTNET_DMWDA_WEIGHT_LONG                             = 0.2;  // Weight for long window
+ 	const double   TESTNET_DMWDA_ADJUSTMENT_RANGE                        = 0.33;  // Adjustment range for confidence-based bounds
+ 	const uint32_t TESTNET_DMWDA_RECENT_WINDOW_SIZE                      = 5;    // Recent window size for anomaly detection
+ 	const uint32_t TESTNET_DMWDA_HISTORICAL_WINDOW_SIZE                  = 20;   // Historical window size for anomaly detection
+ 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_CHECK_BLOCKS             = 5;    // Number of blocks to check for stealing attempts
+ 	const double   TESTNET_DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.05; // 5% of target time threshold for fast blocks
+
+ 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
+    const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 8.0; // Hash rate change threshold for anomaly detection
 
  	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 

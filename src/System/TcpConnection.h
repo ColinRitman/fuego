@@ -1,3 +1,4 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2012-2016, The CryptoNote developers, The Bytecoin developers
 // Copyright (c) 2016-2025, The Karbo developers
 
@@ -6,7 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <utility>
-#include <System/Dispatcher.h>
+#include "Dispatcher.h"
 
 namespace System {
 

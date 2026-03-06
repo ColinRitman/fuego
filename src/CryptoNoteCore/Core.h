@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -21,24 +21,24 @@
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/variables_map.hpp>
 
-#include "P2p/NetNodeCommon.h"
-#include "CryptoNoteProtocol/CryptoNoteProtocolHandlerCommon.h"
+#include "../P2p/NetNodeCommon.h"
+#include "../CryptoNoteProtocol/CryptoNoteProtocolHandlerCommon.h"
 #include "Currency.h"
 #include "TransactionPool.h"
 #include "Blockchain.h"
-#include "CryptoNoteCore/IMinerHandler.h"
-#include "CryptoNoteCore/MinerConfig.h"
+#include "IMinerHandler.h"
+#include "MinerConfig.h"
 #include "ICore.h"
 #include "ICoreObserver.h"
-#include "Common/ObserverManager.h"
+#include "../Common/ObserverManager.h"
 
 #include "System/Dispatcher.h"
-#include "CryptoNoteCore/MessageQueue.h"
-#include "CryptoNoteCore/BlockchainMessages.h"
-#include "CryptoNoteCore/BankingIndex.h"
-#include "CryptoNoteCore/CommitmentIndex.h"
+#include "MessageQueue.h"
+#include "BlockchainMessages.h"
+#include "BankingIndex.h"
+#include "CommitmentIndex.h"
 
-#include <Logging/LoggerMessage.h>
+#include "../Logging/LoggerMessage.h"
 
 namespace CryptoNote {
 

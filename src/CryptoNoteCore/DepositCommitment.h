@@ -1,3 +1,4 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2017-2025 Elderfire Privacy Group
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2014-2017 The XDN developers
@@ -19,7 +20,7 @@
 
 #include <vector>
 #include <cstdint>
-#include "CryptoNote.h"
+#include "../../include/CryptoNote.h"
 
 namespace CryptoNote {
 

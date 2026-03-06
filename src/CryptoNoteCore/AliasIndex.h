@@ -1,10 +1,16 @@
-// Copyright (c) 2018-2025, Fuego Development Team
-// AliasIndex - Standalone on-chain @ alias registry
-// Separated from CommitmentIndex for clean single-responsibility design.
-// Aliases map 8-character names to wallet addresses on-chain.
-// EFier aliases [A-Z0-9&] are assigned during elderking_ceremony and voided on unstake.
-// Regular aliases [a-z0-9&] req donation of 1 XFG to Fuego Development (@fuegodev/@FUEGOXFG) per alias.
-
+// Copyright (c) 2017-2026 Fuego Developers
+//
+// This file is part of Fuego.
+//
+// Fuego is free software distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+// PURPOSE. You can redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 #pragma once
 
 #include <map>
@@ -14,9 +20,9 @@
 #include <string>
 #include <vector>
 
-#include "crypto/crypto.h"
-#include "crypto/hash.h"
-#include "CryptoNoteConfig.h"
+#include "../crypto/crypto.h"
+#include "../crypto/hash.h"
+#include "../CryptoNoteConfig.h"
 
 namespace CryptoNote {
 

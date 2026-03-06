@@ -24,7 +24,7 @@
 #include <chrono>
 #include <boost/program_options/variables_map.hpp>
 
-#include "IWalletLegacy.h"
+#include "../../include/IWalletLegacy.h"
 #include "PasswordContainer.h"
 #include "ClientHelper.h"
 
@@ -129,12 +129,12 @@ namespace CryptoNote
     bool list_burns(const std::vector<std::string> &args);
     bool burn_info(const std::vector<std::string> &args);
 
-    // bool create_cold_secret(const std::vector<std::string> &args);
+     bool create_cold_secret(const std::vector<std::string> &args);
 
     // USER-FACING: Proof generation from deposits
-    // Users generate STARKs from deposit transactions for L2 claims
-    bool generate_proof(const std::vector<std::string> &args);
-    bool elderfier_panel(const std::vector<std::string> &args);
+    // Users generate STARKs from deposit transactions with xfg-stark-cli for L2 claims
+    bool gen_proof(const std::vector<std::string> &args);
+    bool elderfier_panel(const std::vector<std::string> &args); // fier_panel
 
     bool ask_wallet_create_if_needed();
     std::string resolveAlias(const std::string& aliasUrl);

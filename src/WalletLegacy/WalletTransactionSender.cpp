@@ -719,6 +719,7 @@ namespace CryptoNote
       // position issues with commitment-only extras that cause silent failures.
 
       bool isHeatDeposit = false;
+      bool isColdDeposit = false;
       Deposit::Type detectedType = Deposit::Type::COLD;
 
       if (!context->extra.empty()) {
@@ -728,6 +729,7 @@ namespace CryptoNote
           isHeatDeposit = true;
         } else if (tag == TX_EXTRA_COLD_COMMITMENT) {
           detectedType = Deposit::Type::COLD;
+          isColdDeposit = true;
         } else if (tag == TX_EXTRA_ELDERFIER_DEPOSIT) {
           detectedType = Deposit::Type::ELDERFIER;
         }
@@ -760,6 +762,7 @@ namespace CryptoNote
 
           transaction->appendExtra(generatedExtra);
           detectedType = Deposit::Type::COLD;
+          isColdDeposit = true;
         }
       }
 
@@ -795,11 +798,17 @@ namespace CryptoNote
 
       // HEAT secret notification: the wallet that created the burn commitment
       // holds the secret key. We only emit this event for completeness.
-      if (isHeatDeposit) {
+      if (isHeatDeposit || isColdDeposit) {
         std::string txHashStr = Common::podToHex(transactionInfo.hash);
-        Crypto::SecretKey emptySecret = {};
+        // Store the ECDH-derived commitKeys.keyScalar for future withdrawals
+        // This secret is deterministically derived from: H(ECDH(txSecretKey, viewPubKey) || outputIndex)
+        std::vector<uint8_t> secretMetadata;
+        if (isColdDeposit) {
+          // For COLD deposits, store commitment metadata if available
+          secretMetadata.assign(context->extra.begin(), context->extra.end());
+        }
         events.push_back(std::unique_ptr<WalletBurnDepositSecretCreatedEvent>(
-          new WalletBurnDepositSecretCreatedEvent(txHashStr, emptySecret, deposit.amount, std::vector<uint8_t>())));
+          new WalletBurnDepositSecretCreatedEvent(txHashStr, commitKeys.keyScalar, deposit.amount, secretMetadata)));
       }
 
       transactionInfo.firstDepositId = depositId;

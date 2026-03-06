@@ -3587,7 +3587,8 @@ namespace CryptoNote
       uint32_t height,
       const std::vector<uint8_t> &transactionExtra)
   {
-    assert(depositOutput.type == TransactionTypes::OutputType::Multisignature);
+    assert(depositOutput.type == TransactionTypes::OutputType::Commitment ||
+           depositOutput.type == TransactionTypes::OutputType::Multisignature);
     assert(depositOutput.term != 0);
 
     Deposit deposit;

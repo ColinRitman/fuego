@@ -26,6 +26,7 @@
 #include "../Common/StringTools.h"
 #include "../CryptoNoteConfig.h"
 #include "Account.h"
+#include "AdaptiveDifficulty.h"
 #include "CryptoNoteBasicImpl.h"
 #include "CryptoNoteFormatUtils.h"
 #include "CryptoNoteTools.h"
@@ -1217,44 +1218,48 @@ double Currency::getBurnPercentage() const {
 	difficulty_type Currency::nextDifficultyV6(uint32_t height, uint8_t blockMajorVersion,
 		std::vector<std::uint64_t> timestamps, std::vector<difficulty_type> cumulativeDifficulties) const {
 
-		// MWLWMA (Multi-Window LWMA) for v10+
-		// 3 LWMA-1 calculations with different N, combined by weights
-
-		const uint64_t T = difficultyTarget();
 		const uint64_t minDifficulty = isTestnet() ? 1000 : 1000000;
-
-		// Testnet activates updated N/W/clamp params at TESTNET_MWLWMA_V2_HEIGHT (800).
-		// Below that height the original params are used so blocks 43-799 re-validate cleanly.
-		// Mainnet always uses the configured params (no v10 blocks exist yet at launch).
-		const bool useV2 = !isTestnet() || (height >= CryptoNote::TESTNET_MWLWMA_V2_HEIGHT);
-
-		const uint64_t N_short  = (isTestnet() && !useV2) ? 9  : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_SHORT  : parameters::MWLWMA_N_SHORT);
-		const uint64_t N_medium = (isTestnet() && !useV2) ? 33 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_MEDIUM : parameters::MWLWMA_N_MEDIUM);
-		const uint64_t N_long   = (isTestnet() && !useV2) ? 69 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_N_LONG   : parameters::MWLWMA_N_LONG);
-
-		const uint64_t W_short  = (isTestnet() && !useV2) ? 33 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_SHORT  : parameters::MWLWMA_W_SHORT);
-		const uint64_t W_medium = (isTestnet() && !useV2) ? 34 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_MEDIUM : parameters::MWLWMA_W_MEDIUM);
-		const uint64_t W_long   = (isTestnet() && !useV2) ? 33 : (isTestnet() ? CryptoNote::TESTNET_MWLWMA_W_LONG   : parameters::MWLWMA_W_LONG);
 
 		// Sanity checks
 		if (timestamps.size() != cumulativeDifficulties.size() || timestamps.size() < 3) {
 			return minDifficulty;
 		}
 
-		// Lower solve-time clamp: active on testnet v2 params only.
-		// Prevents burst-mined 1-6s blocks from spiking the short window and causing oscillation.
-		// Disabled on mainnet (multi-miner competition smooths variance naturally).
-		const uint64_t minSolveTime = (isTestnet() && useV2) ? T / 8 : 0;
+		// DMWDA activation: testnet at TESTNET_DMWDA_ACTIVATION_HEIGHT, mainnet always (no v10 blocks yet)
+		const bool useDMWDA = !isTestnet() || (height >= CryptoNote::TESTNET_DMWDA_ACTIVATION_HEIGHT);
 
-		// Calculate LWMA for each window
+		if (useDMWDA) {
+			// DMWDA (Dynamic Multi-Window Difficulty Algorithm)
+			auto config = getDefaultFuegoConfig(isTestnet());
+			AdaptiveDifficulty algo(config);
+			uint64_t next_D = algo.calculateNextDifficulty(height, timestamps, cumulativeDifficulties, isTestnet());
+			if (next_D < minDifficulty) {
+				next_D = minDifficulty;
+			}
+			return next_D;
+		}
+
+		// Legacy MWLWMA path for testnet blocks below TESTNET_DMWDA_ACTIVATION_HEIGHT
+		const uint64_t T = difficultyTarget();
+
+		const bool useV2 = (height >= CryptoNote::TESTNET_MWLWMA_V2_HEIGHT);
+
+		const uint64_t N_short  = !useV2 ? 9  : CryptoNote::TESTNET_MWLWMA_N_SHORT;
+		const uint64_t N_medium = !useV2 ? 33 : CryptoNote::TESTNET_MWLWMA_N_MEDIUM;
+		const uint64_t N_long   = !useV2 ? 69 : CryptoNote::TESTNET_MWLWMA_N_LONG;
+
+		const uint64_t W_short  = !useV2 ? 33 : CryptoNote::TESTNET_MWLWMA_W_SHORT;
+		const uint64_t W_medium = !useV2 ? 34 : CryptoNote::TESTNET_MWLWMA_W_MEDIUM;
+		const uint64_t W_long   = !useV2 ? 33 : CryptoNote::TESTNET_MWLWMA_W_LONG;
+
+		const uint64_t minSolveTime = useV2 ? T / 8 : 0;
+
 		uint64_t D_short  = calculateLWMA(timestamps, cumulativeDifficulties, N_short,  T, minDifficulty, minSolveTime);
 		uint64_t D_medium = calculateLWMA(timestamps, cumulativeDifficulties, N_medium, T, minDifficulty, minSolveTime);
 		uint64_t D_long   = calculateLWMA(timestamps, cumulativeDifficulties, N_long,   T, minDifficulty, minSolveTime);
 
-		// Weighted average (integer math to avoid floating point)
 		uint64_t next_D = (D_short * W_short + D_medium * W_medium + D_long * W_long) / (W_short + W_medium + W_long);
 
-		// Enforce minimum
 		if (next_D < minDifficulty) {
 			next_D = minDifficulty;
 		}

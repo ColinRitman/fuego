@@ -42,7 +42,7 @@
 // 0x_8 tags: Burn-related deposit types
 #define TX_EXTRA_HEAT_COMMITMENT            0x08  // Heat commitment (burn)
 #define TX_EXTRA_BURN_RECEIPT               0x18  // Burn transaction receipt
-#define TX_EXTRA_DIGM_MINT                  0xA8  // DIGM coin mint by burn (Split 3 ways dev, digm treasury, burn)
+#define TX_EXTRA_DIGM_MINT                  0xA8  // DIGM coin mint (33% BURN / digm treasury 33% \ devs 33%)
 
 // 0xEF tag: Elderfier staking
 #define TX_EXTRA_ELDERFIER_DEPOSIT          0xEF  // Elderfier staking deposit (no banking fee)

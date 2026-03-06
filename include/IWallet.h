@@ -1,5 +1,5 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2012-2018 The CryptoNote developers
-// Copyright (c) 2017-2022 Fuego Developers
 //
 // This file is part of Fuego.
 //
@@ -19,9 +19,9 @@
 #include <vector>
 #include <boost/optional.hpp>
 #include "CryptoNote.h"
-#include "CryptoNoteConfig.h"
-#include "CryptoNoteCore/CryptoNoteBasic.h"
-#include "CryptoNoteCore/DepositCommitment.h"
+#include "../src/CryptoNoteConfig.h"
+#include "../src/CryptoNoteCore/CryptoNoteBasic.h"
+#include "../src/CryptoNoteCore/DepositCommitment.h"
 
 namespace CryptoNote
 {

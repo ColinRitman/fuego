@@ -25,12 +25,12 @@
 #include <string.h>
 #include <sstream>
 #include <vector>
-#include <iterator>
+// #include <iterator>
 
 #include "Checkpoints.h"
 #include "../CryptoNoteConfig.h"
-#include "Common/StringTools.h"
-#include "Common/DnsTools.h"
+#include "../Common/StringTools.h"
+#include "../Common/DnsTools.h"
 
 using namespace Logging;
 

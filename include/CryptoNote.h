@@ -50,14 +50,22 @@ struct MultisignatureOutput {
 
 // v10+ ring-signature deposit output.
 // Replaces MultisignatureOutput for ALL deposit types: COLD, HEAT burns, Elderfier stakes.
-// Amount lives in TransactionOutput.amount (same as KeyOutput).
+// Amount lives in TransactionOutput.amount (visible, dual-bookkeeping for v10-v10).
 // HEAT burns use throwaway commitKey (secret discarded) and never withdraw but
 // serve as excellent decoys, bulking up decoy pool for COLD/EF withdrawal rings.
 // Ring selection by amount only so all commitment outputs
 // matching amount are eligible decoys regardless of term.
+//
+// v11+ additions: amountCommitment (Pedersen C = amount*H + mask*G) and tierProof
+// (1-of-4 OR proof that C hides a valid tier amount). During the dual-bookkeeping
+// phase (v11), TransactionOutput.amount remains visible alongside the commitment.
+// When full hidden amounts are enabled (v12+), amount is zeroed and only the
+// commitment + tier proof are authoritative.
 struct TransactionOutputCommitment {
-  Crypto::PublicKey commitKey; // = scalar(H("commit_key"||depositSecret)) * G
-  uint32_t term;               // lock term in blocks (same meaning as MultisignatureOutput.term)
+  Crypto::PublicKey commitKey;                    // = scalar(H("commit_key"||depositSecret)) * G
+  uint32_t term;                                  // lock term in blocks
+  Crypto::EllipticCurvePoint amountCommitment;   // C = amount*H + mask*G (Pedersen)
+  Crypto::TierProof tierProof;                    // proves amount ∈ {TIER_0..TIER_3}
 };
 
 // v10+ ring-signature withdrawal input.

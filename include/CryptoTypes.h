@@ -18,6 +18,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#define FUEGO_TIER_COUNT 4
+
 #ifdef __cplusplus
 namespace Crypto {
 #endif
@@ -58,6 +60,13 @@ struct KeyImage {
 
 struct Signature {
   uint8_t data[64];
+};
+
+// 1-of-N OR proof that a Pedersen commitment hides one of N known tier amounts.
+// Used as a lightweight range proof for tiered deposit outputs.
+struct TierProof {
+  struct EllipticCurveScalar e[FUEGO_TIER_COUNT]; // challenge shares (sum to Fiat-Shamir challenge)
+  struct EllipticCurveScalar s[FUEGO_TIER_COUNT]; // Schnorr responses
 };
 
 const struct EllipticCurveScalar I = {{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00} };

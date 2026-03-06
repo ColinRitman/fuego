@@ -513,7 +513,7 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("payments", boost::bind(&simple_wallet::show_payments, this, boost::arg<1>()), "payments <payment_id_1> [<payment_id_2> ... <payment_id_N>] - Show payments <payment_id_1>, ... <payment_id_N>");
   m_consoleHandler.setHandler("get_tx_proof", boost::bind(&simple_wallet::get_tx_proof, this, boost::arg<1>()), "Generate a signature to prove payment: <txid> <address> [<txkey>]");
   m_consoleHandler.setHandler("get_reserve_proof", boost::bind(&simple_wallet::get_reserve_proof, this, boost::arg<1>()), "all|<amount> [<message>] - Generate a signature proving that you own at least <amount>, optionally with a challenge string <message>. ");
-  m_consoleHandler.setHandler("bc_height", boost::bind(&simple_wallet::show_blockchain_height, this, boost::arg<1>()), "Show blockchain height");
+  m_consoleHandler.setHandler("height", boost::bind(&simple_wallet::show_blockchain_height, this, boost::arg<1>()), "Show blockchain height");
   m_consoleHandler.setHandler("show_dust", boost::bind(&simple_wallet::show_dust, this, boost::arg<1>()), "Show the number of unmixable dust outputs");
   m_consoleHandler.setHandler("outputs", boost::bind(&simple_wallet::show_num_unlocked_outputs, this, boost::arg<1>()), "Show the number of unlocked outputs available for a transaction");
   m_consoleHandler.setHandler("optimize", boost::bind(&simple_wallet::optimize_outputs, this, boost::arg<1>()), "Combine many available outputs into a few by sending a transaction to self");
@@ -537,18 +537,18 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // TODO: Re-enable burn and cold commands in next release
   // m_consoleHandler.setHandler("burn", boost::bind(&simple_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
   // m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
-  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begin the Elderfire StayKing Ceremony to become an Ξlderfier (interactive, 5x 800 XFG stakes req'd).");
+  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begins Ælderfire StayKing Ceremony. Details on what is, & how to become, an Ξlderfier (interactive, 5x 800 XFG stakes req'd).");
   m_consoleHandler.setHandler("withdraw", boost::bind(&simple_wallet::withdraw, this, boost::arg<1>()), "withdraw <id> - Withdraw a deposit");
-  m_consoleHandler.setHandler("list_cold", boost::bind(&simple_wallet::list_cold, this, boost::arg<1>()), "list_cold - List all COLD txns and Elderfier deposits");
+  m_consoleHandler.setHandler("list_cold", boost::bind(&simple_wallet::list_cold, this, boost::arg<1>()), "list_cold - List all COLD txns or Elderfier deposits");
   m_consoleHandler.setHandler("cold_info", boost::bind(&simple_wallet::cold_info, this, boost::arg<1>()), "cold_info <id> - Get detailed info on your Certificate of Ledger Deposits");
   m_consoleHandler.setHandler("list_burns", boost::bind(&simple_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all XFG burn transactions (HEAT)");
   m_consoleHandler.setHandler("burn_info", boost::bind(&simple_wallet::burn_info, this, boost::arg<1>()), "burn_info <id> - Get detailed info of burn by ID");
 
-  // NOTE: create_cold_secret and generate_proof are INTERNAL commands
+  // NOTE: create_cold_secret and gen_proof might be better off as INTERNAL commands
   // Users should NOT manually create commitments (auto-embedded in tx_extra)
   // But users MUST generate STARK proofs from deposits for L2 claims
-  // DISABLED: m_consoleHandler.setHandler("create_cold_secret", ...);
-  m_consoleHandler.setHandler("generate_proof", boost::bind(&simple_wallet::generate_proof, this, boost::arg<1>()), "generate_proof <tx_hash> - Generate STARK proof for deposit transaction (for L2 claims)");
+  m_consoleHandler.setHandler("create_cold_secret", boost::bind(&simple_wallet::create_cold_secret, this, boost::arg<1>()), "create_cold_secret <amount> <term_blocks> <chain_code> <metadata> - Create COLD commitment");
+  m_consoleHandler.setHandler("gen_proof", boost::bind(&simple_wallet::gen_proof, this, boost::arg<1>()), "gen_proof <tx_hash> - Data needed to generate STARK proof for deposit transaction (for L2 claims)");
 
   // @ Alias system commands
   m_consoleHandler.setHandler("register_alias", boost::bind(&simple_wallet::register_alias, this, boost::arg<1>()), "register_alias <alias> - Register an @ alias (8 chars [a-z0-9&], costs 1 XFG). EFier aliases [A-Z0-9&] via elderking_ceremony.");
@@ -1200,16 +1200,16 @@ bool simple_wallet::deposit(const std::vector<std::string> &args)
 
 //----------------------------------------------------------------------------------------------------
 // DISABLED: Internal command - users should not create their own commitments
-/*
+
 bool simple_wallet::create_cold_secret(const std::vector<std::string> &args) {
- // PRIVACY MODEL: No ETH address required - recipient binding at STARK proof generation time
+ // ETH address recipient binding at STARK proof generation time for privacy
  if (args.size() != 3) {
    fail_msg_writer() << "usage: create_cold_secret <amount> <term_blocks> <chain_code>";
    fail_msg_writer() << "  amount: amount in atomic XFG (e.g., 80000000 for 8 XFG)";
    fail_msg_writer() << "  term_blocks: deposit term in blocks (e.g., 16440 for 3 months)";
    fail_msg_writer() << "  chain_code: target claim chain (1=ETH, 2=ARB)";
    fail_msg_writer() << "";
-   fail_msg_writer() << "PRIVACY: ETH address is NOT required at deposit time.";
+   fail_msg_writer() << "PRIVACY NOTE: ETH address NOT required for XFG deposits.";
    fail_msg_writer() << "         You will provide your ETH address when generating the STARK proof.";
    fail_msg_writer() << "";
    fail_msg_writer() << "Example: create_cold_secret 80000000 16440 1";
@@ -1283,9 +1283,9 @@ bool simple_wallet::create_cold_secret(const std::vector<std::string> &args) {
    success_msg_writer() << "Term: " << term_blocks << " blocks";
    success_msg_writer() << "Chain Code: " << static_cast<int>(chain_code);
    success_msg_writer() << "";
-   success_msg_writer() << "For privacy, your ETH address is added during zkSTARK generation & is never on-chain.";
+   success_msg_writer() << "For privacy, your ETH address is added during zkSTARK generation & never in Fuego blockchain.";
    success_msg_writer() << "IMPORTANT: Save the secret key! You will need it when generating";
-   success_msg_writer() << "           the STARK proof with xfg-stark-cli.";
+   success_msg_writer() << "           your STARK proof for interest redemption using xfg-stark-cli.";
 
  } catch (const std::exception& e) {
    fail_msg_writer() << "Failed to parse arguments: " << e.what();
@@ -1294,7 +1294,7 @@ bool simple_wallet::create_cold_secret(const std::vector<std::string> &args) {
 
  return true;
 }
-*/
+
 
 //----------------------------------------------------------------------------------------------------
 bool simple_wallet::close_wallet()
@@ -2252,9 +2252,9 @@ bool simple_wallet::withdraw(const std::vector<std::string> &args)
 
  //----------------------------------------------------------------------------------------------------
 // USER-FACING: Users MUST generate STARK proofs from deposits for L2 claims
-bool simple_wallet::generate_proof(const std::vector<std::string> &args) {
+bool simple_wallet::gen_proof(const std::vector<std::string> &args) {
    if (args.size() != 1) {
-     fail_msg_writer() << "Usage: generate_proof <tx_hash>";
+     fail_msg_writer() << "Usage: gen_proof <tx_hash>";
      return true;
    }
 
@@ -2404,16 +2404,15 @@ bool simple_wallet::cold_info(const std::vector<std::string> &args)
         typeDescription = "Unknown deposit type";
     }
 
-    // Display term — disambiguate using deposit type so TESTNET_COLD_MIN_TERM=8
-    // doesn't collide with DEPOSIT_TERM_ELDERFIER_STAKING=8.
+    // Display term (user-defined unlock time, independent of deposit type)
     if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
       success_msg_writer() << "Term:          FOREVER";
-    } else if (deposit.depositType == CryptoNote::Deposit::Type::ELDERFIER) {
+    } else if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING) {
       success_msg_writer() << "Term:          Ξlderfier Staking (unstakeable on demand, " << CryptoNote::parameters::ELDERFIER_STAKING_REVIEW_WINDOW << "-block review)";
-    } else if (deposit.term == m_currency.depositMinTerm()) {
-      success_msg_writer() << "Term:          3 months (" << m_currency.depositMinTerm() << " blocks)";
-    } else if (deposit.term == m_currency.depositMaxTerm()) {
-      success_msg_writer() << "Term:          1 year (" << m_currency.depositMaxTerm() << " blocks)";
+    } else if (deposit.term == CryptoNote::parameters::COLD_MIN_TERM) {
+      success_msg_writer() << "Term:          3 months (16,000 blocks)";
+    } else if (deposit.term == CryptoNote::parameters::COLD_MAX_TERM) {
+      success_msg_writer() << "Term:          1 year (65,000 blocks)";
     } else {
       success_msg_writer() << "Term:          " << deposit.term << " blocks";
     }
@@ -2596,7 +2595,7 @@ bool simple_wallet::burn_info(const std::vector<std::string> &args)
     }
 
     success_msg_writer() << "";
-    success_msg_writer() << "Use 'generate_proof " << Common::podToHex(deposit.transactionHash) << "' to generate STARK proof data.";
+    success_msg_writer() << "Use 'gen_proof " << Common::podToHex(deposit.transactionHash) << "' to generate STARK proof data.";
 
   } catch (const std::exception &e) {
     fail_msg_writer() << "Error: " << e.what();
@@ -3123,8 +3122,8 @@ bool simple_wallet::show_payments(const std::vector<std::string> &args) {
 //----------------------------------------------------------------------------------------------------
 bool simple_wallet::show_blockchain_height(const std::vector<std::string>& args) {
   try {
-    uint64_t bc_height = m_node->getLastLocalBlockHeight();
-    success_msg_writer() << bc_height;
+    uint64_t height = m_node->getLastLocalBlockHeight();
+    success_msg_writer() << height;
   } catch (std::exception &e) {
     fail_msg_writer() << "failed to get blockchain height: " << e.what();
   }

@@ -1,3 +1,4 @@
+// Copyright (c) 2017-2026, Fuego Developers
 // Copyright (c) 2017-2025 Elderfire Privacy Council
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2014-2016 The XDN developers
@@ -15,7 +16,7 @@
 // You should have received a copy of the GNU General Public License
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
-#include "CryptoNoteCore/BankingIndex.h"
+#include "BankingIndex.h"
 
 #include <algorithm>
 #include <cassert>
@@ -23,8 +24,8 @@
 #include <iterator>
 #include <limits>
 
-#include "CryptoNoteSerialization.h"
-#include "Serialization/SerializationOverloads.h"
+//#include "CryptoNoteSerialization.h"
+#include "../Serialization/SerializationOverloads.h"
 
 namespace CryptoNote {
 
@@ -55,7 +56,7 @@ static inline bool sumWillOverflow(int64_t x, int64_t y) {
   if (y < 0 && x < std::numeric_limits<int64_t>::min() - y) {
     return true;
   }
-  
+
   return false;
 }
 
@@ -63,7 +64,7 @@ static inline bool sumWillOverflow(uint64_t x, uint64_t y) {
   if (x > std::numeric_limits<uint64_t>::max() - y) {
     return true;
   }
- 
+
   return false;
 }
 
@@ -90,25 +91,25 @@ void BankingIndex::pushBlock(DepositAmount amount, DepositInterest interest) {
 
 void BankingIndex::popBlock() {
   assert(blockCount > 0);
-  
+
   // Calculate burned amount (if any) in block before popping
   uint64_t burnedInBlock = 0;
   if (!m_burnedXfgEntries.empty() && m_burnedXfgEntries.back().height == blockCount) {
     uint64_t currentTotal = m_ethernalXFG;
-    uint64_t previousTotal = (m_burnedXfgEntries.size() > 1) ? 
+    uint64_t previousTotal = (m_burnedXfgEntries.size() > 1) ?
       (--m_burnedXfgEntries.end() - 1)->cumulative_burned : 0;
     burnedInBlock = currentTotal - previousTotal;
-    
+
     m_burnedXfgEntries.pop_back();
     m_ethernalXFG -= burnedInBlock;  // Update total
   }
-  
+
   --blockCount;
   if (!index.empty() && index.back().height == blockCount) {
     index.pop_back();
   }
 }
-  
+
 auto BankingIndex::size() const -> DepositHeight {
   return blockCount;
 }
@@ -134,14 +135,14 @@ size_t BankingIndex::popBlocks(DepositHeight from) {
   }
 
   index.erase(it, index.end());
-  
+
   // Also pop burned XFG entries from this height
   auto burnedIt = m_burnedXfgEntries.begin();
   while (burnedIt != m_burnedXfgEntries.end() && burnedIt->height >= from) {
     ++burnedIt;
   }
   m_burnedXfgEntries.erase(burnedIt, m_burnedXfgEntries.end());
-  
+
   auto diff = blockCount - from;
   blockCount -= diff;
   return diff;
@@ -174,11 +175,11 @@ BankingIndex::BurnedAmount BankingIndex::getBurnedXfgAtHeight(DepositHeight heig
   if (m_burnedXfgEntries.empty()) {
     return 0;
   }
-  
+
   auto it = std::upper_bound(
     m_burnedXfgEntries.cbegin(), m_burnedXfgEntries.cend(), height,
     [] (DepositHeight height, const BurnedXfgEntry& entry) { return height < entry.height; });
-    
+
   return it == m_burnedXfgEntries.cbegin() ? 0 : (--it)->cumulative_burned;
 }
 
@@ -218,7 +219,7 @@ BankingIndex::DepositStats BankingIndex::getStats() const {
   DepositStats stats;
   stats.totalDeposits = static_cast<uint64_t>(fullDepositAmount());
   stats.ethernalXFG = m_ethernalXFG;
-  stats.regularDeposits = stats.totalDeposits > stats.ethernalXFG ? 
+  stats.regularDeposits = stats.totalDeposits > stats.ethernalXFG ?
     stats.totalDeposits - stats.ethernalXFG : 0;
   return stats;
 }
@@ -226,7 +227,7 @@ BankingIndex::DepositStats BankingIndex::getStats() const {
 void BankingIndex::serialize(ISerializer& s) {
   s(blockCount, "blockCount");
   s(m_ethernalXFG, "ethernalXFG");
-  
+
   if (s.type() == ISerializer::INPUT) {
     readSequence<BankingIndexEntry>(std::back_inserter(index), "index", s);
     readSequence<BurnedXfgEntry>(std::back_inserter(m_burnedXfgEntries), "burnedXfgEntries", s);

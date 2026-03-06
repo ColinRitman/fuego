@@ -1,3 +1,4 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
 // Copyright (c) 2018-2019 The TurtleCoin developers
@@ -15,18 +16,18 @@
 #include <list>
 #include <boost/uuid/uuid.hpp>
 
-#include <System/Context.h>
-#include <System/ContextGroup.h>
-#include <System/Dispatcher.h>
-#include <System/Event.h>
-#include <System/Timer.h>
-#include <System/TcpConnection.h>
-#include <System/TcpListener.h>
+#include "../System/Context.h"
+#include "../System/ContextGroup.h"
+#include "../System/Dispatcher.h"
+#include "../System/Event.h"
+#include "../System/Timer.h"
+#include "../System/TcpConnection.h"
+#include "../System/TcpListener.h"
 
-#include "CryptoNoteCore/OnceInInterval.h"
-#include "CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
-#include "Common/CommandLine.h"
-#include "Logging/LoggerRef.h"
+#include "../CryptoNoteCore/OnceInInterval.h"
+#include "../CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
+#include "../Common/CommandLine.h"
+#include "../Logging/LoggerRef.h"
 
 #include "ConnectionContext.h"
 #include "LevinProtocol.h"

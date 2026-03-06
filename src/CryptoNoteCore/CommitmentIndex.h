@@ -25,9 +25,9 @@
 #include <cstdint>
 #include <string>
 #include <optional>
-#include "crypto/hash.h"
-#include "CryptoNoteCore/AliasIndex.h"
-#include "CryptoNoteCore/Currency.h"
+#include "../crypto/hash.h"
+#include "AliasIndex.h"
+#include "Currency.h"
 
 namespace CryptoNote {
 
@@ -226,7 +226,10 @@ private:
   std::vector<uint8_t> m_elderfier_ids;
 
   // Banking fee tracking and epoch management
-  static const uint64_t EPOCH_DURATION_BLOCKS = 1000;  // Clean epoch boundary every 1000 blocks
+  uint64_t getEpochDuration() const {
+    return m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_EPOCH_DURATION_BLOCKS
+                                  : CryptoNote::parameters::EPOCH_DURATION_BLOCKS;
+  }
 
   std::vector<ElderfierEpochRewards> m_epochHistory;
   uint64_t m_currentEpochStartBlock = 0;

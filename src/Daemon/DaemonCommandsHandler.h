@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network Developers
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -18,10 +18,10 @@
 #pragma once
 
 #include <boost/format.hpp>
-#include "Common/ConsoleHandler.h"
-#include "CryptoNoteProtocol/ICryptoNoteProtocolQuery.h"
-#include <Logging/LoggerRef.h>
-#include <Logging/LoggerManager.h>
+#include "../Common/ConsoleHandler.h"
+#include "../CryptoNoteProtocol/ICryptoNoteProtocolQuery.h"
+#include "../Logging/LoggerRef.h"
+#include "../Logging/LoggerManager.h"
 
 namespace CryptoNote {
 class core;
@@ -64,8 +64,8 @@ private:
   bool print_pl(const std::vector<std::string>& args);
   bool show_hr(const std::vector<std::string>& args);
   bool hide_hr(const std::vector<std::string>& args);
-  bool rollbackchainto(uint32_t height);  
-  bool rollback_chain(const std::vector<std::string>& args);  
+  bool rollbackchainto(uint32_t height);
+  bool rollback_chain(const std::vector<std::string>& args);
   bool print_bc_outs(const std::vector<std::string>& args);
   bool print_cn(const std::vector<std::string>& args);
   bool print_bc(const std::vector<std::string>& args);
