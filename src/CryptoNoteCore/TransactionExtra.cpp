@@ -2161,16 +2161,6 @@ DepositCommitmentKeys deriveCommitmentKeys(const std::array<uint8_t, 32>& deposi
       reinterpret_cast<Crypto::EllipticCurveScalar&>(keys.amountMask));
   }
 
-  // termMask = hash_to_scalar("fuego_term_mask" || depositSecret) mod l
-  {
-    static const char tmLabel[] = "fuego_term_mask";    // 15 bytes
-    uint8_t tmPre[47];
-    memcpy(tmPre,      tmLabel,              15);
-    memcpy(tmPre + 15, depositSecret.data(), 32);
-    Crypto::hash_to_scalar(tmPre, sizeof(tmPre),
-      reinterpret_cast<Crypto::EllipticCurveScalar&>(keys.termMask));
-  }
-
   return keys;
 }
 

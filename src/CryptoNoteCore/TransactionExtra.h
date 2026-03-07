@@ -210,14 +210,12 @@ using TransactionExtraCDDepositSecret = TransactionExtraColdCommitment;
 //   commitKey  = H("fuego_commit_key"  || depositSecret) * G  — on-chain spend key
 //   keyScalar  = the scalar for commitKey                      — spend secret
 //   keyImage   = H_p(commitKey) * keyScalar                   — double-spend nullifier
-//   amountMask = H("fuego_amount_mask" || depositSecret) mod l — Pedersen blinding factor
-//   termMask   = H("fuego_term_mask"   || depositSecret) mod l — term Pedersen blinding factor
+//   amountMask = H("fuego_amount_mask" || depositSecret) mod l — Pedersen blinding factor for amountCommitment
 struct DepositCommitmentKeys {
-  Crypto::PublicKey       commitKey;
-  Crypto::SecretKey       keyScalar;
-  Crypto::KeyImage        keyImage;
+  Crypto::PublicKey           commitKey;
+  Crypto::SecretKey           keyScalar;
+  Crypto::KeyImage            keyImage;
   Crypto::EllipticCurveScalar amountMask; // blinding factor for amountCommitment
-  Crypto::EllipticCurveScalar termMask;   // blinding factor for termCommitment
 };
 
 // Derive all commitment keys from a 32-byte deposit secret.

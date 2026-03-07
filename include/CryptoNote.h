@@ -52,25 +52,19 @@ struct MultisignatureOutput {
 // Replaces MultisignatureOutput for ALL deposit types: COLD, HEAT burns, Elderfier stakes.
 // HEAT burns use throwaway commitKey (secret discarded) and never withdraw but
 // serve as excellent decoys, bulking up decoy pool for COLD/EF withdrawal rings.
-// Ring selection is by amount only so all commitment outputs of matching amount
-// are eligible decoys regardless of term.
+// Ring selection draws from the global CommitmentIndex by amount —
+// all commitment outputs of matching amount are eligible decoys regardless of term.
 //
-// v11+ privacy fields (dual-bookkeeping phase):
-//   amountCommitment — Pedersen C = amount*H + amountMask*G
+// Amount privacy (v10):
+//   amountCommitment — Pedersen C = amount*H + amountMask*G (hides amount)
 //   amountProof      — 1-of-4 OR proof: amount ∈ {TIER_0, TIER_1, TIER_2, TIER_3}
-//   termCommitment   — Pedersen C = term*H + termMask*G
-//   termProof        — 1-of-4 OR proof: term ∈ {3mo, 1yr, FOREVER, EFier}
 //
-// During the dual-bookkeeping phase (v11), TransactionOutput.amount and .term
-// remain visible alongside the commitments. When full hidden values are enabled
-// (v12+), amount is zeroed and only the commitments + proofs are authoritative.
+// Term remains visible as required for node-enforced timelock
 struct TransactionOutputCommitment {
-  Crypto::PublicKey commitKey;                   // ring-sig spend key
-  uint32_t term;                                 // lock term in blocks (visible, dual-bookkeeping)
-  Crypto::EllipticCurvePoint amountCommitment;  // C = amount*H + amountMask*G
-  Crypto::MembershipProof    amountProof;        // proves amount ∈ {TIER_0..TIER_3}
-  Crypto::EllipticCurvePoint termCommitment;    // C = term*H + termMask*G
-  Crypto::MembershipProof    termProof;          // proves term ∈ {3mo, 1yr, FOREVER, EFier}
+  Crypto::PublicKey commitKey;                  // ring-sig spend key
+  uint32_t term;                                // lock term in blocks (visible — enforces timelock)
+  Crypto::EllipticCurvePoint amountCommitment; // C = amount*H + amountMask*G
+  Crypto::MembershipProof    amountProof;       // proves amount ∈ {TIER_0..TIER_3}
 };
 
 // v10+ ring-signature withdrawal input.
