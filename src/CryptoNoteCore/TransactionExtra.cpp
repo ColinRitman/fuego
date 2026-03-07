@@ -129,34 +129,86 @@ namespace CryptoNote
 
         case TX_EXTRA_ELDERFIER_DEPOSIT:
         {
+          // Read directly from iss to keep stream position in sync.
+          // Format: [depositHash:32] [amount:8 LE] [commitment:32] [secWindow:4 LE]
+          //         [metaLen:4 LE] [meta:N] [sigLen:4 LE] [sig:M] [slashable:1]
           TransactionExtraElderfierDeposit deposit;
-          if (getElderfierDepositFromExtra(transactionExtra, deposit)) {
-            transactionExtraFields.push_back(deposit);
-          } else {
-            return false;
+          read(iss, deposit.depositHash.data, 32);
+          deposit.depositAmount = 0;
+          for (int i = 0; i < 8; ++i)
+            deposit.depositAmount |= static_cast<uint64_t>(read<uint8_t>(iss)) << (i * 8);
+          read(iss, deposit.elderfierCommitment.data, 32);
+          deposit.securityWindow = 0;
+          for (int i = 0; i < 4; ++i)
+            deposit.securityWindow |= static_cast<uint32_t>(read<uint8_t>(iss)) << (i * 8);
+          uint32_t metaLen = 0;
+          for (int i = 0; i < 4; ++i)
+            metaLen |= static_cast<uint32_t>(read<uint8_t>(iss)) << (i * 8);
+          if (metaLen > 0) {
+            deposit.metadata.resize(metaLen);
+            read(iss, deposit.metadata.data(), metaLen);
           }
+          uint32_t sigLen = 0;
+          for (int i = 0; i < 4; ++i)
+            sigLen |= static_cast<uint32_t>(read<uint8_t>(iss)) << (i * 8);
+          if (sigLen > 0) {
+            deposit.signature.resize(sigLen);
+            read(iss, deposit.signature.data(), sigLen);
+          }
+          deposit.isSlashable = (read<uint8_t>(iss) != 0);
+          transactionExtraFields.push_back(deposit);
           break;
         }
 
         case TX_EXTRA_ELDERFIER_MESSAGE:
         {
+          // Read directly from iss to keep stream position in sync.
+          // Format: [senderKey:32] [recipientKey:32] [msgType:4 LE] [timestamp:8 LE]
+          //         [dataLen:4 LE] [data:N] [sigLen:4 LE] [sig:M]
           TransactionExtraElderfierMessage message;
-          if (getElderfierMessageFromExtra(transactionExtra, message)) {
-            transactionExtraFields.push_back(message);
-          } else {
-            return false;
+          read(iss, message.senderKey.data, 32);
+          read(iss, message.recipientKey.data, 32);
+          message.messageType = 0;
+          for (int i = 0; i < 4; ++i)
+            message.messageType |= static_cast<uint32_t>(read<uint8_t>(iss)) << (i * 8);
+          message.timestamp = 0;
+          for (int i = 0; i < 8; ++i)
+            message.timestamp |= static_cast<uint64_t>(read<uint8_t>(iss)) << (i * 8);
+          uint32_t msgDataLen = 0;
+          for (int i = 0; i < 4; ++i)
+            msgDataLen |= static_cast<uint32_t>(read<uint8_t>(iss)) << (i * 8);
+          if (msgDataLen > 0) {
+            message.messageData.resize(msgDataLen);
+            read(iss, message.messageData.data(), msgDataLen);
           }
+          uint32_t msgSigLen = 0;
+          for (int i = 0; i < 4; ++i)
+            msgSigLen |= static_cast<uint32_t>(read<uint8_t>(iss)) << (i * 8);
+          if (msgSigLen > 0) {
+            message.signature.resize(msgSigLen);
+            read(iss, message.signature.data(), msgSigLen);
+          }
+          transactionExtraFields.push_back(message);
           break;
         }
 
         case TX_EXTRA_ELDERFIER_ALIAS:
         {
+          // Read directly from iss to keep stream position in sync.
+          // Format: [varint size] [BinaryArray data]
           TransactionExtraAliasRegistration alias;
-          if (getAliasFromExtra(transactionExtra, alias)) {
-            transactionExtraFields.push_back(alias);
+          uint64_t aliasDataSize = 0;
+          readVarint(iss, aliasDataSize);
+          if (aliasDataSize > 0 && aliasDataSize <= 1024) {
+            BinaryArray ba(aliasDataSize);
+            read(iss, ba.data(), aliasDataSize);
+            if (!fromBinaryArray(alias, ba)) {
+              return false;
+            }
           } else {
             return false;
           }
+          transactionExtraFields.push_back(alias);
           break;
         }
 
