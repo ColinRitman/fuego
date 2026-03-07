@@ -51,6 +51,7 @@ size_t getSignaturesCount(const TransactionInput& input) {
     size_t operator()(const KeyInput& txin) const { return txin.outputIndexes.size(); }
     size_t operator()(const MultisignatureInput& txin) const { return txin.signatureCount; }
     size_t operator()(const TransactionInputCommitmentSpend& txin) const { return txin.outputIndexes.size(); }
+    size_t operator()(const TransactionInputUnified& txin) const { return txin.outputIndexes.size(); }
   };
 
   return boost::apply_visitor(txin_signature_size_visitor(), input);
@@ -61,9 +62,11 @@ struct BinaryVariantTagGetter: boost::static_visitor<uint8_t> {
   uint8_t operator()(const CryptoNote::KeyInput) { return  0x2; }
   uint8_t operator()(const CryptoNote::MultisignatureInput) { return  0x3; }
   uint8_t operator()(const CryptoNote::TransactionInputCommitmentSpend) { return  0x4; }
+  uint8_t operator()(const CryptoNote::TransactionInputUnified) { return  0x5; }
   uint8_t operator()(const CryptoNote::KeyOutput) { return  0x2; }
   uint8_t operator()(const CryptoNote::MultisignatureOutput) { return  0x3; }
   uint8_t operator()(const CryptoNote::TransactionOutputCommitment) { return  0x4; }
+  uint8_t operator()(const CryptoNote::TransactionOutputUnified) { return  0x5; }
   uint8_t operator()(const CryptoNote::Transaction) { return  0xcc; }
   uint8_t operator()(const CryptoNote::Block) { return  0xbb; }
 };
@@ -104,6 +107,12 @@ void getVariantValue(CryptoNote::ISerializer& serializer, uint8_t tag, CryptoNot
     in = v;
     break;
   }
+  case 0x5: {
+    CryptoNote::TransactionInputUnified v;
+    serializer(v, "value");
+    in = v;
+    break;
+  }
   default:
     throw std::runtime_error("Unknown variant tag");
   }
@@ -125,6 +134,12 @@ void getVariantValue(CryptoNote::ISerializer& serializer, uint8_t tag, CryptoNot
   }
   case 0x4: {
     CryptoNote::TransactionOutputCommitment v;
+    serializer(v, "data");
+    out = v;
+    break;
+  }
+  case 0x5: {
+    CryptoNote::TransactionOutputUnified v;
     serializer(v, "data");
     out = v;
     break;
@@ -343,6 +358,20 @@ void serialize(TransactionOutputCommitment& out, ISerializer& serializer) {
   serializer(out.term, "term");
   serializePod(out.amountCommitment, "amount_commitment", serializer);
   serializePod(out.amountProof,      "amount_proof",      serializer);
+}
+
+void serialize(TransactionOutputUnified& out, ISerializer& serializer) {
+  serializer(out.key, "key");
+  serializer(out.term, "term");
+  serializePod(out.commitment, "commitment", serializer);
+  serializePod(out.proof,      "proof",      serializer);
+}
+
+void serialize(TransactionInputUnified& in, ISerializer& serializer) {
+  serializeVarintVector(in.outputIndexes, serializer, "key_offsets");
+  serializer(in.keyImage, "k_image");
+  serializePod(in.pseudoCommitment, "pseudo_commitment", serializer);
+  serializer(in.sigC0, "sig_c0");
 }
 
 void serialize(ParentBlockSerializer& pbs, ISerializer& serializer) {

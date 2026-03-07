@@ -76,9 +76,34 @@ struct TransactionInputCommitmentSpend {
   Crypto::KeyImage keyImage;            // H_p(commitKey) * keyScalar — double-spend prevention via m_spent_keys
 };
 
-typedef boost::variant<BaseInput, KeyInput, MultisignatureInput, TransactionInputCommitmentSpend> TransactionInput;
+// v11+ unified output — replaces KeyOutput + TransactionOutputCommitment.
+// ALL v11 transaction outputs (transfers, deposits, burns) use this type.
+// Amount hidden in Pedersen commitment; denomination proved by 1-of-N membership proof.
+// term=0: regular transfer. term>0: locked deposit (blocks).
+// TransactionOutput.amount is 0 on the wire for this type (amount is in commitment).
+struct TransactionOutputUnified {
+  Crypto::PublicKey key;                    // stealth address (regular) or commitKey (deposit)
+  uint32_t term;                            // 0 = regular transfer, >0 = deposit lock (blocks)
+  Crypto::EllipticCurvePoint commitment;    // C = amount*H + mask*G
+  Crypto::MembershipProof proof;            // 1-of-N: amount is a valid denomination
+};
 
-typedef boost::variant<KeyOutput, MultisignatureOutput, TransactionOutputCommitment> TransactionOutputTarget;
+// v11+ unified input — replaces KeyInput + TransactionInputCommitmentSpend.
+// ALL v11 inputs (transfers, deposit withdrawals) use this type.
+// Amount hidden; MLSAG proves spend authority + commitment balance.
+// MLSAG response scalars stored in tx.signatures[input_idx]:
+//   signatures[input_idx][j] = {s[j][0], s[j][1]} for ring member j
+//   (each 64-byte Signature packs both layer responses for one ring member)
+struct TransactionInputUnified {
+  std::vector<uint32_t> outputIndexes;              // global ring (relative offsets)
+  Crypto::KeyImage keyImage;                         // double-spend prevention
+  Crypto::EllipticCurvePoint pseudoCommitment;       // C_pseudo for MLSAG balance
+  Crypto::EllipticCurveScalar sigC0;                 // MLSAG initial challenge scalar
+};
+
+typedef boost::variant<BaseInput, KeyInput, MultisignatureInput, TransactionInputCommitmentSpend, TransactionInputUnified> TransactionInput;
+
+typedef boost::variant<KeyOutput, MultisignatureOutput, TransactionOutputCommitment, TransactionOutputUnified> TransactionOutputTarget;
 
 struct TransactionOutput {
   uint64_t amount;
