@@ -1926,6 +1926,79 @@ namespace CryptoNote
     }
   }
 
+  std::string WalletGreen::createSubAddress(uint32_t major, uint32_t minor, uint64_t creationTimestamp)
+  {
+    throwIfNotInitialized();
+    throwIfStopped();
+    throwIfTrackingMode();
+
+    if (major == 0 && minor == 0) {
+      throw std::system_error(make_error_code(error::WRONG_PARAMETERS),
+                              "Sub-address index (0,0) is reserved for the primary address");
+    }
+
+    // Get master spend public key (index 0 = primary wallet)
+    if (m_walletsContainer.get<RandomAccessIndex>().empty()) {
+      throw std::system_error(make_error_code(error::NOT_INITIALIZED));
+    }
+    const WalletRecord& primary = m_walletsContainer.get<RandomAccessIndex>()[0];
+    const Crypto::SecretKey* spendSec = (primary.spendSecretKey != NULL_SECRET_KEY)
+                                        ? &primary.spendSecretKey : nullptr;
+
+    Crypto::SubAddressKeys subKeys = Crypto::deriveSubAddressKeys(
+        m_viewSecretKey,
+        primary.spendPublicKey,
+        spendSec,
+        major, minor);
+
+    if (creationTimestamp == 0) {
+      creationTimestamp = static_cast<uint64_t>(time(nullptr));
+    }
+
+    // Register the sub-address spend key as a new wallet entry (reuses multi-wallet infrastructure).
+    // The sub spend secret key (b_ij = b + m) is stored so spending works automatically.
+    std::string addr = doCreateAddress(subKeys.spendPublicKey,
+                                       subKeys.hasSpendSecretKey ? subKeys.spendSecretKey : NULL_SECRET_KEY,
+                                       creationTimestamp);
+
+    // Tag the newly-created wallet record with its sub-address index.
+    auto& index = m_walletsContainer.get<KeysIndex>();
+    auto it = index.find(subKeys.spendPublicKey);
+    if (it != index.end()) {
+      index.modify(it, [major, minor](WalletRecord& w) {
+        w.isSubAddress  = true;
+        w.subaddrMajor  = major;
+        w.subaddrMinor  = minor;
+      });
+    }
+
+    // Return address string with sub-address prefix.
+    AccountPublicAddress subAddr{subKeys.spendPublicKey, subKeys.viewPublicKey};
+    return m_currency.subAddressAsString(subAddr);
+  }
+
+  std::vector<std::tuple<uint32_t, uint32_t, std::string>> WalletGreen::listSubAddresses() const
+  {
+    throwIfNotInitialized();
+
+    std::vector<std::tuple<uint32_t, uint32_t, std::string>> result;
+    for (const auto& w : m_walletsContainer.get<RandomAccessIndex>()) {
+      if (!w.isSubAddress) continue;
+      // Reconstruct sub view public key: C_ij = a * D_ij
+      // We use generate_key_derivation which does cofactor-multiply internally,
+      // so we instead derive via deriveSubAddressKeys (view-only, no spend secret needed).
+      Crypto::SubAddressKeys subKeys = Crypto::deriveSubAddressKeys(
+          m_viewSecretKey,
+          m_walletsContainer.get<RandomAccessIndex>()[0].spendPublicKey,
+          nullptr,
+          w.subaddrMajor, w.subaddrMinor);
+      AccountPublicAddress subAddr{w.spendPublicKey, subKeys.viewPublicKey};
+      std::string addrStr = m_currency.subAddressAsString(subAddr);
+      result.emplace_back(w.subaddrMajor, w.subaddrMinor, addrStr);
+    }
+    return result;
+  }
+
   void WalletGreen::deleteAddress(const std::string &address)
   {
     throwIfNotInitialized();

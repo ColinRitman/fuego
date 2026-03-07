@@ -49,6 +49,11 @@ namespace CryptoNote
         uint64_t lockedDepositBalance = 0;
         uint64_t unlockedDepositBalance = 0;
         time_t creationTimestamp;
+
+        // Sub-address fields. (0,0) = master address (primary).
+        uint32_t subaddrMajor = 0;
+        uint32_t subaddrMinor = 0;
+        bool isSubAddress = false;
     };
 
 #pragma pack(push, 1)
@@ -134,7 +139,7 @@ struct EncryptedWalletRecord {
             boost::multi_index::ordered_non_unique<boost::multi_index::tag<BlockHeightIndex>,
                                                    boost::multi_index::member<CryptoNote::WalletTransaction, uint32_t, &CryptoNote::WalletTransaction::blockHeight>>>>
         WalletTransactions;
-        
+
     typedef Common::FileMappedVector<EncryptedWalletRecord> ContainerStorage;
     typedef std::pair<size_t, CryptoNote::WalletTransfer> TransactionTransferPair;
     typedef std::vector<TransactionTransferPair> WalletTransfers;

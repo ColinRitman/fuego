@@ -31,6 +31,7 @@
 #include "Transfers/TransfersSynchronizer.h"
 #include "Transfers/BlockchainSynchronizer.h"
 #include "EldernodeIndexManager.h"  // For elderfier auto-registration
+#include "crypto/subaddress.h"
 
 namespace CryptoNote
 {
@@ -100,6 +101,14 @@ private:
   virtual std::string createAddress(const Crypto::SecretKey &spendSecretKey) override;
   virtual std::string createAddress(const Crypto::PublicKey &spendPublicKey) override;
   virtual std::vector<std::string> createAddressList(const std::vector<Crypto::SecretKey> &spendSecretKeys, bool reset = true) override;
+
+  // Sub-address support.
+  // Creates a deterministic receive address at index (major, minor).
+  // Derived from master spend+view keys; outputs sent to this address appear in wallet balance.
+  // Spending from sub-address outputs uses the derived spend secret b_ij = b + m automatically.
+  // Do not use index (0,0) — that is the primary address.
+  std::string createSubAddress(uint32_t major, uint32_t minor, uint64_t creationTimestamp = 0);
+  std::vector<std::tuple<uint32_t, uint32_t, std::string>> listSubAddresses() const;
 
   virtual void deleteAddress(const std::string &address) override;
 

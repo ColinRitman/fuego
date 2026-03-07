@@ -104,6 +104,12 @@ namespace CryptoNote {
       check_key(adr.viewPublicKey);
   }
   //-----------------------------------------------------------------------
+  bool isSubAddressStr(const std::string& str, uint64_t subaddrPrefix) {
+    uint64_t prefix;
+    std::string data;
+    return Tools::Base58::decode_addr(str, prefix, data) && prefix == subaddrPrefix;
+  }
+  //-----------------------------------------------------------------------
   bool operator ==(const CryptoNote::Transaction& a, const CryptoNote::Transaction& b) {
     return getObjectHash(a) == getObjectHash(b);
   }

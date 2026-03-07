@@ -127,7 +127,7 @@ namespace CryptoNote
     m_genesisBlock.nonce = 70;
     if (m_testnet)
     {
-      m_genesisBlock.nonce = 78; // New nonce for testnet genesis
+      m_genesisBlock.nonce = 79; // v10 genesis: commitment outputs include Pedersen fields
     }
 
     //miner::find_nonce_for_given_block(bl, 1, 0);
@@ -701,6 +701,11 @@ double Currency::getBurnPercentage() const {
     return getAccountAddressAsStr(m_publicAddressBase58Prefix, accountPublicAddress);
   }
 
+  std::string Currency::subAddressAsString(const AccountPublicAddress &subAddressPublicAddress) const
+  {
+    return getAccountAddressAsStr(m_subAddressBase58Prefix, subAddressPublicAddress);
+  }
+
   /* ---------------------------------------------------------------------------------------------------- */
 
   bool Currency::parseAccountAddressString(const std::string &str, AccountPublicAddress &addr) const
@@ -711,13 +716,20 @@ double Currency::getBurnPercentage() const {
       return false;
     }
 
-    if (prefix != m_publicAddressBase58Prefix)
+    if (prefix != m_publicAddressBase58Prefix && prefix != m_subAddressBase58Prefix)
     {
-      logger(DEBUGGING) << "Wrong address prefix: " << prefix << ", expected " << m_publicAddressBase58Prefix;
+      logger(DEBUGGING) << "Wrong address prefix: " << prefix
+                        << ", expected " << m_publicAddressBase58Prefix
+                        << " or " << m_subAddressBase58Prefix;
       return false;
     }
 
     return true;
+  }
+
+  bool Currency::isSubAddressStr(const std::string& str) const
+  {
+    return CryptoNote::isSubAddressStr(str, m_subAddressBase58Prefix);
   }
 
   /* ---------------------------------------------------------------------------------------------------- */
@@ -1220,61 +1232,15 @@ double Currency::getBurnPercentage() const {
 
 		const uint64_t minDifficulty = isTestnet() ? 1000 : 1000000;
 
-		// Sanity checks
 		if (timestamps.size() != cumulativeDifficulties.size() || timestamps.size() < 3) {
 			return minDifficulty;
 		}
 
-		// DMWDA activation: testnet at TESTNET_DMWDA_ACTIVATION_HEIGHT, mainnet always (no v10 blocks yet)
-		const bool useDMWDA = !isTestnet() || (height >= CryptoNote::TESTNET_DMWDA_ACTIVATION_HEIGHT);
-
-		if (useDMWDA) {
-			// DMWDA (Dynamic Multi-Window Difficulty Algorithm)
-			auto config = getDefaultFuegoConfig(isTestnet());
-			AdaptiveDifficulty algo(config);
-			uint64_t next_D = algo.calculateNextDifficulty(height, timestamps, cumulativeDifficulties, isTestnet());
-			if (next_D < minDifficulty) {
-				next_D = minDifficulty;
-			}
-			return next_D;
-		}
-
-		// Legacy MWLWMA path for testnet blocks below TESTNET_DMWDA_ACTIVATION_HEIGHT
-		const uint64_t T = difficultyTarget();
-
-		const bool useV2 = (height >= CryptoNote::TESTNET_MWLWMA_V2_HEIGHT);
-
-		const uint64_t N_short  = !useV2 ? 9  : CryptoNote::TESTNET_MWLWMA_N_SHORT;
-		const uint64_t N_medium = !useV2 ? 33 : CryptoNote::TESTNET_MWLWMA_N_MEDIUM;
-		const uint64_t N_long   = !useV2 ? 69 : CryptoNote::TESTNET_MWLWMA_N_LONG;
-
-		const uint64_t W_short  = !useV2 ? 33 : CryptoNote::TESTNET_MWLWMA_W_SHORT;
-		const uint64_t W_medium = !useV2 ? 34 : CryptoNote::TESTNET_MWLWMA_W_MEDIUM;
-		const uint64_t W_long   = !useV2 ? 33 : CryptoNote::TESTNET_MWLWMA_W_LONG;
-
-		const uint64_t minSolveTime = useV2 ? T / 8 : 0;
-
-		uint64_t D_short  = calculateLWMA(timestamps, cumulativeDifficulties, N_short,  T, minDifficulty, minSolveTime);
-		uint64_t D_medium = calculateLWMA(timestamps, cumulativeDifficulties, N_medium, T, minDifficulty, minSolveTime);
-		uint64_t D_long   = calculateLWMA(timestamps, cumulativeDifficulties, N_long,   T, minDifficulty, minSolveTime);
-
-		uint64_t next_D = (D_short * W_short + D_medium * W_medium + D_long * W_long) / (W_short + W_medium + W_long);
-
-		if (next_D < minDifficulty) {
-			next_D = minDifficulty;
-		}
-
-		// Round to nice numbers for readability
-		uint64_t i = 1000000000;
-		while (i > 1) {
-			if (next_D > i * 100) {
-				next_D = ((next_D + i / 2) / i) * i;
-				break;
-			}
-			i /= 10;
-		}
-
-		return next_D;
+		// DMWDA (Dynamic Multi-Window Difficulty Algorithm) — replaces MWLWMA for all v10+ blocks
+		auto config = getDefaultFuegoConfig(isTestnet());
+		AdaptiveDifficulty algo(config);
+		uint64_t next_D = algo.calculateNextDifficulty(height, timestamps, cumulativeDifficulties, isTestnet());
+		return std::max(minDifficulty, next_D);
 	}
 
 
@@ -1384,6 +1350,7 @@ double Currency::getBurnPercentage() const {
     maxBlockBlobSize(parameters::CRYPTONOTE_MAX_BLOCK_BLOB_SIZE);
     maxTxSize(parameters::CRYPTONOTE_MAX_TX_SIZE);
     publicAddressBase58Prefix(parameters::CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX);
+    subAddressBase58Prefix(parameters::CRYPTONOTE_SUBADDRESS_BASE58_PREFIX);
     minedMoneyUnlockWindow(parameters::CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW);
 
     timestampCheckWindow(parameters::BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW);

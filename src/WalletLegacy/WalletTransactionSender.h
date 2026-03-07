@@ -17,6 +17,9 @@
 
 #pragma once
 
+#include <array>
+#include <map>
+
 #include "CryptoNoteCore/Account.h"
 #include "CryptoNoteCore/Currency.h"
 
@@ -38,6 +41,10 @@ public:
   WalletTransactionSender(const Currency& currency, WalletUserTransactionsCache& transactionsCache, AccountKeys keys, ITransfersContainer& transfersContainer, INode& node);
 
   void stop();
+
+  // Register a sub-address so its outputs are eligible as transaction inputs
+  // AccountKeys MUST contain sub spend secret key (b_ij = b + m)
+  void addSubAddress(const AccountKeys& subKeys, ITransfersContainer& subContainer);
 
   std::unique_ptr<WalletRequest> makeSendRequest(Crypto::SecretKey& transactionSK,
                                                  bool optimize,
@@ -69,7 +76,7 @@ public:
                                                             std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
                                                             const std::vector<DepositId>& depositIds,
                                                             uint64_t fee);
-                                                            
+
 std::shared_ptr<WalletRequest> makeSendFusionRequest(TransactionId& transactionId, std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
                                                      const std::vector<WalletLegacyTransfer>& transfers, const std::list<TransactionOutputInformation>& fusionInputs,
                                                      uint64_t fee, const std::string& extra = "", uint64_t mixIn = 0, uint64_t unlockTimestamp = 0);
@@ -141,6 +148,17 @@ private:
 
   bool m_isStoping;
   ITransfersContainer& m_transferDetails;
+
+  // more sub-address containers for input selection
+  struct SubAddressSource {
+    AccountKeys keys;
+    ITransfersContainer* container;
+  };
+  std::vector<SubAddressSource> m_subAddressSources;
+
+  // Maps (transactionHash || outputInTransaction_LE32) → AccountKeys for sub-address outputs
+  // Used so prepareKeyInputs can attach correct signing keys to each source entry
+  std::map<std::array<uint8_t, 36>, AccountKeys> m_subAddressOutputKeys;
 
   INode& m_node; //used solely to get last known block height for calculateInterest
 };

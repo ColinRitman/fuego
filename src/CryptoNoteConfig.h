@@ -33,6 +33,8 @@ namespace CryptoNote
 		const size_t CRYPTONOTE_MAX_BLOCK_BLOB_SIZE = 8000000;
 		const size_t CRYPTONOTE_MAX_TX_SIZE = 1000000000;
         const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX = 1753191; /* "fire" address prefix */
+        const uint64_t CRYPTONOTE_SUBADDRESS_BASE58_PREFIX = CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX; // same as main (fire) for max privacy, ie indistinguishable to outside observers.
+        // only issue being if user tried to send FROM a sub-addy, which isnt supported by wallets anyway
 		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW = 60;
 		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW_TESTNET = 0;
 		const uint64_t DIFFICULTY_TARGET_DRGL = 81;
@@ -64,7 +66,7 @@ namespace CryptoNote
 		const uint64_t TEST_BANK_FEE_TIER_1 = UINT64_C(8000);   /* 0.1% of 0.8 TEST (8,000,000 atomic) = 8,000 atomic */
 		const uint64_t TEST_BANK_FEE_TIER_2 = UINT64_C(80000);  /* 0.1% of 8 TEST (80,000,000 atomic) = 80,000 atomic */
 		const uint64_t TEST_BANK_FEE_TIER_3 = UINT64_C(800000); /* 0.1% of 80 TEST (800,000,000 atomic) = 800,000 atomic */
-///remove alias option for regular network users
+ // may remove alias option for regular network users for privacy
 		// Fire Alias registration fee: 1 XFG for regular users, free for Elderfiers
 		const uint64_t ALIAS_REGISTRATION_FEE = COIN;  /* 1 XFG sent to Fuego Development Fund */
 
@@ -307,10 +309,11 @@ namespace CryptoNote
 		};
 
  	// TESTNET DEFAULTS
- 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101cf56adac8d2210029c7f8dee06beb5e215dd81325bc079fd7f7b58452590056c";
+ 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101433c9aca20cea9b10cb717e14d171ab94e98b4ffaccfd56f81db695fc1a7dcfb";
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */
+	const uint64_t CRYPTONOTE_SUBADDRESS_BASE58_PREFIX_TESTNET = CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET;
 
 	const uint32_t TESTNET_DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
@@ -331,8 +334,7 @@ namespace CryptoNote
 		const uint64_t TESTNET_MWLWMA_W_SHORT                                = 20;   // 20% weight — reduced; burst-mining spikes were distorting difficulty
 		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 55;   // 55% weight — primary stability anchor
 		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 25;   // 25% weight — trend smoothing
-		const uint32_t TESTNET_MWLWMA_V2_HEIGHT                              = 21;  // Activation height for v2 params; old params used below this to preserve existing block validation
-		const uint32_t TESTNET_DMWDA_ACTIVATION_HEIGHT                        = 600; // Switch from MWLWMA to DMWDA at this testnet height
+		const uint32_t TESTNET_MWLWMA_V2_HEIGHT                              = 21;  // Legacy: unused after DMWDA activation
 
 
  	// TESTNET DMWDA parameters

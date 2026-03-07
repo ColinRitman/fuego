@@ -125,7 +125,8 @@ bool constructTransaction(
     in_contexts.push_back(input_generation_context_data());
     KeyPair& in_ephemeral = in_contexts.back().in_ephemeral;
     KeyImage img;
-    if (!generate_key_image_helper(sender_account_keys, src_entr.realTransactionPublicKey, src_entr.realOutputIndexInTransaction, in_ephemeral, img))
+    const AccountKeys& inputKeys = src_entr.hasCustomKeys ? src_entr.customKeys : sender_account_keys;
+    if (!generate_key_image_helper(inputKeys, src_entr.realTransactionPublicKey, src_entr.realOutputIndexInTransaction, in_ephemeral, img))
       return false;
 
     //check that derived key is equal with real output key

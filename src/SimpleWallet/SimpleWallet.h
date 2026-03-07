@@ -134,7 +134,11 @@ namespace CryptoNote
     // USER-FACING: Proof generation from deposits
     // Users generate STARKs from deposit transactions with xfg-stark-cli for L2 claims
     bool gen_proof(const std::vector<std::string> &args);
-    bool elderfier_panel(const std::vector<std::string> &args); // fier_panel
+    bool elder_council(const std::vector<std::string> &args); // fier_panel
+
+    // Sub-address commands
+    bool new_sub(const std::vector<std::string> &args);
+    bool list_subs(const std::vector<std::string> &args);
 
     bool ask_wallet_create_if_needed();
     std::string resolveAlias(const std::string& aliasUrl);
@@ -212,6 +216,12 @@ namespace CryptoNote
     bool m_generate_new_provided;
 
     std::string m_wallet_file;
+
+    // Sub-address list: (major, minor, addressString)
+    // Generated deterministically from master keys; persisted in <wallet>.subaddresses
+    std::vector<std::tuple<uint32_t, uint32_t, std::string>> m_subAddresses;
+    void loadSubAddresses();
+    void saveSubAddresses() const;
 
     std::unique_ptr<std::promise<std::error_code>> m_initResultPromise;
 

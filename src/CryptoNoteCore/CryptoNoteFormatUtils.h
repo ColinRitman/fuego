@@ -41,6 +41,11 @@ struct TransactionSourceEntry {
   Crypto::PublicKey realTransactionPublicKey; //incoming real tx public key
   size_t realOutputIndexInTransaction;        //index in transaction outputs vector
   uint64_t amount;                            //money
+
+  // for sub-address inputs spend key= b_ij as opposed to main wallet key b.
+  // hasCustomKeys = true for sub-address AccountKeys so constructTransaction signs with the correct key image for the input
+  bool hasCustomKeys = false; // Defaults to false (main address inputs use sender_account_keys as normal)
+  AccountKeys customKeys;
 };
 
 struct TransactionDestinationEntry {

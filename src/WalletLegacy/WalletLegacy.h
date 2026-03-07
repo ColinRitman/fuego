@@ -40,6 +40,7 @@
 #include "Transfers/BlockchainSynchronizer.h"
 #include "Transfers/TransfersSynchronizer.h"
 #include "BurnTransactionHandler.h"
+#include "crypto/subaddress.h"
 
 namespace CryptoNote {
 
@@ -124,6 +125,13 @@ public:
   bool getBurnDepositSecret(const std::string& txHash, Crypto::SecretKey& secret, uint64_t& amount, std::vector<uint8_t>& metadata);
   bool hasBurnDepositSecret(const std::string& txHash);
 
+  // Sub-address registration.
+  // Derives the sub-address at (major, minor), subscribes it to the chain scanner
+  // and returns the sub-address string. Outputs received at this address contribute
+  // to actualBalance() and are selectable as transaction inputs (spend key b_ij used).
+  // Idempotent: calling with a previously-registered index is a no-op and returns the address.
+  virtual std::string registerSubAddress(uint32_t major, uint32_t minor) override;
+
 private:
 
   // IBlockchainSynchronizerObserver
@@ -181,7 +189,7 @@ private:
   bool isBurnTransaction(const std::vector<uint8_t>& txExtra);
   BurnTransactionHandler::BurnTransactionData parseBurnTransaction(const std::vector<uint8_t>& txExtra);
   void generateStarkProofForBurn(const std::string& txHash, const std::string& ethAddress, uint64_t amount);
-  
+
 
 
   enum WalletState
@@ -215,14 +223,14 @@ private:
     uint64_t amount;
     std::vector<uint8_t> metadata;
     time_t timestamp;
-    
+
     BurnDepositSecret() : amount(0), timestamp(0) {}
     BurnDepositSecret(const Crypto::SecretKey& s, uint64_t a, const std::vector<uint8_t>& m)
       : secret(s), amount(a), metadata(m), timestamp(std::time(nullptr)) {}
   };
-  
+
   std::map<std::string, BurnDepositSecret> m_burnDepositSecrets;
-  
+
   // Pending burn deposit secrets (before transaction hash is known)
   Crypto::SecretKey m_pendingBurnSecret;
   uint64_t m_pendingBurnAmount;
@@ -231,6 +239,16 @@ private:
   BlockchainSynchronizer m_blockchainSync;
   TransfersSyncronizer m_transfersSync;
   ITransfersContainer* m_transferDetails;
+
+  // Registered sub-addresses: (AccountKeys with b_ij, container*).
+  // Populated by registerSubAddress(); persisted via the sidecar .subaddresses file.
+  struct SubAddressEntry {
+    uint32_t major;
+    uint32_t minor;
+    AccountKeys keys;
+    ITransfersContainer* container;
+  };
+  std::vector<SubAddressEntry> m_subAddresses;
 
   WalletUserTransactionsCache m_transactionsCache;
   std::unique_ptr<WalletTransactionSender> m_sender;

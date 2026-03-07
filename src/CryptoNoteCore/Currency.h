@@ -39,6 +39,8 @@ public:
   size_t maxBlockBlobSize() const { return m_maxBlockBlobSize; }
   size_t maxTxSize() const { return m_maxTxSize; }
   uint64_t publicAddressBase58Prefix() const { return m_publicAddressBase58Prefix; }
+  uint64_t subAddressBase58Prefix() const { return m_subAddressBase58Prefix; }
+  bool isSubAddressStr(const std::string& str) const;
   size_t minedMoneyUnlockWindow() const { return m_minedMoneyUnlockWindow; }
 
   size_t timestampCheckWindow() const { return m_timestampCheckWindow; }
@@ -310,6 +312,7 @@ public:
 
   std::string accountAddressAsString(const AccountBase &account) const;
   std::string accountAddressAsString(const AccountPublicAddress &accountPublicAddress) const;
+  std::string subAddressAsString(const AccountPublicAddress &subAddressPublicAddress) const;
   bool parseAccountAddressString(const std::string &str, AccountPublicAddress &addr) const;
 
   std::string formatAmount(uint64_t amount) const;
@@ -344,6 +347,7 @@ private:
   size_t m_maxBlockBlobSize;
   size_t m_maxTxSize;
   uint64_t m_publicAddressBase58Prefix;
+  uint64_t m_subAddressBase58Prefix;
   size_t m_minedMoneyUnlockWindow;
 
   size_t m_timestampCheckWindow;
@@ -464,6 +468,7 @@ public:
   CurrencyBuilder& maxBlockBlobSize(size_t val) { m_currency.m_maxBlockBlobSize = val; return *this; }
   CurrencyBuilder& maxTxSize(size_t val) { m_currency.m_maxTxSize = val; return *this; }
   CurrencyBuilder& publicAddressBase58Prefix(uint64_t val) { m_currency.m_publicAddressBase58Prefix = val; return *this; }
+  CurrencyBuilder& subAddressBase58Prefix(uint64_t val) { m_currency.m_subAddressBase58Prefix = val; return *this; }
   CurrencyBuilder& minedMoneyUnlockWindow(size_t val) { m_currency.m_minedMoneyUnlockWindow = val; return *this; }
 
   CurrencyBuilder& timestampCheckWindow(size_t val) { m_currency.m_timestampCheckWindow = val; return *this; }
@@ -572,6 +577,7 @@ public:
     // Set testnet-specific address prefix when testnet mode is enabled
     if (val) {
       publicAddressBase58Prefix(CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET);
+      subAddressBase58Prefix(CRYPTONOTE_SUBADDRESS_BASE58_PREFIX_TESTNET);
       // Set testnet-specific deposit terms
       depositMinTerm(parameters::TESTNET_COLD_MIN_TERM);
       depositMaxTerm(parameters::TESTNET_COLD_MAX_TERM);

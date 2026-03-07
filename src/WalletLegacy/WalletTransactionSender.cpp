@@ -33,6 +33,8 @@
 #include "INode.h"
 
 #include <Logging/LoggerGroup.h>
+#include <array>
+#include <cstring>
 #include <numeric>
 #include <random>
 #include <set>
@@ -43,6 +45,18 @@ using namespace Crypto;
 namespace
 {
   using namespace CryptoNote;
+
+  // Build a 36-byte map key from (txHash, outputIndex) for sub-address output lookup
+  // std::array has lexicographic operator<, so no custom comparator needed
+  std::array<uint8_t, 36> makeSubAddrOutputKey(const Crypto::Hash& txHash, uint32_t outputIdx) {
+    std::array<uint8_t, 36> key;
+    std::memcpy(key.data(), txHash.data, 32);
+    key[32] = outputIdx & 0xFF;
+    key[33] = (outputIdx >> 8) & 0xFF;
+    key[34] = (outputIdx >> 16) & 0xFF;
+    key[35] = (outputIdx >> 24) & 0xFF;
+    return key;
+  }
 
   uint64_t countNeededMoney(uint64_t fee, const std::vector<WalletLegacyTransfer> &transfers)
   {
@@ -207,6 +221,21 @@ namespace CryptoNote
   void WalletTransactionSender::stop()
   {
     m_isStoping = true;
+  }
+
+  void WalletTransactionSender::addSubAddress(const AccountKeys& subKeys, ITransfersContainer& subContainer)
+  {
+    m_subAddressSources.push_back({subKeys, &subContainer});
+
+    // Index all currently known unlocked outputs from this sub-address container
+    // so prepareKeyInputs can look up the correct signing keys per output
+    std::vector<TransactionOutputInformation> outputs;
+    subContainer.getOutputs(outputs, ITransfersContainer::IncludeKeyUnlocked);
+    for (const auto& out : outputs) {
+      if (out.type == TransactionTypes::OutputType::Key) {
+        m_subAddressOutputKeys[makeSubAddrOutputKey(out.transactionHash, out.outputInTransaction)] = subKeys;
+      }
+    }
   }
 
   bool WalletTransactionSender::validateDestinationAddress(const std::string &address)
@@ -1184,6 +1213,14 @@ namespace CryptoNote
       src.realTransactionPublicKey = td.transactionPublicKey;
       src.realOutput = interted_it - src.outputs.begin();
       src.realOutputIndexInTransaction = td.outputInTransaction;
+
+      // Attach sub-address signing keys if this output came from a sub-address container
+      auto keyIt = m_subAddressOutputKeys.find(makeSubAddrOutputKey(td.transactionHash, td.outputInTransaction));
+      if (keyIt != m_subAddressOutputKeys.end()) {
+        src.hasCustomKeys = true;
+        src.customKeys = keyIt->second;
+      }
+
       ++i;
     }
   }
@@ -1301,9 +1338,20 @@ namespace CryptoNote
   {
     uint64_t foundMoney = 0;
 
-    /** Get all the unlocked outputs from the wallet */
+    /** Get all the unlocked outputs from the wallet (main + sub-addresses) */
     std::vector<TransactionOutputInformation> outputs;
     m_transferDetails.getOutputs(outputs, ITransfersContainer::IncludeKeyUnlocked);
+    for (const auto& src : m_subAddressSources) {
+      std::vector<TransactionOutputInformation> subOutputs;
+      src.container->getOutputs(subOutputs, ITransfersContainer::IncludeKeyUnlocked);
+      // Index any newly arrived outputs that weren't in the map yet
+      for (const auto& out : subOutputs) {
+        if (out.type == TransactionTypes::OutputType::Key) {
+          m_subAddressOutputKeys[makeSubAddrOutputKey(out.transactionHash, out.outputInTransaction)] = src.keys;
+        }
+      }
+      outputs.insert(outputs.end(), subOutputs.begin(), subOutputs.end());
+    }
 
     /** Before picking the input buckets, lets shuffle all
      * the available outputs for privacy */

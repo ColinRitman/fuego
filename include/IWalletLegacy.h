@@ -167,6 +167,10 @@ public:
   virtual TransactionId withdrawDeposits(const std::vector<DepositId>& depositIds, uint64_t fee) = 0;
   virtual std::error_code cancelTransaction(size_t transferId) = 0;
 
+  // Sub-address support: subscribe the wallet scanner to this (major, minor) index.
+  // Returns the encoded sub-address string. Idempotent.
+  virtual std::string registerSubAddress(uint32_t major, uint32_t minor) = 0;
+
 };
 
 }

@@ -16,6 +16,7 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "SimpleWallet.h"
+#include "crypto/subaddress.h"
 
 #include <ctime>
 #include <fstream>
@@ -556,7 +557,9 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("list_aliases", boost::bind(&simple_wallet::list_aliases, this, boost::arg<1>()), "list_aliases - List all registered @ aliases on the network");
   // Hidden command — empty usage string keeps it out of help output.
   // Only shows content to registered Elderfiers.
-  m_consoleHandler.setHandler("elderfier_panel", boost::bind(&simple_wallet::elderfier_panel, this, boost::arg<1>()), "");
+  m_consoleHandler.setHandler("elder_council", boost::bind(&simple_wallet::elder_council, this, boost::arg<1>()), "");
+  m_consoleHandler.setHandler("new_sub", boost::bind(&simple_wallet::new_sub, this, boost::arg<1>()), "new_sub [major] [minor] - Generate a sub-address at index (major, minor). Omit args for auto-increment (0, N).");
+  m_consoleHandler.setHandler("list_subs", boost::bind(&simple_wallet::list_subs, this, boost::arg<1>()), "list_subs - List all sub-addresses for this wallet");
 }
 
 bool simple_wallet::show_dust(const std::vector<std::string>& args) {
@@ -823,6 +826,7 @@ bool simple_wallet::init(const boost::program_options::variables_map& vm) {
     m_node->addObserver(static_cast<INodeObserver*>(this));
 
     logger(INFO, BRIGHT_WHITE) << "Opened wallet: " << m_wallet->getAddress();
+    loadSubAddresses();
 
     success_msg_writer() <<
       "**********************************************************************\n" <<
@@ -2034,7 +2038,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
 }
 
 //----------------------------------------------------------------------------------------------------
-bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
+bool simple_wallet::elder_council(const std::vector<std::string> &)
 {
   // ── Gate: must be a registered Elderfier ────────────────────────────────
   std::string myAddress = m_wallet->getAddress();
@@ -2061,8 +2065,8 @@ bool simple_wallet::elderfier_panel(const std::vector<std::string> &)
       }
       if (pendingStakes > 0) {
         success_msg_writer() << "";
-        success_msg_writer() << "  EFier ceremony pending (" << pendingStakes << "/5 stakes tracked).";
-        success_msg_writer() << "  elderfier_panel will be available once all 5 confirm and your alias is registered.";
+        success_msg_writer() << "  Elderfier ceremony pending (" << pendingStakes << "/5 stakes tracked).";
+        success_msg_writer() << "  elder_council command will be available once all 5 confirm and your alias is registered.";
         success_msg_writer() << "  Check: list_cold  |  lookup_alias <your_alias>";
         success_msg_writer() << "";
       } else {
@@ -3733,4 +3737,105 @@ bool simple_wallet::list_aliases(const std::vector<std::string> &args) {
 //----------------------------------------------------------------------------------------------------
 void simple_wallet::printConnectionError() const {
   fail_msg_writer() << "wallet failed to connect to daemon (" << m_daemon_address << ").";
+}
+
+//----------------------------------------------------------------------------------------------------
+// Sub-address sidecar persistence: <wallet_file>.subaddresses
+// Format: one line per sub-address — "major minor address"
+//----------------------------------------------------------------------------------------------------
+void simple_wallet::loadSubAddresses() {
+  m_subAddresses.clear();
+  std::string path = m_wallet_file + ".subaddresses";
+  std::ifstream f(path);
+  if (!f.is_open()) return;
+  uint32_t major, minor;
+  std::string addr;
+  while (f >> major >> minor >> addr) {
+    m_subAddresses.emplace_back(major, minor, addr);
+    // Re-subscribe each sub-address to the chain scanner so incoming outputs are detected.
+    try {
+      m_wallet->registerSubAddress(major, minor);
+    } catch (...) {
+      // If registration fails (e.g. wallet not yet fully initialized), skip silently.
+      // The user can re-open the wallet to retry.
+    }
+  }
+}
+
+void simple_wallet::saveSubAddresses() const {
+  std::string path = m_wallet_file + ".subaddresses";
+  std::ofstream f(path);
+  for (const auto& entry : m_subAddresses) {
+    f << std::get<0>(entry) << " " << std::get<1>(entry) << " " << std::get<2>(entry) << "\n";
+  }
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::new_sub(const std::vector<std::string>& args) {
+  // Determine index.
+  uint32_t major = 0;
+  uint32_t minor = 0;
+
+  if (args.size() >= 2) {
+    try {
+      major = static_cast<uint32_t>(std::stoul(args[0]));
+      minor = static_cast<uint32_t>(std::stoul(args[1]));
+    } catch (...) {
+      fail_msg_writer() << "Usage: new_sub [major] [minor]";
+      return true;
+    }
+  } else if (args.size() == 1) {
+    fail_msg_writer() << "Usage: new_sub [major] [minor]  (provide both or neither)";
+    return true;
+  } else {
+    // Auto-increment: major=0, minor = next unused
+    minor = 0;
+    for (const auto& e : m_subAddresses) {
+      if (std::get<0>(e) == 0) {
+        minor = std::max(minor, std::get<1>(e) + 1);
+      }
+    }
+  }
+
+  if (major == 0 && minor == 0) {
+    fail_msg_writer() << "Index (0,0) is the primary address. Use minor >= 1.";
+    return true;
+  }
+
+  // Check for duplicate.
+  for (const auto& e : m_subAddresses) {
+    if (std::get<0>(e) == major && std::get<1>(e) == minor) {
+      success_msg_writer() << "Sub-address [" << major << "," << minor << "] already exists:";
+      success_msg_writer() << std::get<2>(e);
+      return true;
+    }
+  }
+
+  // Register with the wallet (subscribes the chain scanner and enables balance detection).
+  std::string addrStr = m_wallet->registerSubAddress(major, minor);
+
+  m_subAddresses.emplace_back(major, minor, addrStr);
+  saveSubAddresses();
+
+  success_msg_writer() << "Sub-address [" << major << "," << minor << "]:";
+  success_msg_writer() << addrStr;
+  success_msg_writer() << "";
+  success_msg_writer() << "Share this address with payers. Incoming funds will appear in your balance.";
+  success_msg_writer() << "Each payer gets a unique address so payments cannot be correlated on-chain.";
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::list_subs(const std::vector<std::string>& args) {
+  if (m_subAddresses.empty()) {
+    success_msg_writer() << "No sub-addresses generated yet. Use: new_sub";
+    return true;
+  }
+  success_msg_writer() << "Sub-addresses for this wallet:";
+  success_msg_writer() << "";
+  for (const auto& e : m_subAddresses) {
+    success_msg_writer() << "  [" << std::get<0>(e) << "," << std::get<1>(e) << "]  " << std::get<2>(e);
+  }
+  return true;
 }
