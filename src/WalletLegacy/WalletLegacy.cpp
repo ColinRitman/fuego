@@ -1252,23 +1252,33 @@ std::string WalletLegacy::registerSubAddress(uint32_t major, uint32_t minor) {
   sub.syncStart.height = 0;
   sub.syncStart.timestamp = m_account.get_createtime() - ACCOUN_CREATE_TIME_ACCURACY;
 
-  auto& subObject = m_transfersSync.addSubscription(sub);
-  ITransfersContainer* container = &subObject.getContainer();
-  subObject.addObserver(this);
+  // Stop blockchain synchronizer before adding subscription
+  m_blockchainSync.stop();
 
-  SubAddressEntry entry;
-  entry.major     = major;
-  entry.minor     = minor;
-  entry.keys      = subAccountKeys;
-  entry.container = container;
-  m_subAddresses.push_back(entry);
+  try {
+    auto& subObject = m_transfersSync.addSubscription(sub);
+    ITransfersContainer* container = &subObject.getContainer();
+    subObject.addObserver(this);
 
-  // Update the sender with the new sub-address data.
-  if (m_sender) {
-    m_sender->addSubAddress(subAccountKeys, *container);
+    SubAddressEntry entry;
+    entry.major     = major;
+    entry.minor     = minor;
+    entry.keys      = subAccountKeys;
+    entry.container = container;
+    m_subAddresses.push_back(entry);
+
+    // Update the sender with the new sub-address data.
+    if (m_sender) {
+      m_sender->addSubAddress(subAccountKeys, *container);
+    }
+
+    m_blockchainSync.start(); //XXX: start can throw. what to do in this case?
+    return m_currency.subAddressAsString({subKeys.spendPublicKey, subKeys.viewPublicKey});
+  } catch (...) {
+    // Ensure we restart the synchronizer even on error
+    m_blockchainSync.start();
+    throw;
   }
-
-  return m_currency.subAddressAsString({subKeys.spendPublicKey, subKeys.viewPublicKey});
 }
 
 bool WalletLegacy::isTrackingWallet() {

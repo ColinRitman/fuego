@@ -3789,7 +3789,7 @@ bool simple_wallet::new_sub(const std::vector<std::string>& args) {
     return true;
   } else {
     // Auto-increment: major=0, minor = next unused
-    minor = 0;
+    minor = 1;
     for (const auto& e : m_subAddresses) {
       if (std::get<0>(e) == 0) {
         minor = std::max(minor, std::get<1>(e) + 1);
@@ -3812,7 +3812,28 @@ bool simple_wallet::new_sub(const std::vector<std::string>& args) {
   }
 
   // Register with the wallet (subscribes the chain scanner and enables balance detection).
-  std::string addrStr = m_wallet->registerSubAddress(major, minor);
+  std::string addrStr;
+  try {
+    addrStr = m_wallet->registerSubAddress(major, minor);
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Failed to register sub-address [" << major << "," << minor << "]: " << e.what();
+    return true;
+  } catch (...) {
+    fail_msg_writer() << "Failed to register sub-address [" << major << "," << minor << "]: Unknown error";
+    return true;
+  }
+
+  // Validate the returned address string
+  if (addrStr.empty()) {
+    fail_msg_writer() << "Sub-address registration returned empty string for [" << major << "," << minor << "]";
+    return true;
+  }
+
+  // Basic sanity check - addresses should be reasonably long (base58 encoded)
+  if (addrStr.size() < 10) {
+    fail_msg_writer() << "Sub-address returned suspiciously short string for [" << major << "," << minor << "]: " << addrStr;
+    return true;
+  }
 
   m_subAddresses.emplace_back(major, minor, addrStr);
   saveSubAddresses();
