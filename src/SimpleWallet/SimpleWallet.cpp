@@ -1932,6 +1932,13 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     CryptoNote::AccountKeys walletKeys;
     m_wallet->getAccountKeys(walletKeys);
 
+    // Generate a dedicated signing keypair for this elderfier.
+    // The public key is embedded on-chain in deposit metadata.
+    // The secret key is displayed once — operator must save it to run fuegod --elderfier-key.
+    Crypto::PublicKey signingPubKey;
+    Crypto::SecretKey signingSecKey;
+    Crypto::generate_keys(signingPubKey, signingSecKey);
+
     for (int i = 0; i < 5; ++i) {
       success_msg_writer() << "  The " << flameNames[i] << " Flame — forging stake " << (i + 1) << " of 5...";
 
@@ -1957,6 +1964,9 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       elderfierDeposit.metadata.clear();
       elderfierDeposit.metadata.push_back(0xEA);
       elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(), alias.begin(), alias.end());
+      // Append signing public key (32 bytes) — used by daemon to verify elderfier identity
+      elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(),
+        signingPubKey.data, signingPubKey.data + 32);
       elderfierDeposit.signature.clear();
       elderfierDeposit.isSlashable        = true;
 
@@ -2021,6 +2031,21 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "  When all 5 deposits confirm on-chain, the network will";
     success_msg_writer() << "  register you as Ælder King @" << alias;
     success_msg_writer() << "  and add you to the active Ξlderfiers registry.";
+    success_msg_writer() << "";
+    success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+    success_msg_writer() << "║           SAVE YOUR ELDERFIER SIGNING KEY                  ║";
+    success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Your signing secret key (SAVE THIS — shown only once):";
+    success_msg_writer() << "";
+    success_msg_writer() << "    " << Common::podToHex(signingSecKey);
+    success_msg_writer() << "";
+    success_msg_writer() << "  To run your Elderfier signing node:";
+    success_msg_writer() << "";
+    success_msg_writer() << "    fuegod --elderfier-key " << Common::podToHex(signingSecKey);
+    success_msg_writer() << "";
+    success_msg_writer() << "  This key signs merkle roots on each block. Without it,";
+    success_msg_writer() << "  your node cannot fulfill its Elderfier duties.";
     success_msg_writer() << "";
     success_msg_writer() << "  Your Elderfire burns bright.";
     success_msg_writer() << "  Guard the Realm well, King " << alias << ".";

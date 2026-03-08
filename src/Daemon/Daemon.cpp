@@ -49,6 +49,8 @@
 #include "P2p/NetNodeConfig.h"
 #include "Rpc/RpcServer.h"
 #include "Rpc/RpcServerConfig.h"
+#include "CryptoNoteCore/ElderfierSignatureBroadcaster.h"
+#include "Common/StringTools.h"
 #include "version.h"
 
 #include "Logging/ConsoleLogger.h"
@@ -80,11 +82,8 @@ namespace
   const command_line::arg_descriptor<std::string> arg_set_fee_address = { "fee-address", "Set a fee address for remote nodes", "" };
   const command_line::arg_descriptor<std::string> arg_set_view_key = { "view-key", "Set secret view-key for remote node fee confirmation", "" };
 
-  // Elderfier Service Arguments (STARK verification with stake requirement)
- // const command_line::arg_descriptor<bool>        arg_enable_elderfier = {"enable-elderfier", "Enable Elderfier service mode for STARK proof verification (requires 800 XFG stake)", false};
- // const command_line::arg_descriptor<std::string> arg_elderfier_config = {"elderfier-config", "Path to Elderfier configuration file (optional)", ""};
- // const command_line::arg_descriptor<std::string> arg_elderfier_registry_url = {"elderfier-registry-url", "GitHub URL for Elderfier registry (default: https://raw.githubusercontent.com/usexfg/fuego/main/elderfier_registry.txt)", "https://raw.githubusercontent.com/usexfg/fuego/main/elderfier_registry.txt"};
-//
+  // Elderfier signing key: hex secret key produced by elderking_ceremony
+  const command_line::arg_descriptor<std::string> arg_elderfier_key = {"elderfier-key", "Secret signing key (hex) for Elderfier merkle root signing. Produced during elderking_ceremony.", ""};
   const command_line::arg_descriptor<bool>        arg_restricted_rpc = {"restricted-rpc", "Restrict RPC to view only commands to prevent abuse"};
   const command_line::arg_descriptor<std::string> arg_enable_cors = { "enable-cors", "Adds header 'Access-Control-Allow-Origin' to the daemon's RPC responses. Uses the value as domain. Use * for all", "" };
   const command_line::arg_descriptor<int>         arg_log_level   = {"log-level", "", 2}; // info level
@@ -130,7 +129,9 @@ JsonValue buildLoggerConfiguration(Level level, const std::string& logfile) {
 }
 
 // Forward declaration for elderfier broadcaster initialization
-void initializeElderfierBroadcaster(CryptoNote::core& ccore, CryptoNote::NodeServer& p2psrv, LoggerRef& logger);
+std::unique_ptr<CryptoNote::ElderfierSignatureBroadcaster> initializeElderfierBroadcaster(
+    CryptoNote::core& ccore, CryptoNote::NodeServer& p2psrv,
+    const boost::program_options::variables_map& vm, LoggerRef& logger);
 
 int main(int argc, char* argv[])
 {
@@ -167,10 +168,7 @@ int main(int argc, char* argv[])
    command_line::add_arg(desc_cmd_sett, arg_console);
    command_line::add_arg(desc_cmd_sett, arg_set_view_key);
 
-       // Elderfier Service Arguments (STARK verification with stake requirement)
-   // command_line::add_arg(desc_cmd_sett, arg_enable_elderfier);
-  //  command_line::add_arg(desc_cmd_sett, arg_elderfier_config);
-  //  command_line::add_arg(desc_cmd_sett, arg_elderfier_registry_url);
+   command_line::add_arg(desc_cmd_sett, arg_elderfier_key);
 
    command_line::add_arg(desc_cmd_sett, arg_testnet_on);
    command_line::add_arg(desc_cmd_sett, arg_enable_cors);
@@ -346,8 +344,8 @@ int main(int argc, char* argv[])
 
     logger(INFO) << "Core initialized OK";
 
-    // Initialize elderfier signature broadcaster (if configured)
-    initializeElderfierBroadcaster(ccore, p2psrv, logger);
+    // Initialize elderfier signature broadcaster (if --elderfier-key provided)
+    auto elderfierBroadcaster = initializeElderfierBroadcaster(ccore, p2psrv, vm, logger);
 
     // start components
     if (!command_line::has_arg(vm, arg_console)) {
@@ -397,6 +395,13 @@ int main(int argc, char* argv[])
 
     dch.stop_handling();
 
+    // Stop elderfier signing before tearing down core/p2p
+    if (elderfierBroadcaster) {
+      logger(INFO) << "Stopping elderfier broadcaster...";
+      elderfierBroadcaster->stop();
+      elderfierBroadcaster.reset();
+    }
+
     //stop components
     logger(INFO) << "Stopping core rpc server...";
     rpcServer.stop();
@@ -445,29 +450,56 @@ bool command_line_preprocessor(const boost::program_options::variables_map &vm, 
 // ELDERFIER SIGNATURE BROADCASTER INITIALIZATION
 // ============================================================================
 
-void initializeElderfierBroadcaster(CryptoNote::core& ccore, CryptoNote::NodeServer& p2psrv, LoggerRef& logger) {
-    // This function should be called after core initialization
-    // It checks if this node is configured to run as an elderfier and starts the background broadcaster
+std::unique_ptr<CryptoNote::ElderfierSignatureBroadcaster> initializeElderfierBroadcaster(
+    CryptoNote::core& ccore, CryptoNote::NodeServer& p2psrv,
+    const boost::program_options::variables_map& vm, LoggerRef& logger) {
 
     try {
-        // TODO: Check environment variables or config file for elderfier mode
-        // bool elderfier_enabled = /* read from config */;
-        // uint8_t elderfier_id = /* read from config */;
-        // std::string wallet_address = /* read from config */;
-        // std::string signing_key_hex = /* read from config */;
+        std::string keyHex = command_line::get_arg(vm, arg_elderfier_key);
+        if (keyHex.empty()) {
+            return nullptr;  // Not running as elderfier
+        }
 
-        // if (elderfier_enabled) {
-        //     auto broadcaster = std::make_unique<CryptoNote::ElderfierSignatureBroadcaster>(ccore, p2psrv);
-        //     if (broadcaster->initialize(elderfier_id, wallet_address, signing_key)) {
-        //         broadcaster->start();
-        //         logger(INFO) << "Elderfier broadcaster started for EFiD " << (int)elderfier_id;
-        //     }
-        // }
+        // Parse signing secret key from hex
+        if (keyHex.size() != 64) {
+            logger(ERROR, BRIGHT_RED) << "Invalid --elderfier-key: must be 64 hex characters (32 bytes)";
+            return nullptr;
+        }
 
-        logger(TRACE) << "Elderfier broadcaster initialization placeholder - check config for 'elderfier' settings";
+        Crypto::SecretKey signingSecKey;
+        if (!Common::podFromHex(keyHex, signingSecKey)) {
+            logger(ERROR, BRIGHT_RED) << "Invalid --elderfier-key: bad hex encoding";
+            return nullptr;
+        }
+
+        // Derive public key from secret key
+        Crypto::PublicKey signingPubKey;
+        if (!Crypto::secret_key_to_public_key(signingSecKey, signingPubKey)) {
+            logger(ERROR, BRIGHT_RED) << "Invalid --elderfier-key: cannot derive public key";
+            return nullptr;
+        }
+
+        logger(INFO, BRIGHT_CYAN) << "";
+        logger(INFO, BRIGHT_CYAN) << "========================================";
+        logger(INFO, BRIGHT_CYAN) << "  ELDERFIER SIGNING MODE ACTIVE";
+        logger(INFO, BRIGHT_CYAN) << "========================================";
+        logger(INFO, BRIGHT_CYAN) << "  Signing pubkey: " << Common::podToHex(signingPubKey);
+        logger(INFO, BRIGHT_CYAN) << "  This node will sign merkle roots on each new block.";
+        logger(INFO, BRIGHT_CYAN) << "========================================";
+        logger(INFO, BRIGHT_CYAN) << "";
+
+        // Create and start broadcaster (pass p2psrv as both NodeServer& and IP2pEndpoint*)
+        auto broadcaster = std::make_unique<CryptoNote::ElderfierSignatureBroadcaster>(ccore, p2psrv, &p2psrv);
+        broadcaster->setSigningKeys(signingPubKey, signingSecKey);
+        broadcaster->start();
+
+        logger(INFO, BRIGHT_GREEN) << "Elderfier signature broadcaster started";
+
+        return broadcaster;
 
     } catch (const std::exception& e) {
         logger(WARNING) << "Exception initializing elderfier broadcaster: " << e.what();
+        return nullptr;
     }
 }
 

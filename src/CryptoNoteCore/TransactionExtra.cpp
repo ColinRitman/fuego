@@ -832,128 +832,64 @@ namespace CryptoNote
   }
 
   bool getElderfierDepositFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraElderfierDeposit& deposit) {
-    std::cout << "\n[getElderfierDepositFromExtra] Dumping extra field:" << std::endl;
-    std::cout << "  Size: " << tx_extra.size() << " bytes" << std::endl;
-
     // Find the 0xEF tag in tx_extra
     size_t pos = 0;
-    bool found = false;
-
     while (pos < tx_extra.size()) {
       if (tx_extra[pos] == TX_EXTRA_ELDERFIER_DEPOSIT) {
-        found = true;
-        std::cout << "  ✓ Found 0xEF tag at position " << pos << std::endl;
         pos++; // Skip tag
         break;
       }
       pos++;
     }
-
-    if (!found) {
-      std::cout << "  ✗ FAILED: tag 0xEF not found in extra field!" << std::endl;
-      return false;
-    }
-
-    std::cout << "  Starting deserialization at pos=" << pos << std::endl;
+    if (pos >= tx_extra.size()) return false;
 
     // Deserialize deposit hash (32 bytes)
-    std::cout << "  [position " << pos << "] Deserializing deposit hash (32 bytes)..." << std::endl;
-    if (pos + 32 > tx_extra.size()) {
-      std::cout << "  ✗ FAILED: not enough bytes for deposit hash (need " << (pos+32) << ", have " << tx_extra.size() << ")" << std::endl;
-      return false;
-    }
+    if (pos + 32 > tx_extra.size()) return false;
     std::memcpy(deposit.depositHash.data, &tx_extra[pos], 32);
     pos += 32;
-    std::cout << "  ✓ deposit hash loaded" << std::endl;
-    std::cout << "  ✓ deposit hash loaded" << std::endl;
 
     // Deserialize amount (8 bytes, little-endian)
-    std::cout << "  [position " << pos << "] Deserializing amount (8 bytes)..." << std::endl;
-    if (pos + 8 > tx_extra.size()) {
-      std::cout << "  ✗ FAILED: not enough bytes for amount (need " << (pos+8) << ", have " << tx_extra.size() << ")" << std::endl;
-      return false;
-    }
+    if (pos + 8 > tx_extra.size()) return false;
     deposit.depositAmount = 0;
-    for (int i = 0; i < 8; ++i) {
+    for (int i = 0; i < 8; ++i)
       deposit.depositAmount |= static_cast<uint64_t>(tx_extra[pos + i]) << (i * 8);
-    }
     pos += 8;
-    std::cout << "  ✓ amount loaded: " << deposit.depositAmount << std::endl;
 
-    // Deserialize elderfier commitment (fixed 32 bytes)
-    std::cout << "  [position " << pos << "] Deserializing elderfier commitment (32 bytes)..." << std::endl;
-    if (pos + 32 > tx_extra.size()) {
-      std::cout << "  ✗ FAILED: not enough bytes for commitment (need " << (pos+32) << ", have " << tx_extra.size() << ")" << std::endl;
-      return false;
-    }
+    // Deserialize elderfier commitment (32 bytes)
+    if (pos + 32 > tx_extra.size()) return false;
     std::memcpy(deposit.elderfierCommitment.data, &tx_extra[pos], 32);
     pos += 32;
-    std::cout << "  ✓ commitment loaded" << std::endl;
-    std::cout << "  ✓ commitment loaded" << std::endl;
 
     // Deserialize security window (4 bytes, little-endian)
-    std::cout << "  [position " << pos << "] Deserializing security window (4 bytes)..." << std::endl;
-    if (pos + 4 > tx_extra.size()) {
-      std::cout << "  ✗ FAILED: not enough bytes for security window (need " << (pos+4) << ", have " << tx_extra.size() << ")" << std::endl;
-      return false;
-    }
+    if (pos + 4 > tx_extra.size()) return false;
     deposit.securityWindow = 0;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i)
       deposit.securityWindow |= static_cast<uint32_t>(tx_extra[pos + i]) << (i * 8);
-    }
     pos += 4;
-    std::cout << "  ✓ security window loaded: " << deposit.securityWindow << std::endl;
 
-    // Deserialize metadata size and data
-    std::cout << "  [position " << pos << "] Deserializing metadata size..." << std::endl;
-    if (pos + 4 > tx_extra.size()) {
-      std::cout << "  ✗ FAILED: not enough bytes for metadata size (need " << (pos+4) << ", have " << tx_extra.size() << ")" << std::endl;
-      return false;
-    }
+    // Deserialize metadata
+    if (pos + 4 > tx_extra.size()) return false;
     uint32_t metaLen = 0;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i)
       metaLen |= static_cast<uint32_t>(tx_extra[pos + i]) << (i * 8);
-    }
     pos += 4;
-
-    if (pos + metaLen > tx_extra.size()) {
-      std::cout << "  ✗ FAILED: not enough bytes for metadata data (need " << (pos+metaLen) << ", have " << tx_extra.size() << ")" << std::endl;
-      return false;
-    }
+    if (pos + metaLen > tx_extra.size()) return false;
     deposit.metadata.assign(&tx_extra[pos], &tx_extra[pos] + metaLen);
     pos += metaLen;
-    std::cout << "  ✓ metadata loaded (" << deposit.metadata.size() << " bytes)" << std::endl;
 
-    // Deserialize signature size and data
-    std::cout << "  [position " << pos << "] Deserializing signature size..." << std::endl;
-    if (pos + 4 > tx_extra.size()) {
-      std::cout << "  ✗ FAILED: not enough bytes for signature size (need " << (pos+4) << ", have " << tx_extra.size() << ")" << std::endl;
-      return false;
-    }
+    // Deserialize signature
+    if (pos + 4 > tx_extra.size()) return false;
     uint32_t sigLen = 0;
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < 4; ++i)
       sigLen |= static_cast<uint32_t>(tx_extra[pos + i]) << (i * 8);
-    }
     pos += 4;
-
-    if (pos + sigLen > tx_extra.size()) {
-      std::cout << "  ✗ FAILED: not enough bytes for signature data (need " << (pos+sigLen) << ", have " << tx_extra.size() << ")" << std::endl;
-      return false;
-    }
+    if (pos + sigLen > tx_extra.size()) return false;
     deposit.signature.assign(&tx_extra[pos], &tx_extra[pos] + sigLen);
     pos += sigLen;
-    std::cout << "  ✓ signature loaded (" << deposit.signature.size() << " bytes)" << std::endl;
 
     // Deserialize slashable flag (1 byte)
-    std::cout << "  [position " << pos << "] Deserializing slashable flag..." << std::endl;
-    if (pos >= tx_extra.size()) {
-      std::cout << "  ✗ FAILED: no byte for slashable flag!" << std::endl;
-      return false;
-    }
+    if (pos >= tx_extra.size()) return false;
     deposit.isSlashable = (tx_extra[pos] != 0);
-    pos += 1;
-    std::cout << "  ✓ slashable flag = " << (deposit.isSlashable ? "true" : "false") << std::endl;
-    std::cout << "  FINAL: Successfully deserialized " << pos << " bytes" << std::endl;
 
     return true;
   }

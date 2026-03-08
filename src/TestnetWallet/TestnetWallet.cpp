@@ -570,6 +570,11 @@ namespace CryptoNote
       CryptoNote::AccountKeys walletKeys;
       m_wallet->getAccountKeys(walletKeys);
 
+      // Generate a dedicated signing keypair for this elderfier.
+      Crypto::PublicKey signingPubKey;
+      Crypto::SecretKey signingSecKey;
+      Crypto::generate_keys(signingPubKey, signingSecKey);
+
       for (int i = 0; i < 5; ++i) {
         success_msg_writer() << "  The " << flameNames[i] << " Flame — forging stake " << (i + 1) << " of 5...";
 
@@ -595,6 +600,9 @@ namespace CryptoNote
         elderfierDeposit.metadata.clear();
         elderfierDeposit.metadata.push_back(0xEA);
         elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(), alias.begin(), alias.end());
+        // Append signing public key (32 bytes)
+        elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(),
+          signingPubKey.data, signingPubKey.data + 32);
         elderfierDeposit.signature.clear();
         elderfierDeposit.isSlashable        = true;
 
@@ -611,37 +619,6 @@ namespace CryptoNote
 
         CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
         std::string extraString = std::string(extra.begin(), extra.end());
-
-        // DEBUG: Check if 0xEF tag is present in transaction extra
-        std::cout << "\n=== ELDERFIER DEBUG ===" << std::endl;
-        std::cout << "Extra size: " << extra.size() << " bytes" << std::endl;
-        std::cout << "Extra hex (first 40 bytes): ";
-        for (size_t i = 0; i < std::min<size_t>(extra.size(), 40); ++i) {
-            printf("%02x ", (unsigned char)extra[i]);
-        }
-        std::cout << std::endl;
-
-        bool foundEF = false;
-        bool foundEA = false;
-        for (size_t i = 0; i < extra.size(); ++i) {
-            if (extra[i] == 0xEF) {
-                foundEF = true;
-                std::cout << "✓ Found 0xEF tag at position " << i << std::endl;
-            }
-            if (extra[i] == 0xEA && foundEF) {
-                foundEA = true;
-                std::cout << "✓ Found 0xEA alias-tag at position " << i << std::endl;
-            }
-        }
-
-        if (!foundEF) {
-            std::cout << "✗ ERROR: 0xEF tag NOT FOUND - ElderfierDeposit not added!" << std::endl;
-        }
-        if (!foundEA && foundEF) {
-            std::cout << "✗ ERROR: 0xEABDCD tag NOT FOUND - alias data incorrectly formed!" << std::endl;
-        }
-        std::cout << "==================\n" << std::endl;
-
 
 
         CryptoNote::WalletHelper::SendCompleteResultObserver sent;
@@ -689,8 +666,20 @@ namespace CryptoNote
       success_msg_writer() << "  register you as Elder King @" << alias;
       success_msg_writer() << "  and add you to the active Testifiers registry.";
       success_msg_writer() << "";
+      success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
+      success_msg_writer() << "║           SAVE YOUR ELDERFIER SIGNING KEY                  ║";
+      success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+      success_msg_writer() << "";
+      success_msg_writer() << "  Your signing secret key (SAVE THIS — shown only once):";
+      success_msg_writer() << "";
+      success_msg_writer() << "    " << Common::podToHex(signingSecKey);
+      success_msg_writer() << "";
+      success_msg_writer() << "  To run your Elderfier signing node:";
+      success_msg_writer() << "";
+      success_msg_writer() << "    fuegod --elderfier-key " << Common::podToHex(signingSecKey);
+      success_msg_writer() << "";
       success_msg_writer() << "  Your Elderfire burns bright.";
-      success_msg_writer() << "  Guard the Realm well,  " << alias << ".";
+      success_msg_writer() << "  Guard the Realm well, " << alias << ".";
       success_msg_writer() << "";
       success_msg_writer() << "  Commands:  list_cold  |  lookup_alias " << alias;
       success_msg_writer() << "";

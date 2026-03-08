@@ -17,13 +17,13 @@
 
 #include "DaemonCommandsHandler.h"
 #include <ctime>
-#include "P2p/NetNode.h"
+#include "../P2p/NetNode.h"
 #include "CryptoNoteCore/Miner.h"
 #include "CryptoNoteCore/Core.h"
 #include "CryptoNoteCore/Currency.h"
 #include "CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
 #include "Serialization/SerializationTools.h"
-#include "version.h"
+#include "../version.h.in"
 #include <boost/format.hpp>
 #include "Common/Math.h"
 #include "Common/ConsoleTools.h"
@@ -339,12 +339,12 @@ std::cout << "**************************************************"<< std::endl;
 std::cout << "Network Hashrate: " << get_mining_speed(hashrate) << ", Difficulty: " << difficulty << std::endl;
 std::cout << "Block Major version: " << (int)majorVersion << ", " << "Alt Blocks: " << alt_blocks_count << std::endl;
 const auto &currency = m_core.currency();
-std::cout << "All " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " ever minted :  " << currency.formatAmount(totalCoinsInNetwork) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << std::endl;
+std::cout << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " minted to date:  " << currency.formatAmount(totalCoinsInNetwork) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << std::endl;
 std::cout << "Total Ethereal (burned) : " << (totalCoinsEthereal >= 1000000 ? currency.formatAmount(totalCoinsEthereal) : "0.0") << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (reborn as coinbase rewards)" << std::endl;
 std::cout << "Locked in COLD Banking : " << (totalCoinsOnDeposits >= 1000000 ? currency.formatAmount(totalCoinsOnDeposits) : "0.0") << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (" << currency.formatAmount(calculatePercent(currency, totalCoinsOnDeposits, totalCoinsInNetwork)) << "%)" << std::endl;
 uint64_t actualTotalSupply = (totalCoinsInNetwork > totalCoinsEthereal) ? (totalCoinsInNetwork - totalCoinsEthereal) : 0;
 uint64_t actualCircSupply = (actualTotalSupply > totalCoinsOnDeposits) ? (actualTotalSupply - totalCoinsOnDeposits) : 0;
-std::cout << "Circulating Supply (active/unbanked) : " << currency.formatAmount(actualCircSupply) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (" << currency.formatAmount(calculatePercent(currency, actualCircSupply, actualTotalSupply)) << "%)" << std::endl;
+std::cout << "Circulating (active/unbanked) : " << currency.formatAmount(actualCircSupply) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << " (" << currency.formatAmount(calculatePercent(currency, actualCircSupply, actualTotalSupply)) << "%)" << std::endl;
 std::cout << "Total Supply (minus burns): " << currency.formatAmount(actualTotalSupply) << " " << (m_core.currency().isTestnet() ? "TEST" : "XFG") << std::endl;
 std::cout << "**************************************************"<< std::endl;
   return true;

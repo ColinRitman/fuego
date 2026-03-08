@@ -2868,17 +2868,17 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
       // Parse transaction extra to detect burn types (0X08 0xEF)
       std::vector<TransactionExtraField> extraFields;
       if (parseTransactionExtra(tx.tx.extra, extraFields)) {
-        logger(INFO, "Blockchain") << "Transaction " << getObjectHash(tx.tx)
+        logger(DEBUGGING, "Blockchain") << "Transaction " << getObjectHash(tx.tx)
                                  << " extra: Found " << extraFields.size() << " fields";
         for (size_t i = 0; i < extraFields.size(); ++i) {
           if (extraFields[i].type() == typeid(TransactionExtraElderfierDeposit)) {
-            logger(INFO, "Blockchain") << "  Field " << i << ": TransactionExtraElderfierDeposit";
+            logger(DEBUGGING, "Blockchain") << "  Field " << i << ": TransactionExtraElderfierDeposit";
           } else if (extraFields[i].type() == typeid(TransactionExtraAliasRegistration)) {
-            logger(INFO, "Blockchain") << "  Field " << i << ": TransactionExtraAliasRegistration";
+            logger(DEBUGGING, "Blockchain") << "  Field " << i << ": TransactionExtraAliasRegistration";
           } else if (extraFields[i].type() == typeid(TransactionExtraPublicKey)) {
-            logger(INFO, "Blockchain") << "  Field " << i << ": TransactionExtraPublicKey";
+            logger(DEBUGGING, "Blockchain") << "  Field " << i << ": TransactionExtraPublicKey";
           } else {
-            logger(INFO, "Blockchain") << "  Field " << i << ": Unknown type";
+            logger(DEBUGGING, "Blockchain") << "  Field " << i << ": Unknown type";
           }
         }
         for (const auto& field : extraFields) {
@@ -2955,10 +2955,21 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             entry.targetChainId = 0;  // No cross-chain claim for staking
             entry.senderAddress = Common::podToHex(elderfierDeposit.elderfierCommitment);
 
-            // Extract ceremony alias from metadata (0xEA tag + variable length)
+            // Extract ceremony alias and signing pubkey from metadata
+            // Format: [0xEA][alias:8][signingPubKey:32]
             std::string ceremonyAlias;
+            Crypto::PublicKey signingPubKey = {};
             if (elderfierDeposit.metadata.size() >= 2 && elderfierDeposit.metadata[0] == 0xEA) {
-              ceremonyAlias = std::string(elderfierDeposit.metadata.begin() + 1, elderfierDeposit.metadata.end());
+              if (elderfierDeposit.metadata.size() >= 41) {
+                // New format: 1 byte tag + 8 byte alias + 32 byte signing pubkey
+                ceremonyAlias = std::string(elderfierDeposit.metadata.begin() + 1, elderfierDeposit.metadata.begin() + 9);
+                std::memcpy(signingPubKey.data, &elderfierDeposit.metadata[9], 32);
+                logger(INFO) << "Elderfier signing pubkey registered for @" << ceremonyAlias
+                             << ": " << Common::podToHex(signingPubKey);
+              } else {
+                // Legacy format: 1 byte tag + alias (no signing key)
+                ceremonyAlias = std::string(elderfierDeposit.metadata.begin() + 1, elderfierDeposit.metadata.end());
+              }
             }
 
             // Use alias as ceremony identifier (groups all 5 deposits)
