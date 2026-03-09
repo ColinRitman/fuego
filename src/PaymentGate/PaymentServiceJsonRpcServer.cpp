@@ -667,7 +667,7 @@ std::error_code PaymentServiceJsonRpcServer::handleGetEthernalXFG(const GetEther
 {
   uint64_t eternal;
   service.getEternalFlame(eternal);
-  response.ethernalXFG = eternal;
+  response.ethereal_xfg = eternal;
   return std::error_code();
 }
 
