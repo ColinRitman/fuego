@@ -574,9 +574,9 @@ bool core::get_block_template(Block& b, const AccountPublicAddress& adr, difficu
     m_mempool.getTransactions(b.transactionHashes, blockTxs, missed);
     bankingFeesInBlock = Blockchain::computeBankingFeesFromTransactions(blockTxs);
 
-    // Check for epoch boundary and get EFier reward distribution
-    if (m_blockchain.getCommitmentIndex().isEpochBoundary(height)) {
-      efierRewards = m_blockchain.getCommitmentIndex().finalizeEpoch(height);
+    // Per-block EFier distribution: split this block's banking fees among active EFiers
+    if (bankingFeesInBlock > 0) {
+      efierRewards = m_blockchain.getCommitmentIndex().computePerBlockEfierRewards(bankingFeesInBlock);
     }
 
     if (bankingFeesInBlock > 0 || !efierRewards.empty()) {
@@ -1381,32 +1381,8 @@ uint64_t core::getCommitmentConsensusPercentage() const {
   return m_blockchain.getCommitmentConsensusPercentage();
 }
 
-uint64_t core::getCurrentElderfierEpoch() const {
-  return m_blockchain.getCurrentElderfierEpoch();
-}
-
-uint64_t core::getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const {
-  return m_blockchain.getElderfierEarnings(elderfier_id, epochNumber);
-}
-
-ElderfierEpochRewards core::getElderfierEpochRewards(uint64_t epochNumber) const {
-  return m_blockchain.getElderfierEpochRewards(epochNumber);
-}
-
-std::vector<ElderfierEpochRewards> core::getElderfierEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const {
-  return m_blockchain.getElderfierEpochHistory(startEpoch, endEpoch);
-}
-
-std::vector<uint8_t> core::getActiveElderfiers(uint64_t epochNumber) const {
-  return m_blockchain.getActiveElderfiers(epochNumber);
-}
-
-uint64_t core::getTotalFeesInEscrow() const {
-  return m_blockchain.getTotalFeesInEscrow();
-}
-
-uint64_t core::getTotalFeesDistributedAllTime() const {
-  return m_blockchain.getTotalFeesDistributedAllTime();
+size_t core::getActiveElderfierCount() const {
+  return m_blockchain.getActiveElderfierCount();
 }
 
 // Elderfier registration lifecycle proxy

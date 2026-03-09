@@ -486,20 +486,18 @@ double Currency::getBurnPercentage() const {
       return false;
     }
 
-    // V10+: Withhold banking fees from miner, they go to EFiers via coinbase at epoch boundary
+    // V10+: Banking fees from deposits are redirected to active EFiers.
+    // Deduct the actual distributed EFier total from miner's share (not raw banking fees).
+    // When no active EFiers or below dust threshold, efierTotal=0 and miner keeps full reward.
     uint64_t minerReward = blockReward;
     uint64_t efierTotal = 0;
-    if (blockMajorVersion >= BLOCK_MAJOR_VERSION_10 && bankingFeesInBlock > 0) {
-      // Banking fees are part of the tx fee which is included in blockReward.
-      // Subtract them from miner's share — they go to EFiers at epoch boundary.
-      if (bankingFeesInBlock <= minerReward) {
-        minerReward -= bankingFeesInBlock;
-      }
-    }
-
-    // Sum up EFier rewards (only present at epoch boundaries)
     for (const auto& reward : efierRewards) {
       efierTotal += reward.second;
+    }
+    if (blockMajorVersion >= BLOCK_MAJOR_VERSION_10 && efierTotal > 0) {
+      if (efierTotal <= minerReward) {
+        minerReward -= efierTotal;
+      }
     }
 
     // Decompose miner reward into outputs

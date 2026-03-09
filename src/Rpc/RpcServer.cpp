@@ -1621,31 +1621,11 @@ bool RpcServer::on_get_elderfier_fee_balance(const COMMAND_RPC_GET_ELDERFIER_FEE
     // Set elderfier_id in response
     res.elderfier_id = req.elderfier_id;
 
-    // Query current epoch earnings
-    uint64_t current_epoch = m_core.getCurrentElderfierEpoch();
-    uint64_t earnings = m_core.getElderfierEarnings(req.elderfier_id, current_epoch);
-
-    // Query lifetime total earnings
-    uint64_t lifetime_total = 0;
-    uint64_t max_epochs = current_epoch + 1;  // Include current epoch
-    for (uint64_t ep = 0; ep < max_epochs; ++ep) {
-      lifetime_total += m_core.getElderfierEarnings(req.elderfier_id, ep);
-    }
-
-    // Count how many epochs this EF was active
-    uint64_t rounds_signed = 0;
-    for (uint64_t ep = 0; ep < max_epochs; ++ep) {
-      auto active = m_core.getActiveElderfiers(ep);
-      if (std::find(active.begin(), active.end(), req.elderfier_id) != active.end()) {
-        if (m_core.getElderfierEarnings(req.elderfier_id, ep) > 0) {
-          rounds_signed++;
-        }
-      }
-    }
-
-    res.accumulated_fees = earnings;
-    res.total_fees_earned = lifetime_total;
-    res.number_of_rounds_signed = rounds_signed;
+    // Per-block fee distribution: no epoch-based earnings tracking.
+    // EFier fees go directly into coinbase outputs each block — tracked on-chain.
+    res.accumulated_fees = 0;
+    res.total_fees_earned = 0;
+    res.number_of_rounds_signed = 0;
     res.status = CORE_RPC_STATUS_OK;
 
     return true;
@@ -1667,13 +1647,10 @@ bool RpcServer::on_get_elderfier_network_stats(const COMMAND_RPC_GET_ELDERFIER_N
     auto pending_ids = m_core.getCommitmentPendingElderfierIds();
     uint32_t current_height = m_core.get_current_blockchain_height();
 
-    // Query fee data from CommitmentIndex
-    uint64_t all_time_fees = m_core.getTotalFeesDistributedAllTime();
-    uint64_t pending_fees = m_core.getTotalFeesInEscrow();
-
-    res.total_fees_distributed_all_time = all_time_fees;
-    res.total_fees_pending_in_escrow = pending_fees;
-    res.total_registered_elderfiers = signed_ids.size() + pending_ids.size();
+    // Per-block fee distribution: fees go directly into coinbase each block.
+    res.total_fees_distributed_all_time = 0;
+    res.total_fees_pending_in_escrow = 0;
+    res.total_registered_elderfiers = m_core.getActiveElderfierCount();
     res.current_block_height = current_height;
     res.status = CORE_RPC_STATUS_OK;
 

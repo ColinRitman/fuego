@@ -184,14 +184,8 @@ namespace CryptoNote {
     std::vector<uint8_t> getCommitmentPendingElderfierIds() const;
     uint64_t getCommitmentConsensusPercentage() const;
 
-    // Elderfier fee tracking accessors
-    uint64_t getCurrentElderfierEpoch() const;
-    uint64_t getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const;
-    ElderfierEpochRewards getElderfierEpochRewards(uint64_t epochNumber) const;
-    std::vector<ElderfierEpochRewards> getElderfierEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const;
-    std::vector<uint8_t> getActiveElderfiers(uint64_t epochNumber) const;
-    uint64_t getTotalFeesInEscrow() const;
-    uint64_t getTotalFeesDistributedAllTime() const;
+    // Elderfier fee tracking
+    size_t getActiveElderfierCount() const;
 
     // Elderfier registration lifecycle proxies
     bool canAddressRegisterElderfier(const std::string& address) const;

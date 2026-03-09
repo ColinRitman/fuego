@@ -169,7 +169,6 @@ void CommitmentIndex::checkAndFlushThreshold(uint64_t current_block_height) {
   uint64_t consensus_pct = (valid_signatures * 100) / total_elderfiers;
 
   // At 69% threshold: flush stale signatures (for non-current roots)
-  // Fee distribution happens in finalizeEpoch() at epoch boundaries
   if (consensus_pct >= 69) {
     // Flush signatures for current root
     std::vector<std::pair<uint8_t, std::string>> to_remove;
@@ -289,9 +288,13 @@ bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Cryp
     }
   }
 
-  // Assign next available EFiD (0-255)
-  if (m_elderfier_ids.size() >= 256) {
-    return false;  // Maximum 256 Elderfiers reached
+  // Cap active EFiers at 8 (keeps fee splits meaningful, limits coinbase outputs)
+  size_t activeCount = 0;
+  for (const auto& r : m_elderfierRegistrations) {
+    if (r.second.status == ElderfierStatus::ACTIVE) ++activeCount;
+  }
+  if (activeCount >= 8) {
+    return false;  // Maximum 8 active Elderfiers
   }
 
   // Find next unused EFiD
@@ -524,8 +527,6 @@ void CommitmentIndex::clear() {
   // Note: AliasIndex is cleared/reset separately by Blockchain (owns its own lifecycle)
   m_elderfierRegistrations.clear();
   m_voidRegistrations.clear();
-  m_epochHistory.clear();
-  m_currentEpochTotalFees = 0;
   m_current_merkle_root = Crypto::Hash();
   m_current_block_height = 0;
 }
@@ -564,13 +565,64 @@ size_t CommitmentIndex::coldCount() const {
 }
 
 // ============================================================================
-// PHASE 5: FEE TRACKING AND EPOCH MANAGEMENT
+// PHASE 5: PER-BLOCK EFIER FEE DISTRIBUTION
 // ============================================================================
 
-void CommitmentIndex::addElderfierFee(uint64_t feeAmount) {
+std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::computePerBlockEfierRewards(uint64_t bankingFees) const {
   std::lock_guard<std::mutex> lock(m_mutex);
 
-  m_currentEpochTotalFees += feeAmount;
+  std::vector<std::pair<AccountPublicAddress, uint64_t>> rewards;
+
+  if (bankingFees == 0) {
+    return rewards;
+  }
+
+  // Collect all ACTIVE registered EFiers with valid addresses
+  struct ActiveEfier {
+    uint8_t efid;
+    AccountPublicAddress addr;
+  };
+  std::vector<ActiveEfier> activeEfiers;
+
+  for (const auto& pair : m_elderfierRegistrations) {
+    if (pair.second.status != ElderfierStatus::ACTIVE) continue;
+
+    auto addrIt = m_elderfierAddresses.find(pair.second.elderfier_id);
+    if (addrIt == m_elderfierAddresses.end()) continue;
+
+    AccountPublicAddress addr;
+    if (!m_currency.parseAccountAddressString(addrIt->second, addr)) continue;
+
+    activeEfiers.push_back({pair.second.elderfier_id, addr});
+  }
+
+  if (activeEfiers.empty()) {
+    return rewards;  // No active EFiers — banking fees stay with miner
+  }
+
+  // Sort by EFiD for deterministic ordering across all nodes
+  std::sort(activeEfiers.begin(), activeEfiers.end(),
+    [](const ActiveEfier& a, const ActiveEfier& b) { return a.efid < b.efid; });
+
+  // Split equally, distribute remainder 1 atomic unit each (lowest EFiD first)
+  uint64_t perEfier = bankingFees / activeEfiers.size();
+  uint64_t remainder = bankingFees % activeEfiers.size();
+
+  // Below dust threshold: skip split, miner keeps full reward for this block.
+  // Avoids creating tiny UTXO spam (e.g. 0.0008 XFG fee split among 50 EFiers).
+  uint64_t dustThreshold = m_currency.defaultDustThreshold();
+  if (perEfier < dustThreshold) {
+    return rewards;
+  }
+
+  for (size_t i = 0; i < activeEfiers.size(); ++i) {
+    uint64_t share = perEfier + (i < remainder ? 1 : 0);
+    if (share > 0) {
+      rewards.push_back({activeEfiers[i].addr, share});
+    }
+  }
+
+  return rewards;
 }
 
 void CommitmentIndex::addBlockBankingFee(uint64_t height, uint64_t fee) {
@@ -584,164 +636,18 @@ uint64_t CommitmentIndex::getBlockBankingFee(uint64_t height) const {
   return (it != m_blockBankingFees.end()) ? it->second : 0;
 }
 
-bool CommitmentIndex::isEpochBoundary(uint64_t height) const {
-  uint64_t epochDur = getEpochDuration();
-  return height > 0 && (height / epochDur) > ((height - 1) / epochDur);
-}
-
-std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::finalizeEpoch(uint64_t currentBlockHeight) {
-  std::lock_guard<std::mutex> lock(m_mutex);
-
-  std::vector<std::pair<AccountPublicAddress, uint64_t>> efierRewards;
-
-  // Check if we're at an epoch boundary
-  uint64_t currentEpoch = getCurrentEpoch(currentBlockHeight);
-
-  if (m_epochHistory.empty() && m_currentEpochStartBlock == 0) {
-    m_currentEpochStartBlock = currentBlockHeight;
-    return efierRewards;  // First epoch, nothing to finalize yet
-  }
-
-  // Only finalize if we're entering a new epoch
-  uint64_t lastEpoch = getCurrentEpoch(m_currentEpochStartBlock);
-  if (currentEpoch <= lastEpoch) {
-    return efierRewards;  // Not at epoch boundary yet
-  }
-
-  // Finalize the completed epoch
-  ElderfierEpochRewards epochRewards;
-  epochRewards.epochNumber = lastEpoch;
-  epochRewards.epochStartBlock = m_currentEpochStartBlock;
-  epochRewards.epochEndBlock = currentBlockHeight - 1;
-  epochRewards.totalFeesCollected = m_currentEpochTotalFees;
-
-  if (m_currentEpochTotalFees > 0) {
-    // Only signing EFiers receive rewards (inline to avoid deadlock — we already hold m_mutex)
-    {
-      std::string current_root_hex = Common::podToHex(m_current_merkle_root);
-      std::set<uint8_t> seen;
-      for (auto it = m_signatures.begin(); it != m_signatures.end(); ++it) {
-        if (it->first.second == current_root_hex && it->second.is_valid && seen.find(it->first.first) == seen.end()) {
-          epochRewards.activeElderfiers.push_back(it->first.first);
-          seen.insert(it->first.first);
-        }
-      }
-    }
-
-    if (!epochRewards.activeElderfiers.empty()) {
-      // Distribute fees equally among signers only
-      uint64_t feePerElderfier = m_currentEpochTotalFees / epochRewards.activeElderfiers.size();
-      uint64_t remainder = m_currentEpochTotalFees % epochRewards.activeElderfiers.size();
-
-      for (size_t i = 0; i < epochRewards.activeElderfiers.size(); ++i) {
-        uint8_t efid = epochRewards.activeElderfiers[i];
-        uint64_t share = feePerElderfier;
-        if (i < remainder) {
-          share += 1;  // Distribute remainder 1 atomic unit per signer
-        }
-        epochRewards.distribution[efid] = share;
-
-        // Build coinbase reward output if we have the EFier's address
-        auto addrIt = m_elderfierAddresses.find(efid);
-        if (addrIt != m_elderfierAddresses.end()) {
-          AccountPublicAddress addr;
-          if (m_currency.parseAccountAddressString(addrIt->second, addr)) {
-            efierRewards.push_back({addr, share});
-          }
-        }
-      }
-
-      // Reset fees only when successfully distributed to signers
-      m_currentEpochTotalFees = 0;
-    }
-    // If no signers: DON'T reset m_currentEpochTotalFees — carry over to next epoch
-  }
-
-  m_epochHistory.push_back(epochRewards);
-
-  // Reset for next epoch
-  m_currentEpochStartBlock = currentBlockHeight;
-  return efierRewards;
-}
-
-uint64_t CommitmentIndex::getCurrentEpoch(uint64_t blockHeight) const {
-  // Each epoch is 1000 blocks
-  // Epoch 0: blocks 0-999, Epoch 1: blocks 1000-1999, etc.
-  return blockHeight / getEpochDuration();
-}
-
-std::vector<uint8_t> CommitmentIndex::getActiveElderfiers(uint64_t epochNumber) const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-  return calculateActiveElderfiers(epochNumber);
-}
-
-std::vector<uint8_t> CommitmentIndex::calculateActiveElderfiers(uint64_t epochNumber) const {
-  // Return all registered elderfiers - they all sign the merkle root
-  // Fees only go to those who actually signed
-  // (this method is kept for compatibility, but returns all EFs)
-  return m_elderfier_ids;
-}
-
-uint64_t CommitmentIndex::getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-
-  for (const auto& epoch : m_epochHistory) {
-    if (epoch.epochNumber == epochNumber) {
-      auto it = epoch.distribution.find(elderfier_id);
-      if (it != epoch.distribution.end()) {
-        return it->second;
-      }
-      return 0;
-    }
-  }
-
-  return 0;  // Epoch not found or elderfier didn't earn in that epoch
-}
-
 void CommitmentIndex::registerElderfierAddress(uint8_t elderfier_id, const std::string& address) {
   std::lock_guard<std::mutex> lock(m_mutex);
   m_elderfierAddresses[elderfier_id] = address;
 }
 
-ElderfierEpochRewards CommitmentIndex::getEpochRewards(uint64_t epochNumber) const {
+size_t CommitmentIndex::getActiveElderfierCount() const {
   std::lock_guard<std::mutex> lock(m_mutex);
-
-  for (const auto& epoch : m_epochHistory) {
-    if (epoch.epochNumber == epochNumber) {
-      return epoch;
-    }
+  size_t count = 0;
+  for (const auto& pair : m_elderfierRegistrations) {
+    if (pair.second.status == ElderfierStatus::ACTIVE) ++count;
   }
-
-  return ElderfierEpochRewards();  // Return empty rewards if epoch not found
-}
-
-std::vector<ElderfierEpochRewards> CommitmentIndex::getEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-
-  std::vector<ElderfierEpochRewards> result;
-  for (const auto& epoch : m_epochHistory) {
-    if (epoch.epochNumber >= startEpoch && epoch.epochNumber <= endEpoch) {
-      result.push_back(epoch);
-    }
-  }
-
-  return result;
-}
-
-uint64_t CommitmentIndex::getTotalFeesInEscrow() const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-  return m_currentEpochTotalFees;
-}
-
-uint64_t CommitmentIndex::getTotalFeesDistributedAllTime() const {
-  std::lock_guard<std::mutex> lock(m_mutex);
-
-  uint64_t total = 0;
-  for (const auto& epoch : m_epochHistory) {
-    total += epoch.totalFeesCollected;
-  }
-
-  return total;
+  return count;
 }
 
 // ============================================================================

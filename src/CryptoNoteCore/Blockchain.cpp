@@ -449,40 +449,10 @@ uint64_t Blockchain::getCommitmentConsensusPercentage() const {
   return m_commitmentIndex.getConsensusPercentageForCurrentRoot();
 }
 
-// Elderfier fee tracking accessors
-uint64_t Blockchain::getCurrentElderfierEpoch() const {
+// Elderfier fee tracking accessor
+size_t Blockchain::getActiveElderfierCount() const {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getCurrentEpoch(m_blocks.size());
-}
-
-uint64_t Blockchain::getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const {
-  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getElderfierEarnings(elderfier_id, epochNumber);
-}
-
-ElderfierEpochRewards Blockchain::getElderfierEpochRewards(uint64_t epochNumber) const {
-  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getEpochRewards(epochNumber);
-}
-
-std::vector<ElderfierEpochRewards> Blockchain::getElderfierEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const {
-  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getEpochHistory(startEpoch, endEpoch);
-}
-
-std::vector<uint8_t> Blockchain::getActiveElderfiers(uint64_t epochNumber) const {
-  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getActiveElderfiers(epochNumber);
-}
-
-uint64_t Blockchain::getTotalFeesInEscrow() const {
-  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getTotalFeesInEscrow();
-}
-
-uint64_t Blockchain::getTotalFeesDistributedAllTime() const {
-  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-  return m_commitmentIndex.getTotalFeesDistributedAllTime();
+  return m_commitmentIndex.getActiveElderfierCount();
 }
 
 // Elderfier signature cache accessors
@@ -1407,47 +1377,32 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
   }
 
   if (blockMajorVersion >= CryptoNote::BLOCK_MAJOR_VERSION_10) {
-    // V10+: Banking fees are paid to EFiers at epoch boundaries.
-    // Recompute banking fees deterministically from block transactions.
+    // V10+: Banking fees from deposits are split per-block among active EFiers.
+    // Recompute deterministically from block transactions.
     uint64_t bankingFeesInBlock = computeBankingFeesFromTransactions(blockTransactions);
 
-    // Compute expected EFier fees at epoch boundary
+    // Compute expected EFier distribution (deterministic — same result on all nodes)
+    auto expectedEfierRewards = m_commitmentIndex.computePerBlockEfierRewards(bankingFeesInBlock);
     uint64_t efierTotal = 0;
-    if (m_commitmentIndex.isEpochBoundary(height)) {
-      // At epoch boundary, finalizeEpoch will distribute accumulated fees.
-      // For validation, we need the efier outputs total from the coinbase.
-      // The actual distribution is deterministic based on SIGNED EFiers and accumulated fees.
-      // We trust the miner included the correct EFier outputs; the total is validated below.
-      // The pushToBankingIndex/finalizeEpoch call after validation will verify consistency.
-      // For now, efierTotal = coinbaseTotal - (reward - bankingFeesInBlock)
-      // i.e., whatever the miner claims as EFier outputs.
+    for (const auto& r : expectedEfierRewards) {
+      efierTotal += r.second;
     }
 
-    // Expected coinbase: reward - bankingFeesInBlock + efierTotal
-    // Since we don't independently know Efier Total during validation (it comes from
-    // CommitmentIndex state that gets updated AFTER this block), we validate that:
-    // coinbaseTotal >= reward - bankingFeesInBlock  (miner got at least emission)
-    // coinbaseTotal <= reward                       (no inflation — total can't exceed full reward)
-    uint64_t expectedMinerReward = reward - std::min(bankingFeesInBlock, reward);
+    // coinbaseTotal must equal: (reward - bankingFees) + efierTotal
+    // Banking fees deducted from miner, redistributed to EFiers — no inflation.
+    // If no active EFiers, efierTotal=0 and miner keeps full reward (bankingFees=0 effective).
+    uint64_t effectiveBankingFees = std::min(efierTotal, reward);  // Can't deduct more than reward
+    uint64_t expectedCoinbase = reward - effectiveBankingFees + efierTotal;
 
-    if (coinbaseTotal < expectedMinerReward) {
-      logger(ERROR, BRIGHT_RED) << "Coinbase too small at height " << height << ": "
+    if (coinbaseTotal != expectedCoinbase) {
+      logger(ERROR, BRIGHT_RED) << "Coinbase mismatch at height " << height << ": "
         << m_currency.formatAmount(coinbaseTotal) << " (actual) vs "
-        << m_currency.formatAmount(expectedMinerReward) << " (expected min, after banking fee)"
-        << " [bankingFees=" << m_currency.formatAmount(bankingFeesInBlock) << "]";
+        << m_currency.formatAmount(expectedCoinbase) << " (expected)"
+        << " [reward=" << m_currency.formatAmount(reward)
+        << ", bankingFees=" << m_currency.formatAmount(bankingFeesInBlock)
+        << ", efierTotal=" << m_currency.formatAmount(efierTotal) << "]";
       return false;
     }
-
-    if (coinbaseTotal > reward) {
-      logger(ERROR, BRIGHT_RED) << "Coinbase exceeds reward at height " << height << ": "
-        << m_currency.formatAmount(coinbaseTotal) << " (actual) vs "
-        << m_currency.formatAmount(reward) << " (max allowed)"
-        << " [bankingFees=" << m_currency.formatAmount(bankingFeesInBlock) << "]";
-      return false;
-    }
-
-    // The emission change accounts for full coinbase total (miner + EFier outputs)
-    // since all outputs come from existing fees (no inflation)
   } else {
     // Pre-v10: only reject if miner claims MORE than the calculated reward.
     // Miners may legitimately claim less (underspend just reduces emission).
@@ -2738,10 +2693,9 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
   pushBlock(block);
     pushToBankingIndex(block, interestSummary);
 
-  // PHASE 5: Track per-block banking fees and finalize epoch at boundaries
+  // Track per-block banking fees for audit/query
   uint32_t blockHeight = static_cast<uint32_t>(m_blocks.size()) - 1;
   {
-    // Compute and store banking fees for this block (excluding coinbase)
     std::vector<Transaction> blockTxs;
     for (size_t i = 1; i < block.transactions.size(); ++i) {
       blockTxs.push_back(block.transactions[i].tx);
@@ -2751,8 +2705,6 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
       m_commitmentIndex.addBlockBankingFee(blockHeight, blockBankingFee);
     }
   }
-  // Finalize epoch at boundary (distribution already happened during block creation)
-  m_commitmentIndex.finalizeEpoch(blockHeight);
 
   auto block_processing_time = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - blockProcessingStart).count();
 
@@ -2922,13 +2874,6 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
 
             logger(DEBUGGING) << "HEAT commitment indexed: " << Common::podToHex(heatCommit.commitment)
                              << " amount=" << heatCommit.amount;
-
-            // Extract 0.1% banking fee for elderfier distribution (HEAT burns)
-            uint64_t heatFee = (heatCommit.amount * 1) / 1000;  // 0.1% = 1/1000
-            if (heatFee > 0) {
-              m_commitmentIndex.addElderfierFee(heatFee);
-              logger(DEBUGGING) << "HEAT fee extracted: " << heatFee << " heat (0.1% of " << heatCommit.amount << ")";
-            }
           }
           // Check for COLD commitment (0xCD) - term deposit
           else if (field.type() == typeid(TransactionExtraColdCommitment)) {
@@ -2948,13 +2893,6 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
 
             logger(DEBUGGING) << "COLD commitment indexed: " << Common::podToHex(coldCommit.commitment)
                              << " amount=" << coldCommit.amount << " term=" << coldCommit.term;
-
-            // Extract 0.1% banking fee for elderfier distribution (COLD deposits)
-            uint64_t coldFee = (coldCommit.amount * 1) / 1000;  // 0.1% = 1/1000
-            if (coldFee > 0) {
-              m_commitmentIndex.addElderfierFee(coldFee);
-              logger(DEBUGGING) << "COLD fee extracted: " << coldFee << " heat (0.1% of " << coldCommit.amount << ")";
-            }
           }
           // Note: TX_EXTRA_ELDERFIER_DEPOSIT (0xEF) is NOT added to ethernalXFG initially
           // because it represents slashable staking. However, if the deposit is later
@@ -3000,13 +2938,6 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             entry.signingPubKey = signingPubKey;
 
             m_commitmentIndex.addCommitment(entry);
-
-            // Extract 0.1% banking fee for elderfier distribution (EF staking deposits)
-            uint64_t efFee = (elderfierDeposit.depositAmount * 1) / 1000;  // 0.1% = 1/1000
-            if (efFee > 0) {
-              m_commitmentIndex.addElderfierFee(efFee);
-              logger(DEBUGGING) << "EF fee extracted: " << efFee << " heat (0.1% of " << elderfierDeposit.depositAmount << ")";
-            }
 
             logger(DEBUGGING) << "Elderfier staking deposit indexed: " << Common::podToHex(elderfierDeposit.depositHash)
                              << " amount=" << elderfierDeposit.depositAmount

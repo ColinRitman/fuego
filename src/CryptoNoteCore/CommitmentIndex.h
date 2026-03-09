@@ -147,23 +147,15 @@ public:
   // Get pending elderfier IDs
   std::vector<uint8_t> getPendingElderfierIds() const;
 
-  // Fee tracking and epoch management (Phase 5)
-  void addElderfierFee(uint64_t feeAmount);
+  // Per-block EFier fee distribution (Phase 5)
+  // Splits bankingFees equally among all ACTIVE registered EFiers.
+  // Returns {address, amount} pairs for coinbase outputs. Pure/deterministic — no state mutation.
+  std::vector<std::pair<AccountPublicAddress, uint64_t>> computePerBlockEfierRewards(uint64_t bankingFees) const;
 
   // Per-block banking fee tracking (for coinbase split)
   void addBlockBankingFee(uint64_t height, uint64_t fee);
   uint64_t getBlockBankingFee(uint64_t height) const;
 
-  // Finalize epoch at boundary. Returns EFier reward distribution for coinbase outputs.
-  // If no signers, fees carry over to next epoch (only signing EFiers receive rewards).
-  std::vector<std::pair<AccountPublicAddress, uint64_t>> finalizeEpoch(uint64_t currentBlockHeight);
-
-  // Check if height is an epoch boundary
-  bool isEpochBoundary(uint64_t height) const;
-
-  uint64_t getCurrentEpoch(uint64_t blockHeight) const;
-  std::vector<uint8_t> getActiveElderfiers(uint64_t epochNumber) const;
-  uint64_t getElderfierEarnings(uint8_t elderfier_id, uint64_t epochNumber) const;
   void registerElderfierAddress(uint8_t elderfier_id, const std::string& address);
 
   // Elderfier registration lifecycle management
@@ -179,12 +171,8 @@ public:
   // Lookup signing pubkey by EFiD (for signature verification)
   bool getElderfierSigningPubkey(uint8_t efid, Crypto::PublicKey& pubkey_out) const;
 
-  ElderfierEpochRewards getEpochRewards(uint64_t epochNumber) const;
-  std::vector<ElderfierEpochRewards> getEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const;
-
-  // Fee query methods
-  uint64_t getTotalFeesInEscrow() const;
-  uint64_t getTotalFeesDistributedAllTime() const;
+  // Get count of active registered EFiers
+  size_t getActiveElderfierCount() const;
 
   // Set the AliasIndex reference (called by Blockchain after construction)
   void setAliasIndex(AliasIndex* aliasIndex) { m_aliasIndex = aliasIndex; }
@@ -231,15 +219,7 @@ private:
   // List of registered elderfier IDs
   std::vector<uint8_t> m_elderfier_ids;
 
-  // Banking fee tracking and epoch management
-  uint64_t getEpochDuration() const {
-    return m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_EPOCH_DURATION_BLOCKS
-                                  : CryptoNote::parameters::EPOCH_DURATION_BLOCKS;
-  }
-
-  std::vector<ElderfierEpochRewards> m_epochHistory;
-  uint64_t m_currentEpochStartBlock = 0;
-  uint64_t m_currentEpochTotalFees = 0;
+  // Banking fee tracking
   std::map<uint8_t, std::string> m_elderfierAddresses;   // EFiD -> wallet address mapping
   std::map<uint64_t, uint64_t> m_blockBankingFees;       // height -> banking fee sum for that block
 
@@ -265,7 +245,6 @@ private:
   bool isElderfierRegistrationDeposit(const CommitmentEntry& entry);
   std::string getWalletAddressFromTx(const Crypto::Hash& txHash);
   bool tryRegisterElderfier(const std::string& wallet, const Crypto::PublicKey& pubkey, const std::string& alias);
-  std::vector<uint8_t> calculateActiveElderfiers(uint64_t epochNumber) const;
   Crypto::Hash computeMerkleRootInternal() const;  // Recompute root from m_merkle_leaves (caller holds lock)
 };
 
