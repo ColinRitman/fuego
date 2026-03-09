@@ -2289,6 +2289,7 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
   std::vector<const Crypto::PublicKey*> ringKeys;
   ringKeys.reserve(absoluteIndexes.size());
   bool hasNonForever = false;
+  uint32_t currentHeight = getCurrentBlockchainHeight();
   for (uint64_t absIdx : absoluteIndexes) {
     if (absIdx >= amountRefs.size()) {
       logger(INFO) << "CommitmentSpend: global index " << absIdx << " out of range (" << amountRefs.size() << " commitment outputs at this amount)";
@@ -2299,6 +2300,20 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
 
     if (ref.term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
       hasNonForever = true;
+
+      // All non-FOREVER ring members must be mature — prevents early withdrawal
+      // (we don't know which ring member is real, so all must satisfy the condition)
+      if (ref.term > 0) {
+        uint32_t creationHeight = ref.transactionIndex.block;
+        uint32_t maturityHeight = creationHeight + ref.term;
+        // overflow guard: if creationHeight + term wraps around, treat as immature
+        if (maturityHeight < creationHeight || currentHeight < maturityHeight) {
+          logger(INFO) << "CommitmentSpend: ring member at index " << absIdx
+                       << " is an immature COLD deposit (matures at block "
+                       << maturityHeight << ", current " << currentHeight << ")";
+          return false;
+        }
+      }
     }
 
     // Track max referenced block height.

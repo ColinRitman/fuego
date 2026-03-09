@@ -226,9 +226,18 @@ namespace CryptoNote
 	}
 
 void Currency::addEternalFlame(uint64_t amount) {
-  m_ethernalXFG += amount;
+  uint64_t newTotal = m_ethernalXFG + amount;
+  if (newTotal < m_ethernalXFG || newTotal > m_moneySupply) {
+    m_ethernalXFG = m_moneySupply;  // cap at total supply
+    return;
+  }
+  m_ethernalXFG = newTotal;
 }
 void Currency::removeEternalFlame(uint64_t amount) {
+  if (amount > m_ethernalXFG) {
+    m_ethernalXFG = 0;  // floor at zero
+    return;
+  }
   m_ethernalXFG -= amount;
 }
 double Currency::getBurnPercentage() const {
