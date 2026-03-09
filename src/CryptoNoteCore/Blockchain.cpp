@@ -2820,6 +2820,11 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
     return m_commitmentIndex.computeMerkleRoot();
   }
 
+  bool Blockchain::getElderfierSigningPubkey(uint8_t efid, Crypto::PublicKey& pubkey_out) const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.getElderfierSigningPubkey(efid, pubkey_out);
+  }
+
   std::vector<Crypto::Hash> Blockchain::getCommitmentMerkleProof(const Crypto::Hash& commitment) const {
     std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
     return m_commitmentIndex.getMerkleProof(commitment);
@@ -2977,6 +2982,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
               entry.senderAddress = "CEREMONY:" + ceremonyAlias;
             }
             entry.ceremonyAlias = ceremonyAlias;
+            entry.signingPubKey = signingPubKey;
 
             m_commitmentIndex.addCommitment(entry);
 

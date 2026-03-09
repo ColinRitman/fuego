@@ -1,5 +1,6 @@
 // Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2020-2026 Elderfire Privacy Group
+//
 // This file is part of Fuego.
 //
 // Fuego is free software distributed in the hope that it
@@ -41,7 +42,7 @@ struct CommitmentEntry {
   uint64_t amount = 0;
   uint32_t term = 0;
 
-  // Internal commitment type (how this deposit is used)
+  // Internal commitment type (how deposit is used)
   //   HEAT = permanent burn via tx extra tag 0x08
   //   COLD = interest-bearing term deposit via tx extra tag 0xCD
   //   ELDERFIER_STAKING = service node stake via tx extra tag 0xEF (5x 800 XFG)
@@ -57,6 +58,7 @@ struct CommitmentEntry {
 
   std::string senderAddress;   // Wallet address that created this commitment (populated for 0xEF deposits)
   std::string ceremonyAlias;   // 8-char alias from 0xEF deposit metadata (0xEA tag), auto-registered with EFiD
+  Crypto::PublicKey signingPubKey = {};  // Ed25519 signing pubkey from 0xEA metadata (for EFier signature verification)
 
   void serialize(ISerializer& s);
 };
@@ -98,6 +100,7 @@ enum class ElderfierStatus : uint8_t {
 struct ElderfierRegistration {
   std::string address;
   uint8_t elderfier_id;
+  Crypto::PublicKey signing_pubkey = {};  // Ed25519 pubkey for verifying EFier signatures
   ElderfierStatus status = ElderfierStatus::ACTIVE;
   uint32_t unstaking_start_block = 0;  // Block where unstaking was initiated
   uint32_t unstaking_review_window = 0; // Review window duration in blocks (1000 mainnet, 10 testnet)
@@ -172,6 +175,9 @@ public:
   bool isElderfierInReviewWindow(const std::string& address, uint8_t efid, uint32_t currentBlock) const;
   bool isAddressBlacklisted(const std::string& address, uint8_t efid) const;
   std::vector<ElderfierRegistration> getElderfierRegistrationsByAddress(const std::string& address) const;
+
+  // Lookup signing pubkey by EFiD (for signature verification)
+  bool getElderfierSigningPubkey(uint8_t efid, Crypto::PublicKey& pubkey_out) const;
 
   ElderfierEpochRewards getEpochRewards(uint64_t epochNumber) const;
   std::vector<ElderfierEpochRewards> getEpochHistory(uint64_t startEpoch, uint64_t endEpoch) const;

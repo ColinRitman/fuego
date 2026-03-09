@@ -86,9 +86,12 @@ void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
       m_pendingElderfierStakes[wallet].deposit_count++;
       m_pendingElderfierStakes[wallet].total_amount += entry.amount;
 
-      // Extract ceremony alias from metadata if present
+      // Extract ceremony alias and signing pubkey from CommitmentEntry if present
       if (!entry.ceremonyAlias.empty() && m_pendingElderfierStakes[wallet].alias.empty()) {
         m_pendingElderfierStakes[wallet].alias = entry.ceremonyAlias;
+      }
+      if (entry.signingPubKey != Crypto::PublicKey()) {
+        m_pendingElderfierStakes[wallet].signing_pubkey = entry.signingPubKey;
       }
 
       // Auto-register when five 800 XFG deposits for 4000 XFG total are confirmed
@@ -105,17 +108,41 @@ void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
 void CommitmentIndex::addSignatureToCache(const CachedElderfierSignature& sig) {
   std::lock_guard<std::mutex> lock(m_mutex);
 
+  // Verify Ed25519 signature against registered signing pubkey
+  CachedElderfierSignature verified_sig = sig;
+  verified_sig.is_valid = false;
+
+  if (sig.sig_algorithm == 0) {
+    // Look up registered pubkey for this EFiD
+    Crypto::PublicKey registered_pubkey = {};
+    bool found = false;
+    for (const auto& pair : m_elderfierRegistrations) {
+      if (pair.second.elderfier_id == sig.elderfier_id &&
+          pair.second.status == ElderfierStatus::ACTIVE) {
+        registered_pubkey = pair.second.signing_pubkey;
+        found = true;
+        break;
+      }
+    }
+
+    if (found && registered_pubkey != Crypto::PublicKey()) {
+      // Cryptographic verification: is this signature from the registered EFier?
+      verified_sig.is_valid = Crypto::check_signature(
+          sig.merkle_root, registered_pubkey, sig.signature);
+    }
+  }
+
   std::string merkle_root_hex = Common::podToHex(sig.merkle_root);
   auto key = std::make_pair(sig.elderfier_id, merkle_root_hex);
-  m_signatures[key] = sig;
+  m_signatures[key] = verified_sig;
 
   // Track when root was first seen
   if (m_root_first_seen_block.find(merkle_root_hex) == m_root_first_seen_block.end()) {
     m_root_first_seen_block[merkle_root_hex] = sig.received_block_height;
   }
 
-  // Update current merkle root if newer
-  if (sig.received_block_height >= m_current_block_height) {
+  // Update current merkle root if newer (only from verified signatures)
+  if (verified_sig.is_valid && sig.received_block_height >= m_current_block_height) {
     m_current_merkle_root = sig.merkle_root;
     m_current_block_height = sig.received_block_height;
   }
@@ -281,6 +308,7 @@ bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Cryp
   ElderfierRegistration reg;
   reg.address = wallet;
   reg.elderfier_id = efid;
+  reg.signing_pubkey = pubkey;
   reg.status = ElderfierStatus::ACTIVE;
   reg.unstaking_start_block = 0;
   reg.unstaking_review_window = 0;
@@ -303,6 +331,17 @@ bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Cryp
   }
 
   return true;
+}
+
+bool CommitmentIndex::getElderfierSigningPubkey(uint8_t efid, Crypto::PublicKey& pubkey_out) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  for (const auto& pair : m_elderfierRegistrations) {
+    if (pair.second.elderfier_id == efid && pair.second.status == ElderfierStatus::ACTIVE) {
+      pubkey_out = pair.second.signing_pubkey;
+      return pubkey_out != Crypto::PublicKey();  // Only valid if non-zero
+    }
+  }
+  return false;
 }
 
 // ============================================================================

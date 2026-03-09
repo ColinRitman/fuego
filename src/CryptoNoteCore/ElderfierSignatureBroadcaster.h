@@ -64,6 +64,8 @@ private:
   Crypto::PublicKey m_signingPubKey;
   Crypto::SecretKey m_signingSecKey;
   bool m_hasSigningKeys = false;
+  uint8_t m_myEfid = 0;        // resolved from registration by pubkey
+  bool m_efidResolved = false;  // true once we've looked up EFiD
 
   // Signing thread
   std::thread m_signingThread;

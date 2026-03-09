@@ -129,28 +129,47 @@ void ElderfierSignatureBroadcaster::signingThread() {
       m_core.get_blockchain_top(currentHeight, topId);
 
       if (currentHeight > m_lastSignedHeight && currentHeight > 0) {
-        // get commitment merkle root (what L2 contracts use to verify merkle proofs against)
+        // resolve EFiD from registration (once, by matching signing pubkey)
+        if (!m_efidResolved) {
+          auto& blockchain = m_core.get_blockchain_storage();
+          for (uint8_t id = 0; id < 255; ++id) {
+            Crypto::PublicKey registered_pk;
+            if (blockchain.getElderfierSigningPubkey(id, registered_pk) &&
+                registered_pk == m_signingPubKey) {
+              m_myEfid = id;
+              m_efidResolved = true;
+              break;
+            }
+          }
+          if (!m_efidResolved) {
+            // Not registered yet — skip signing this block
+            m_lastSignedHeight = currentHeight;
+            continue;
+          }
+        }
+
+        // get commitment merkle root (what L2 contracts verify merkle proofs against)
         Crypto::Hash commitmentRoot = m_core.get_blockchain_storage().getCommitmentMerkleRoot();
 
         // only sign if there are commitments (non-zero root)
         if (commitmentRoot == Crypto::Hash()) {
           m_lastSignedHeight = currentHeight;
         } else {
-          // sign merkle root
+          // sign commitment merkle root with the registered key
           Crypto::Signature sig;
           Crypto::generate_signature(commitmentRoot, m_signingPubKey, m_signingSecKey, sig);
 
-          // build p2p message
+          // build P2P message with actual EFiD
           COMMAND_ELDERFIER_SIGNATURE::request sig_msg;
           sig_msg.merkle_root = commitmentRoot;
           sig_msg.signature = sig;
-          sig_msg.elderfier_id = 0;  // looked up by pubkey on receiving end
+          sig_msg.elderfier_id = m_myEfid;
           sig_msg.block_height = currentHeight;
           sig_msg.timestamp = std::time(nullptr);
           sig_msg.version = 1;
           sig_msg.sig_algorithm = 0;  // Ed25519
 
-          // relay to all connected peers via IP2pEndpoint interface
+          // relay to all connected peers
           if (m_p2pEndpoint) {
             auto buf = LevinProtocol::encode(sig_msg);
             m_p2pEndpoint->externalRelayNotifyToAll(
@@ -161,7 +180,7 @@ void ElderfierSignatureBroadcaster::signingThread() {
           CachedElderfierSignature cached;
           cached.merkle_root = commitmentRoot;
           cached.signature = sig;
-          cached.elderfier_id = 0;
+          cached.elderfier_id = m_myEfid;
           cached.block_height = currentHeight;
           cached.timestamp = sig_msg.timestamp;
           cached.sig_algorithm = 0;

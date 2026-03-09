@@ -144,6 +144,7 @@ namespace CryptoNote {
     Crypto::Hash getCommitmentMerkleRoot() const;
     std::vector<Crypto::Hash> getCommitmentMerkleProof(const Crypto::Hash& commitment) const;
     int64_t getCommitmentLeafIndex(const Crypto::Hash& commitment) const;
+    bool getElderfierSigningPubkey(uint8_t efid, Crypto::PublicKey& pubkey_out) const;
     CommitmentIndex::Height getCommitmentHighestBlock() const;
 
     // Banking fee computation: scan transactions for HEAT/COLD commitments, return 0.1% sum
