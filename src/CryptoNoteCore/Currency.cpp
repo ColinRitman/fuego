@@ -225,26 +225,14 @@ namespace CryptoNote
 		}
 	}
 
-void Currency::addEternalFlame(uint64_t amount) {
-  uint64_t newTotal = m_ethernalXFG + amount;
-  if (newTotal < m_ethernalXFG || newTotal > m_moneySupply) {
-    m_ethernalXFG = m_moneySupply;  // cap at total supply
-    return;
-  }
-  m_ethernalXFG = newTotal;
-}
-void Currency::removeEternalFlame(uint64_t amount) {
-  if (amount > m_ethernalXFG) {
-    m_ethernalXFG = 0;  // floor at zero
-    return;
-  }
-  m_ethernalXFG -= amount;
+void Currency::syncEternalFlame(uint64_t authoritativeTotal) {
+  m_ethereal_xfg = std::min(authoritativeTotal, m_moneySupply);
 }
 double Currency::getBurnPercentage() const {
   if (m_moneySupply == 0) {
     return 0.0;
   }
-  return static_cast<double>(m_ethernalXFG) / static_cast<double>(m_moneySupply) * 100.0;
+  return static_cast<double>(m_ethereal_xfg) / static_cast<double>(m_moneySupply) * 100.0;
 }
 
 	bool Currency::getBlockReward(uint8_t blockMajorVersion, size_t medianSize, size_t currentBlockSize, uint64_t alreadyGeneratedCoins,

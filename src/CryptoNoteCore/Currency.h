@@ -293,9 +293,10 @@ public:
 
   // Money supply methods
   uint64_t getBaseMoneySupply() const { return m_baseMoneySupply; }
-  void addEternalFlame(uint64_t amount);
-  void removeEternalFlame(uint64_t amount);
-  uint64_t getEternalFlame() const { return m_ethernalXFG; }
+  // Sync EternalFlame from authoritative source (BankingIndex).
+  // This is the ONLY way m_ethereal_xfg should be updated.
+  void syncEternalFlame(uint64_t authoritativeTotal);
+  uint64_t getEternalFlame() const { return m_ethereal_xfg; }
   double getBurnPercentage() const;
 
   // Network validation
@@ -399,7 +400,7 @@ private:
 
   // Money supply
   uint64_t m_baseMoneySupply;
-  uint64_t m_ethernalXFG;
+  uint64_t m_ethereal_xfg;
 
   // Network validation - using hash of network ID
   uint64_t m_fuegoNetworkId;
@@ -538,7 +539,7 @@ public:
 
   // Money supply builders
   CurrencyBuilder& baseMoneySupply(uint64_t val) { m_currency.m_baseMoneySupply = val; return *this; }
-  CurrencyBuilder& ethernalXFG(uint64_t val) { m_currency.m_ethernalXFG = val; return *this; }
+  CurrencyBuilder& ethernalXFG(uint64_t val) { m_currency.m_ethereal_xfg = val; return *this; }
 
   // Network validation builder
   CurrencyBuilder& fuegoNetworkId(uint64_t val) { m_currency.m_fuegoNetworkId = val; return *this; }

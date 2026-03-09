@@ -554,7 +554,7 @@ void GetEthernalXFG::Request::serialize(CryptoNote::ISerializer &serializer)
 
 void GetEthernalXFG::Response::serialize(CryptoNote::ISerializer &serializer)
 {
-  serializer(ethernalXFG, "ethernalXFG");
+  serializer(ethereal_xfg, "ethereal_xfg");
   serializer(formattedAmount, "formattedAmount");
 }
 

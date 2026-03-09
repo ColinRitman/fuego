@@ -29,10 +29,10 @@
 
 namespace CryptoNote {
 
-BankingIndex::BankingIndex() : blockCount(0), m_ethernalXFG(0) {
+BankingIndex::BankingIndex() : blockCount(0), m_ethereal_xfg(0) {
 }
 
-BankingIndex::BankingIndex(DepositHeight expectedHeight) : blockCount(0), m_ethernalXFG(0) {
+BankingIndex::BankingIndex(DepositHeight expectedHeight) : blockCount(0), m_ethereal_xfg(0) {
   index.reserve(expectedHeight + 1);
 }
 
@@ -95,13 +95,13 @@ void BankingIndex::popBlock() {
   // Calculate burned amount (if any) in block before popping
   uint64_t burnedInBlock = 0;
   if (!m_burnedXfgEntries.empty() && m_burnedXfgEntries.back().height == blockCount) {
-    uint64_t currentTotal = m_ethernalXFG;
+    uint64_t currentTotal = m_ethereal_xfg;
     uint64_t previousTotal = (m_burnedXfgEntries.size() > 1) ?
       (--m_burnedXfgEntries.end() - 1)->cumulative_burned : 0;
     burnedInBlock = currentTotal - previousTotal;
 
     m_burnedXfgEntries.pop_back();
-    m_ethernalXFG -= burnedInBlock;  // Update total
+    m_ethereal_xfg -= burnedInBlock;  // Update total
   }
 
   --blockCount;
@@ -166,9 +166,9 @@ auto BankingIndex::depositInterestAtHeight(DepositHeight height) const -> Deposi
   }
 }
 
-// Enhanced burned XFG tracking methods
+// burned XFG tracking methods
 BankingIndex::BurnedAmount BankingIndex::getBurnedXfgAmount() const {
-  return m_ethernalXFG;
+  return m_ethereal_xfg;
 }
 
 BankingIndex::BurnedAmount BankingIndex::getBurnedXfgAtHeight(DepositHeight height) const {
@@ -193,22 +193,22 @@ void BankingIndex::addForeverDeposit(BurnedAmount amount, DepositHeight height) 
   // Add to burned XFG tracking (new functionality)
   // SECURITY: Check for overflow before adding to cumulative burned amount
   const uint64_t MAX_BURNED = std::numeric_limits<uint64_t>::max();
-  assert(amount <= MAX_BURNED - m_ethernalXFG && "addForeverDeposit: Overflow in cumulative burned amount!");
+  assert(amount <= MAX_BURNED - m_ethereal_xfg && "addForeverDeposit: Overflow in cumulative burned amount!");
 
-  m_ethernalXFG += amount;
+  m_ethereal_xfg += amount;
 
   if (!m_burnedXfgEntries.empty() && m_burnedXfgEntries.back().height == height) {
     // Update existing entry
     // SECURITY: Check for overflow in entry amount as well
     assert(amount <= MAX_BURNED - m_burnedXfgEntries.back().amount && "addForeverDeposit: Overflow in entry amount!");
     m_burnedXfgEntries.back().amount += amount;
-    m_burnedXfgEntries.back().cumulative_burned = m_ethernalXFG;
+    m_burnedXfgEntries.back().cumulative_burned = m_ethereal_xfg;
   } else {
     // Create new entry
     m_burnedXfgEntries.push_back({
       height,
       amount,
-      m_ethernalXFG
+      m_ethereal_xfg
     });
   }
 }
@@ -218,15 +218,15 @@ void BankingIndex::addForeverDeposit(BurnedAmount amount, DepositHeight height) 
 BankingIndex::DepositStats BankingIndex::getStats() const {
   DepositStats stats;
   stats.totalDeposits = static_cast<uint64_t>(fullDepositAmount());
-  stats.ethernalXFG = m_ethernalXFG;
-  stats.regularDeposits = stats.totalDeposits > stats.ethernalXFG ?
-    stats.totalDeposits - stats.ethernalXFG : 0;
+  stats.ethereal_xfg = m_ethereal_xfg;
+  stats.regularDeposits = stats.totalDeposits > stats.ethereal_xfg ?
+    stats.totalDeposits - stats.ethereal_xfg : 0;
   return stats;
 }
 
 void BankingIndex::serialize(ISerializer& s) {
   s(blockCount, "blockCount");
-  s(m_ethernalXFG, "ethernalXFG");
+  s(m_ethereal_xfg, "ethernalXFG");
 
   if (s.type() == ISerializer::INPUT) {
     readSequence<BankingIndexEntry>(std::back_inserter(index), "index", s);
