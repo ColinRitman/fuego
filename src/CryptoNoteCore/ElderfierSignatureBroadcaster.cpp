@@ -129,38 +129,46 @@ void ElderfierSignatureBroadcaster::signingThread() {
       m_core.get_blockchain_top(currentHeight, topId);
 
       if (currentHeight > m_lastSignedHeight && currentHeight > 0) {
-        // Sign the top block hash as the merkle root
-        Crypto::Signature sig;
-        Crypto::generate_signature(topId, m_signingPubKey, m_signingSecKey, sig);
+        // get commitment merkle root (what L2 contracts use to verify merkle proofs against)
+        Crypto::Hash commitmentRoot = m_core.get_blockchain_storage().getCommitmentMerkleRoot();
 
-        // Build P2P message
-        COMMAND_ELDERFIER_SIGNATURE::request sig_msg;
-        sig_msg.merkle_root = topId;
-        sig_msg.signature = sig;
-        sig_msg.elderfier_id = 0;  // Will be looked up by pubkey on receiving end
-        sig_msg.block_height = currentHeight;
-        sig_msg.timestamp = std::time(nullptr);
-        sig_msg.version = 1;
-        sig_msg.sig_algorithm = 0;  // Ed25519
+        // only sign if there are commitments (non-zero root)
+        if (commitmentRoot == Crypto::Hash()) {
+          m_lastSignedHeight = currentHeight;
+        } else {
+          // sign merkle root
+          Crypto::Signature sig;
+          Crypto::generate_signature(commitmentRoot, m_signingPubKey, m_signingSecKey, sig);
 
-        // Relay to all connected peers via IP2pEndpoint interface
-        if (m_p2pEndpoint) {
-          auto buf = LevinProtocol::encode(sig_msg);
-          m_p2pEndpoint->externalRelayNotifyToAll(
-              COMMAND_ELDERFIER_SIGNATURE::ID, buf, nullptr);
+          // build p2p message
+          COMMAND_ELDERFIER_SIGNATURE::request sig_msg;
+          sig_msg.merkle_root = commitmentRoot;
+          sig_msg.signature = sig;
+          sig_msg.elderfier_id = 0;  // looked up by pubkey on receiving end
+          sig_msg.block_height = currentHeight;
+          sig_msg.timestamp = std::time(nullptr);
+          sig_msg.version = 1;
+          sig_msg.sig_algorithm = 0;  // Ed25519
+
+          // relay to all connected peers via IP2pEndpoint interface
+          if (m_p2pEndpoint) {
+            auto buf = LevinProtocol::encode(sig_msg);
+            m_p2pEndpoint->externalRelayNotifyToAll(
+                COMMAND_ELDERFIER_SIGNATURE::ID, buf, nullptr);
+          }
+
+          // cache locally
+          CachedElderfierSignature cached;
+          cached.merkle_root = commitmentRoot;
+          cached.signature = sig;
+          cached.elderfier_id = 0;
+          cached.block_height = currentHeight;
+          cached.timestamp = sig_msg.timestamp;
+          cached.sig_algorithm = 0;
+          m_core.get_blockchain_storage().addSignatureToCache(cached);
+
+          m_lastSignedHeight = currentHeight;
         }
-
-        // Also cache locally
-        CachedElderfierSignature cached;
-        cached.merkle_root = topId;
-        cached.signature = sig;
-        cached.elderfier_id = 0;
-        cached.block_height = currentHeight;
-        cached.timestamp = sig_msg.timestamp;
-        cached.sig_algorithm = 0;
-        m_core.get_blockchain_storage().addSignatureToCache(cached);
-
-        m_lastSignedHeight = currentHeight;
       }
     } catch (const std::exception& e) {
       // Silently continue — signing failures are non-fatal
