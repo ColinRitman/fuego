@@ -51,6 +51,7 @@
 #include "CryptoNoteCore/CryptoNoteTools.h"
 #include "CryptoNoteCore/AliasIndex.h"
 #include "CryptoNoteCore/TransactionExtra.h"
+#include "CryptoNoteCore/DepositCommitment.h"
 
 namespace CryptoNote
 {
@@ -150,17 +151,26 @@ namespace CryptoNote
         return true;
       }
 
-      // Create HEAT commitment for burn (0x08 tag)
-      std::vector<uint8_t> extra;
-      Crypto::PublicKey pubkey;
-      Crypto::SecretKey seckey;
-      Crypto::generate_keys(pubkey, seckey);
-      Crypto::Hash heatCommit = Crypto::cn_fast_hash(pubkey.data, sizeof(pubkey.data));
+      // Generate unified STARK commitment (v3) for testnet burn
+      auto starkResult = CryptoNote::StarkCommitmentGenerator::generate(
+          burn_amount,
+          CryptoNote::parameters::DEPOSIT_TERM_FOREVER,
+          CryptoNote::parameters::STARK_NETWORK_ID_TESTNET,
+          CryptoNote::parameters::STARK_TARGET_CHAIN_ETH,
+          CryptoNote::parameters::STARK_COMMITMENT_VERSION);
 
+      success_msg_writer() << "";
+      success_msg_writer() << "STARK Commitment Data (SAVE THIS — needed to claim HEAT):";
+      success_msg_writer() << "  Secret:     " << Common::podToHex(starkResult.secret);
+      success_msg_writer() << "  Commitment: " << Common::podToHex(starkResult.commitment);
+      success_msg_writer() << "  Nullifier:  " << Common::podToHex(starkResult.nullifier);
+      success_msg_writer() << "";
+
+      std::vector<uint8_t> extra;
       CryptoNote::TransactionExtraHeatCommitment heatCommitment;
-      heatCommitment.commitment = heatCommit;
+      heatCommitment.commitment = starkResult.commitment;
       heatCommitment.amount = burn_amount;
-      heatCommitment.metadata = {0x08};  // Tag 0x08 for HEAT
+      heatCommitment.metadata = {0x08};
 
       CryptoNote::addHeatCommitmentToExtra(extra, heatCommitment);
       std::string extraString = std::string(extra.begin(), extra.end());
@@ -285,15 +295,24 @@ namespace CryptoNote
         return true;
       }
 
-      // Create COLD commitment for yield deposit (0xCD tag)
-      std::vector<uint8_t> extra;
-      Crypto::PublicKey pubkey;
-      Crypto::SecretKey seckey;
-      Crypto::generate_keys(pubkey, seckey);
-      Crypto::Hash coldCommit = Crypto::cn_fast_hash(pubkey.data, sizeof(pubkey.data));
+      // Generate unified STARK commitment (v3) for testnet COLD deposit
+      auto starkResult = CryptoNote::StarkCommitmentGenerator::generate(
+          cold_amount,
+          cold_term,
+          CryptoNote::parameters::STARK_NETWORK_ID_TESTNET,
+          CryptoNote::parameters::STARK_TARGET_CHAIN_ETH,
+          CryptoNote::parameters::STARK_COMMITMENT_VERSION);
 
+      success_msg_writer() << "";
+      success_msg_writer() << "STARK Commitment Data (SAVE THIS — needed to claim CD interest):";
+      success_msg_writer() << "  Secret:     " << Common::podToHex(starkResult.secret);
+      success_msg_writer() << "  Commitment: " << Common::podToHex(starkResult.commitment);
+      success_msg_writer() << "  Nullifier:  " << Common::podToHex(starkResult.nullifier);
+      success_msg_writer() << "";
+
+      std::vector<uint8_t> extra;
       CryptoNote::TransactionExtraColdCommitment coldCommitment;
-      coldCommitment.commitment = coldCommit;
+      coldCommitment.commitment = starkResult.commitment;
       coldCommitment.amount = cold_amount;
       coldCommitment.term = cold_term;
       coldCommitment.claimChainCode = 1;  // Default to ETH chain
@@ -301,7 +320,7 @@ namespace CryptoNote
       CryptoNote::addColdCommitmentToExtra(extra, coldCommitment);
       std::string extraString = std::string(extra.begin(), extra.end());
 
-      success_msg_writer() << "Creating COLD transaction: " << m_currency.formatAmount(cold_amount) << " XFG for " << term_label;
+      success_msg_writer() << "Creating COLD transaction: " << m_currency.formatAmount(cold_amount) << " TEST for " << term_label;
 
       CryptoNote::WalletHelper::SendCompleteResultObserver sent;
       WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);

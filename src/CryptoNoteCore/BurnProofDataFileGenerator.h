@@ -13,6 +13,18 @@
 // You should have received a copy of the GNU General Public License
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
+// ============================================================
+// DEPRECATED — old MVP BPDF model (pre-v3)
+// ============================================================
+// This file generated JSON "Burn Proof Data Files" using the old
+// keccak(secret || "commitment") formula without amount/network/term binding.
+// Commitment and nullifier algorithms here DO NOT match the v3 unified
+// STARK AIR (burn_mint_air.rs).
+//
+// Replaced by: StarkCommitmentGenerator in DepositCommitment.h
+// Proof gen:   xfg-stark-cli (Winterfell, uses unified v3 preimage)
+// ============================================================
+
 #pragma once
 
 #include <string>

@@ -169,6 +169,13 @@ namespace CryptoNote
         const uint32_t DEPOSIT_TERM_YIELD = COLD_MIN_TERM;     // 16k blocks (3 mo) for Fuego Untraceable Custom Interest Assets (FuCIA) deposits
         const uint32_t DEPOSIT_TERM_BURN = DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
 
+        // XFG-STARK commitment constants (unified format for xfg-stark-cli relay)
+        const uint32_t STARK_NETWORK_ID_MAINNET  = 1;
+        const uint32_t STARK_NETWORK_ID_TESTNET  = 2;
+        const uint32_t STARK_COMMITMENT_VERSION  = 3;     // v3: unified HEAT+COLD relay format (4 tiers)
+        const uint32_t STARK_TARGET_CHAIN_ETH    = 1;     // Ethereum mainnet
+        const uint32_t STARK_TARGET_CHAIN_ARB    = 42161; // Arbitrum One
+
         const uint32_t DEPOSIT_TERM_MIN = 16000;  // New 3-month term, slightly <90 days of Fuego blocks (180 blks per day)
         const uint32_t DEPOSIT_TERM_MAX   = 65000;   // ~1-year using 360(+1)days/yr (65k blocks)
 
@@ -309,7 +316,7 @@ namespace CryptoNote
 		};
 
  	// TESTNET DEFAULTS
- 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101433c9aca20cea9b10cb717e14d171ab94e98b4ffaccfd56f81db695fc1a7dcfb";
+ 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd08807121015c7bd08f34012b7cb1c366fdd90655596818d133be69ae9916f0832ece64549b";
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */
@@ -319,15 +326,9 @@ namespace CryptoNote
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
 
 //__________________________________________________________________________________________________________________________
-                                     	// TESTNET MWLWMA parameters
+                                     	// TESTNET parameters
 //--------------------------------------------------------------------------------------------------------------------------
-	// Analysis of testnet blocks 43-596 identified three issues:
-	// 1. DIFFICULTY_WINDOW_V4=45 silently capped N_long to effectiveN=45 (N_long=69 never used)
-	// 2. Equal weights (33/34/33) slowed crash recovery (~37 blocks for a 5x hashrate drop)
-	// 3. No lower clamp — burst-mined 1-6s blocks spiked the short window, causing oscillation
-	// v2 params activate at TESTNET_MWLWMA_V2_HEIGHT (800) so blocks 43-799 re-validate cleanly.
-	// N_short raised 9→17 (less reactive to burst), N_long set to 45 (was already capped there),
-	// weights shifted to medium-dominant (20/55/25), lower clamp T/8 added in nextDifficultyV6.
+
 		const uint64_t TESTNET_MWLWMA_N_SHORT                                = 17;   // Short window (was 9; 17 reduces burst-mining oscillation)
 		const uint64_t TESTNET_MWLWMA_N_MEDIUM                               = 33;   // Medium window (unchanged)
 		const uint64_t TESTNET_MWLWMA_N_LONG                                 = 45;   // Long window (was 69, but capped to 45 by DIFFICULTY_WINDOW_V4 — now explicit)
@@ -339,29 +340,29 @@ namespace CryptoNote
 
  	// TESTNET DMWDA parameters
 //--------------------------------------------------------------------------------------------------------------------------
- 		const uint32_t TESTNET_DMWDA_SHORT_WINDOW                            = 30;   // Rapid response window
- 		const uint32_t TESTNET_DMWDA_MEDIUM_WINDOW                           = 69;   // Stability window
- 		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 180;  // Trend analysis window
- 		const uint32_t TESTNET_DMWDA_EMERGENCY_WINDOW                        = 3;    // Emergency response window
- 		const double   TESTNET_DMWDA_MIN_ADJUSTMENT                          = 0.5;  // Minimum difficulty adjustment (50%)
- 		const double   TESTNET_DMWDA_MAX_ADJUSTMENT                          = 3.0;  // Maximum difficulty adjustment (300%) — needs headroom for single-miner recovery
- 		const double   TESTNET_DMWDA_EMERGENCY_THRESHOLD                     = 0.45;  // Emergency threshold (45%)
- 		const double   TESTNET_DMWDA_SMOOTHING_FACTOR                        = 0.8;  // Smoothing factor for oscillations prevention 80/20 prev/new
+ 		const uint32_t TESTNET_DMWDA_SHORT_WINDOW                            = 15;   // Rapid response window (smaller = snappier)
+ 		const uint32_t TESTNET_DMWDA_MEDIUM_WINDOW                           = 45;   // Stability anchor
+ 		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 90;   // Trend window (capped by difficulty data window anyway)
+ 		const uint32_t TESTNET_DMWDA_EMERGENCY_WINDOW                        = 5;    // Emergency response window
+ 		const double   TESTNET_DMWDA_MIN_ADJUSTMENT                          = 0.65; // Max 35% drop per block — prevents instant floor crash
+ 		const double   TESTNET_DMWDA_MAX_ADJUSTMENT                          = 4.0;  // Max 4x increase per block — faster recovery from low floor
+ 		const double   TESTNET_DMWDA_EMERGENCY_THRESHOLD                     = 0.35; // Emergency clamp [0.35x, 2.86x] — tighter than before
+ 		const double   TESTNET_DMWDA_SMOOTHING_FACTOR                        = 0.65; // 65% new / 35% old — damp oscillation vs 80% which overshot
  		const double   TESTNET_DMWDA_CONFIDENCE_MIN                          = 0.2;  // Minimum confidence score
  		const double   TESTNET_DMWDA_CONFIDENCE_MAX                          = 1.0;  // Maximum confidence score
  	    const double   TESTNET_DMWDA_DEFAULT_CONFIDENCE                      = 0.5;  // Default confidence score
 
-    const double   TESTNET_DMWDA_WEIGHT_SHORT                            = 0.5;  // Weight for short window
- 	const double   TESTNET_DMWDA_WEIGHT_MEDIUM                           = 0.3;  // Weight for medium window
- 	const double   TESTNET_DMWDA_WEIGHT_LONG                             = 0.2;  // Weight for long window
+    const double   TESTNET_DMWDA_WEIGHT_SHORT                            = 0.5;  // 50% short window weight (responsive)
+ 	const double   TESTNET_DMWDA_WEIGHT_MEDIUM                           = 0.35; // 35% medium
+ 	const double   TESTNET_DMWDA_WEIGHT_LONG                             = 0.15; // 15% long (trend dampening)
  	const double   TESTNET_DMWDA_ADJUSTMENT_RANGE                        = 0.33;  // Adjustment range for confidence-based bounds
  	const uint32_t TESTNET_DMWDA_RECENT_WINDOW_SIZE                      = 5;    // Recent window size for anomaly detection
  	const uint32_t TESTNET_DMWDA_HISTORICAL_WINDOW_SIZE                  = 20;   // Historical window size for anomaly detection
  	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_CHECK_BLOCKS             = 5;    // Number of blocks to check for stealing attempts
- 	const double   TESTNET_DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.05; // 5% of target time threshold for fast blocks
+ 	const double   TESTNET_DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.15; // 15% of target = 72s threshold (was 38s — too many false positives)
 
- 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
-    const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 8.0; // Hash rate change threshold for anomaly detection
+ 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD                = 3;    // Need 3 of 5 fast blocks to trigger (was 2 — too sensitive)
+    const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 6.0;  // Hash rate change threshold (was 8.0)
 
  	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 

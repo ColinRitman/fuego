@@ -127,7 +127,7 @@ namespace CryptoNote
     m_genesisBlock.nonce = 70;
     if (m_testnet)
     {
-      m_genesisBlock.nonce = 79; // v10 genesis: commitment outputs include Pedersen fields
+      m_genesisBlock.nonce = 80;
     }
 
     //miner::find_nonce_for_given_block(bl, 1, 0);
@@ -1240,7 +1240,18 @@ double Currency::getBurnPercentage() const {
 		auto config = getDefaultFuegoConfig(isTestnet());
 		AdaptiveDifficulty algo(config);
 		uint64_t next_D = algo.calculateNextDifficulty(height, timestamps, cumulativeDifficulties, isTestnet());
-		return std::max(minDifficulty, next_D);
+		next_D = std::max(minDifficulty, next_D);
+
+		// Round to clean numbers for readability (same as MWLWMA did)
+		uint64_t i = 1000000000;
+		while (i > 1) {
+			if (next_D > i * 100) {
+				next_D = ((next_D + i / 2) / i) * i;
+				break;
+			}
+			i /= 10;
+		}
+		return next_D;
 	}
 
 
