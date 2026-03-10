@@ -1231,8 +1231,8 @@ double Currency::getBurnPercentage() const {
 			return minDifficulty;
 		}
 
-		// DMWDA (Dynamic Multi-Window Difficulty Algorithm) — replaces MWLWMA for all v10+ blocks
-		auto config = getDefaultFuegoConfig(isTestnet());
+		// DMWDA — epoch selected by height, so param changes never require a chain reset
+		auto config = getDefaultFuegoConfig(isTestnet(), height);
 		AdaptiveDifficulty algo(config);
 		uint64_t next_D = algo.calculateNextDifficulty(height, timestamps, cumulativeDifficulties, isTestnet());
 		next_D = std::max(minDifficulty, next_D);

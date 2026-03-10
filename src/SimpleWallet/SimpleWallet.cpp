@@ -540,7 +540,7 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
   m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begins Ælderfire StayKing Ceremony. Details on what is, & how to become, an Ξlderfier (interactive, 5x 800 XFG stakes req'd).");
   m_consoleHandler.setHandler("withdraw", boost::bind(&simple_wallet::withdraw, this, boost::arg<1>()), "withdraw <id> - Withdraw a deposit");
-  m_consoleHandler.setHandler("list_cold", boost::bind(&simple_wallet::list_cold, this, boost::arg<1>()), "list_cold - List all COLD txns or Elderfier deposits");
+  m_consoleHandler.setHandler("list_cold", boost::bind(&simple_wallet::list_cold, this, boost::arg<1>()), "list_cold - List all COLD yield deposits");
   m_consoleHandler.setHandler("cold_info", boost::bind(&simple_wallet::cold_info, this, boost::arg<1>()), "cold_info <id> - Get detailed info on your Certificate of Ledger Deposits");
   m_consoleHandler.setHandler("list_burns", boost::bind(&simple_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all XFG burn transactions (HEAT)");
   m_consoleHandler.setHandler("burn_info", boost::bind(&simple_wallet::burn_info, this, boost::arg<1>()), "burn_info <id> - Get detailed info of burn by ID");
@@ -1358,23 +1358,24 @@ bool simple_wallet::list_cold(const std::vector<std::string> &)
       continue;
     }
 
+    // Skip EFier stakes — those belong in elder_council only
+    uint32_t efTerm = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING
+                                              : CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING;
+    if (deposit.term == efTerm) {
+      continue;
+    }
+
     // Format amount (interest handled off-chain via L2)
     std::string amount_str = m_currency.formatAmount(deposit.amount);
 
-    // Format term (network-aware: testnet EFier=2, mainnet EFier=8)
-    uint32_t eFierTerm  = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING
-                                                  : CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING;
-    uint32_t coldMin    = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM
-                                                  : CryptoNote::parameters::COLD_MIN_TERM;
-    uint32_t coldMax    = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM
-                                                  : CryptoNote::parameters::COLD_MAX_TERM;
+    // Format term (COLD deposits only — HEAT and EFier already filtered)
+    uint32_t coldMin = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM
+                                               : CryptoNote::parameters::COLD_MIN_TERM;
+    uint32_t coldMax = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM
+                                               : CryptoNote::parameters::COLD_MAX_TERM;
 
-    std::string term_str = "";
-    if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
-      term_str = "HEAT (forever)";
-    } else if (deposit.term == eFierTerm) {
-      term_str = "EFier Stake";
-    } else if (deposit.term == coldMin) {
+    std::string term_str;
+    if (deposit.term == coldMin) {
       term_str = "3 months";
     } else if (deposit.term == coldMax) {
       term_str = "1 year";
@@ -1524,6 +1525,20 @@ bool simple_wallet::burn(const std::vector<std::string> &args)
     heatCommitment.metadata = {0x08};
 
     CryptoNote::addHeatCommitmentToExtra(extra, heatCommitment);
+
+    // Encrypt STARK secret into tx extra (0xD5) so burn_info can retrieve it
+    CryptoNote::AccountKeys walletKeys;
+    m_wallet->getAccountKeys(walletKeys);
+    CryptoNote::DepositSecretPayload secretPayload;
+    secretPayload.depositType = 0x08; // HEAT
+    secretPayload.amount = burn_amount;
+    secretPayload.term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
+    memcpy(secretPayload.depositSecret, &starkResult.secret, 32);
+    CryptoNote::TransactionExtraDepositSecret encSecret;
+    if (CryptoNote::encryptDepositSecret(secretPayload, walletKeys.address.viewPublicKey, encSecret)) {
+      CryptoNote::addDepositSecretToExtra(extra, encSecret);
+    }
+
     std::string extraString(extra.begin(), extra.end());
 
     // Send the burn deposit transaction
@@ -1687,6 +1702,20 @@ bool simple_wallet::cold(const std::vector<std::string> &args)
     coldCommitment.claimChainCode = 1;  // Default to ETH chain
 
     CryptoNote::addColdCommitmentToExtra(extra, coldCommitment);
+
+    // Encrypt STARK secret into tx extra (0xD5) so cold_info can retrieve it
+    CryptoNote::AccountKeys walletKeys;
+    m_wallet->getAccountKeys(walletKeys);
+    CryptoNote::DepositSecretPayload secretPayload;
+    secretPayload.depositType = 0xCD; // COLD
+    secretPayload.amount = cold_amount;
+    secretPayload.term = cold_term;
+    memcpy(secretPayload.depositSecret, &starkResult.secret, 32);
+    CryptoNote::TransactionExtraDepositSecret encSecret;
+    if (CryptoNote::encryptDepositSecret(secretPayload, walletKeys.address.viewPublicKey, encSecret)) {
+      CryptoNote::addDepositSecretToExtra(extra, encSecret);
+    }
+
     std::string extraString(extra.begin(), extra.end());
 
     // Send the COLD deposit transaction
@@ -1952,12 +1981,20 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     CryptoNote::AccountKeys walletKeys;
     m_wallet->getAccountKeys(walletKeys);
 
-    // Generate a dedicated signing keypair for this elderfier.
-    // The public key is embedded on-chain in deposit metadata.
-    // The secret key is displayed once — operator must save it to run fuegod --elderfier-key.
+    // Derive a deterministic signing keypair from the wallet's spend secret key.
+    // hash_to_scalar("fuego_ef_sign" || spendSecretKey) -> always the same for this wallet.
+    // Recoverable any time the wallet is open (shown in elder_council).
     Crypto::PublicKey signingPubKey;
     Crypto::SecretKey signingSecKey;
-    Crypto::generate_keys(signingPubKey, signingSecKey);
+    {
+      static const char label[] = "fuego_ef_sign___";  // 16 bytes
+      uint8_t preimage[48];
+      std::memcpy(preimage,      label, 16);
+      std::memcpy(preimage + 16, walletKeys.spendSecretKey.data, 32);
+      Crypto::hash_to_scalar(preimage, sizeof(preimage),
+        reinterpret_cast<Crypto::EllipticCurveScalar&>(signingSecKey));
+      Crypto::secret_key_to_public_key(signingSecKey, signingPubKey);
+    }
 
     for (int i = 0; i < 5; ++i) {
       success_msg_writer() << "  The " << flameNames[i] << " Flame — forging stake " << (i + 1) << " of 5...";
@@ -2052,20 +2089,16 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "  register you as Ælder King @" << alias;
     success_msg_writer() << "  and add you to the active Ξlderfiers registry.";
     success_msg_writer() << "";
-    success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-    success_msg_writer() << "║           SAVE YOUR ELDERFIER SIGNING KEY                  ║";
-    success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+    success_msg_writer() << "  ── YOUR ELDERFIER SIGNING KEY ───────────────────────────";
     success_msg_writer() << "";
-    success_msg_writer() << "  Your signing secret key (SAVE THIS — shown only once):";
-    success_msg_writer() << "";
-    success_msg_writer() << "    " << Common::podToHex(signingSecKey);
+    success_msg_writer() << "  Signing key:  " << Common::podToHex(signingSecKey);
     success_msg_writer() << "";
     success_msg_writer() << "  To run your Elderfier signing node:";
     success_msg_writer() << "";
     success_msg_writer() << "    fuegod --elderfier-key " << Common::podToHex(signingSecKey);
     success_msg_writer() << "";
-    success_msg_writer() << "  This key signs merkle roots on each block. Without it,";
-    success_msg_writer() << "  your node cannot fulfill its Elderfier duties.";
+    success_msg_writer() << "  This key is derived from your wallet and can always be";
+    success_msg_writer() << "  viewed again via  elder_council";
     success_msg_writer() << "";
     success_msg_writer() << "  Your Elderfire burns bright.";
     success_msg_writer() << "  Guard the Realm well, King " << alias << ".";
@@ -2129,6 +2162,21 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
     return true;
   }
 
+  // ── Derive signing keypair from wallet spend key ─────────────────────────
+  CryptoNote::AccountKeys walletKeys;
+  m_wallet->getAccountKeys(walletKeys);
+  Crypto::PublicKey signingPubKey;
+  Crypto::SecretKey signingSecKey;
+  {
+    static const char label[] = "fuego_ef_sign___";  // 16 bytes
+    uint8_t preimage[48];
+    std::memcpy(preimage,      label, 16);
+    std::memcpy(preimage + 16, walletKeys.spendSecretKey.data, 32);
+    Crypto::hash_to_scalar(preimage, sizeof(preimage),
+      reinterpret_cast<Crypto::EllipticCurveScalar&>(signingSecKey));
+    Crypto::secret_key_to_public_key(signingSecKey, signingPubKey);
+  }
+
   // ── Header ───────────────────────────────────────────────────────────────
   success_msg_writer() << "";
   success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
@@ -2137,6 +2185,10 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
   success_msg_writer() << "";
   success_msg_writer() << "  Alias:          @" << registeredAlias;
   success_msg_writer() << "  Registered:     Block " << registeredBlock;
+  success_msg_writer() << "  Signing key:    " << Common::podToHex(signingSecKey);
+  success_msg_writer() << "  Signing pubkey: " << Common::podToHex(signingPubKey);
+  success_msg_writer() << "";
+  success_msg_writer() << "  Run daemon:     fuegod --elderfier-key " << Common::podToHex(signingSecKey);
   success_msg_writer() << "";
 
   // ── Stakes ───────────────────────────────────────────────────────────────
@@ -2514,6 +2566,20 @@ bool simple_wallet::cold_info(const std::vector<std::string> &args)
 
       // Also show raw extra hex for debugging
       success_msg_writer() << "Extra (hex):   " << Common::toHex(extraBytes);
+
+      // Decrypt and display STARK secret if present (0xD5 tag)
+      CryptoNote::TransactionExtraDepositSecret encSecret;
+      if (CryptoNote::getDepositSecretFromExtra(extraBytes, encSecret)) {
+        CryptoNote::AccountKeys walletKeys;
+        m_wallet->getAccountKeys(walletKeys);
+        CryptoNote::DepositSecretPayload decrypted;
+        if (CryptoNote::decryptDepositSecret(encSecret, walletKeys.viewSecretKey, decrypted)) {
+          Crypto::SecretKey secret;
+          memcpy(&secret, decrypted.depositSecret, 32);
+          success_msg_writer() << "";
+          success_msg_writer() << "STARK Secret:  " << Common::podToHex(secret);
+        }
+      }
     }
 
   } catch (const std::exception &e) {
@@ -2641,6 +2707,20 @@ bool simple_wallet::burn_info(const std::vector<std::string> &args)
       }
 
       success_msg_writer() << "Extra (hex):   " << Common::toHex(extraBytes);
+
+      // Decrypt and display STARK secret if present (0xD5 tag)
+      CryptoNote::TransactionExtraDepositSecret encSecret;
+      if (CryptoNote::getDepositSecretFromExtra(extraBytes, encSecret)) {
+        CryptoNote::AccountKeys walletKeys;
+        m_wallet->getAccountKeys(walletKeys);
+        CryptoNote::DepositSecretPayload decrypted;
+        if (CryptoNote::decryptDepositSecret(encSecret, walletKeys.viewSecretKey, decrypted)) {
+          Crypto::SecretKey secret;
+          memcpy(&secret, decrypted.depositSecret, 32);
+          success_msg_writer() << "";
+          success_msg_writer() << "STARK Secret:  " << Common::podToHex(secret);
+        }
+      }
     }
 
     success_msg_writer() << "";

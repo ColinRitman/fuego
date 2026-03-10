@@ -2191,15 +2191,17 @@ static Crypto::chacha8_iv depositEncIV(const Crypto::PublicKey& txPubKey) {
 
 bool encryptDepositSecret(const DepositSecretPayload& plaintext,
                           const Crypto::PublicKey& recipientViewPubKey,
-                          const Crypto::SecretKey& txSecKey,
-                          const Crypto::PublicKey& txPubKey,
                           TransactionExtraDepositSecret& out) {
+  // Generate one-time ephemeral keypair for ECDH
+  Crypto::SecretKey ephSecKey;
+  Crypto::generate_keys(out.ephPubKey, ephSecKey);
+
   Crypto::KeyDerivation derivation;
-  if (!Crypto::generate_key_derivation(recipientViewPubKey, txSecKey, derivation))
+  if (!Crypto::generate_key_derivation(recipientViewPubKey, ephSecKey, derivation))
     return false;
 
   Crypto::chacha8_key encKey = depositEncKey(derivation);
-  Crypto::chacha8_iv  encIV  = depositEncIV(txPubKey);
+  Crypto::chacha8_iv  encIV  = depositEncIV(out.ephPubKey);
 
   out.encryptedPayload.resize(sizeof(DepositSecretPayload));
   Crypto::chacha8(&plaintext, sizeof(DepositSecretPayload),
@@ -2209,18 +2211,17 @@ bool encryptDepositSecret(const DepositSecretPayload& plaintext,
 }
 
 bool decryptDepositSecret(const TransactionExtraDepositSecret& encrypted,
-                          const Crypto::PublicKey& txPubKey,
                           const Crypto::SecretKey& walletViewSecKey,
                           DepositSecretPayload& out) {
   if (encrypted.encryptedPayload.size() != sizeof(DepositSecretPayload))
     return false;
 
   Crypto::KeyDerivation derivation;
-  if (!Crypto::generate_key_derivation(txPubKey, walletViewSecKey, derivation))
+  if (!Crypto::generate_key_derivation(encrypted.ephPubKey, walletViewSecKey, derivation))
     return false;
 
   Crypto::chacha8_key encKey = depositEncKey(derivation);
-  Crypto::chacha8_iv  encIV  = depositEncIV(txPubKey);
+  Crypto::chacha8_iv  encIV  = depositEncIV(encrypted.ephPubKey);
 
   Crypto::chacha8(encrypted.encryptedPayload.data(), sizeof(DepositSecretPayload),
                   encKey, encIV,
@@ -2230,10 +2231,14 @@ bool decryptDepositSecret(const TransactionExtraDepositSecret& encrypted,
 
 bool addDepositSecretToExtra(std::vector<uint8_t>& tx_extra,
                              const TransactionExtraDepositSecret& secret) {
-  if (secret.encryptedPayload.size() > 255)
+  // Format: [0xD5][len=77][ephPubKey:32][ciphertext:45]
+  if (secret.encryptedPayload.size() != sizeof(DepositSecretPayload))
     return false;
+  const uint8_t totalLen = 32 + static_cast<uint8_t>(secret.encryptedPayload.size()); // 77
   tx_extra.push_back(TX_EXTRA_DEPOSIT_SECRET);
-  tx_extra.push_back(static_cast<uint8_t>(secret.encryptedPayload.size()));
+  tx_extra.push_back(totalLen);
+  const auto* pubBytes = reinterpret_cast<const uint8_t*>(&secret.ephPubKey);
+  tx_extra.insert(tx_extra.end(), pubBytes, pubBytes + 32);
   tx_extra.insert(tx_extra.end(),
                   secret.encryptedPayload.begin(),
                   secret.encryptedPayload.end());
@@ -2242,13 +2247,16 @@ bool addDepositSecretToExtra(std::vector<uint8_t>& tx_extra,
 
 bool getDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra,
                                TransactionExtraDepositSecret& out) {
+  // Format: [0xD5][len=77][ephPubKey:32][ciphertext:45]
+  const size_t expectedLen = 32 + sizeof(DepositSecretPayload); // 77
   for (size_t i = 0; i + 1 < tx_extra.size(); ++i) {
     if (tx_extra[i] != TX_EXTRA_DEPOSIT_SECRET)
       continue;
     uint8_t len = tx_extra[i + 1];
-    if (i + 2 + len > tx_extra.size())
+    if (len != expectedLen || i + 2 + len > tx_extra.size())
       return false;
-    out.encryptedPayload.assign(tx_extra.begin() + i + 2,
+    memcpy(&out.ephPubKey, &tx_extra[i + 2], 32);
+    out.encryptedPayload.assign(tx_extra.begin() + i + 2 + 32,
                                 tx_extra.begin() + i + 2 + len);
     return true;
   }

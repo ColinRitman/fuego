@@ -173,6 +173,20 @@ namespace CryptoNote
       heatCommitment.metadata = {0x08};
 
       CryptoNote::addHeatCommitmentToExtra(extra, heatCommitment);
+
+      // Encrypt STARK secret into tx extra (0xD5)
+      CryptoNote::AccountKeys walletKeys;
+      m_wallet->getAccountKeys(walletKeys);
+      CryptoNote::DepositSecretPayload secretPayload;
+      secretPayload.depositType = 0x08;
+      secretPayload.amount = burn_amount;
+      secretPayload.term = CryptoNote::parameters::DEPOSIT_TERM_FOREVER;
+      memcpy(secretPayload.depositSecret, &starkResult.secret, 32);
+      CryptoNote::TransactionExtraDepositSecret encSecret;
+      if (CryptoNote::encryptDepositSecret(secretPayload, walletKeys.address.viewPublicKey, encSecret)) {
+        CryptoNote::addDepositSecretToExtra(extra, encSecret);
+      }
+
       std::string extraString = std::string(extra.begin(), extra.end());
 
       success_msg_writer() << "Creating TEST burn (HEAT): " << m_currency.formatAmount(burn_amount) << " TEST";
@@ -318,6 +332,20 @@ namespace CryptoNote
       coldCommitment.claimChainCode = 1;  // Default to ETH chain
 
       CryptoNote::addColdCommitmentToExtra(extra, coldCommitment);
+
+      // Encrypt STARK secret into tx extra (0xD5)
+      CryptoNote::AccountKeys walletKeys;
+      m_wallet->getAccountKeys(walletKeys);
+      CryptoNote::DepositSecretPayload secretPayload;
+      secretPayload.depositType = 0xCD;
+      secretPayload.amount = cold_amount;
+      secretPayload.term = cold_term;
+      memcpy(secretPayload.depositSecret, &starkResult.secret, 32);
+      CryptoNote::TransactionExtraDepositSecret encSecret;
+      if (CryptoNote::encryptDepositSecret(secretPayload, walletKeys.address.viewPublicKey, encSecret)) {
+        CryptoNote::addDepositSecretToExtra(extra, encSecret);
+      }
+
       std::string extraString = std::string(extra.begin(), extra.end());
 
       success_msg_writer() << "Creating COLD transaction: " << m_currency.formatAmount(cold_amount) << " TEST for " << term_label;
@@ -589,10 +617,18 @@ namespace CryptoNote
       CryptoNote::AccountKeys walletKeys;
       m_wallet->getAccountKeys(walletKeys);
 
-      // Generate a dedicated signing keypair for this elderfier.
+      // Derive deterministic signing keypair from wallet spend key.
       Crypto::PublicKey signingPubKey;
       Crypto::SecretKey signingSecKey;
-      Crypto::generate_keys(signingPubKey, signingSecKey);
+      {
+        static const char label[] = "fuego_ef_sign___";  // 16 bytes
+        uint8_t preimage[48];
+        std::memcpy(preimage,      label, 16);
+        std::memcpy(preimage + 16, walletKeys.spendSecretKey.data, 32);
+        Crypto::hash_to_scalar(preimage, sizeof(preimage),
+          reinterpret_cast<Crypto::EllipticCurveScalar&>(signingSecKey));
+        Crypto::secret_key_to_public_key(signingSecKey, signingPubKey);
+      }
 
       for (int i = 0; i < 5; ++i) {
         success_msg_writer() << "  The " << flameNames[i] << " Flame — forging stake " << (i + 1) << " of 5...";
@@ -685,17 +721,15 @@ namespace CryptoNote
       success_msg_writer() << "  register you as Elder King @" << alias;
       success_msg_writer() << "  and add you to the active Testifiers registry.";
       success_msg_writer() << "";
-      success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-      success_msg_writer() << "║           SAVE YOUR ELDERFIER SIGNING KEY                  ║";
-      success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+      success_msg_writer() << "  ── YOUR TESTIFIER SIGNING KEY ───────────────────────────";
       success_msg_writer() << "";
-      success_msg_writer() << "  Your signing secret key (SAVE THIS — shown only once):";
+      success_msg_writer() << "  Signing key:  " << Common::podToHex(signingSecKey);
       success_msg_writer() << "";
-      success_msg_writer() << "    " << Common::podToHex(signingSecKey);
+      success_msg_writer() << "  To run your Testifier signing node:";
       success_msg_writer() << "";
-      success_msg_writer() << "  To run your Elderfier signing node:";
+      success_msg_writer() << "    testnetd --testifier-key " << Common::podToHex(signingSecKey);
       success_msg_writer() << "";
-      success_msg_writer() << "    fuegod --elderfier-key " << Common::podToHex(signingSecKey);
+      success_msg_writer() << "  Derived from your wallet — view again via  elder_council";
       success_msg_writer() << "";
       success_msg_writer() << "  Your Elderfire burns bright.";
       success_msg_writer() << "  Guard the Realm well, " << alias << ".";

@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2026 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -40,6 +40,8 @@
 
 #include "../Logging/ConsoleLogger.h"
 #include "../Logging/LoggerManager.h"
+#include "../CryptoNoteCore/ElderfierSignatureBroadcaster.h"
+#include "../Common/StringTools.h"
 
 #if defined(WIN32)
 #include <crtdbg.h>
@@ -64,6 +66,7 @@ namespace
   const command_line::arg_descriptor<bool>        arg_console     = {"no-console", "Disable daemon console commands"};
     const command_line::arg_descriptor<bool>        arg_print_genesis_tx = { "print-genesis-tx", "Prints genesis' block tx hex to insert it to config and exits" };
     const command_line::arg_descriptor<bool>        arg_generate_new_genesis = { "generate-new-genesis", "Generates a new genesis block for testnet" };
+    const command_line::arg_descriptor<std::string> arg_testifier_key = {"testifier-key", "Secret signing key (hex) for Testifier merkle root signing.", ""};
 }
 
 bool command_line_preprocessor(const boost::program_options::variables_map& vm, LoggerRef& logger);
@@ -148,7 +151,7 @@ int main(int argc, char* argv[])
 
    command_line::add_arg(desc_cmd_sett, arg_print_genesis_tx);
       command_line::add_arg(desc_cmd_sett, arg_generate_new_genesis);
-      //command_line::add_arg(desc_cmd_sett, arg_genesis_block_reward_address);
+      command_line::add_arg(desc_cmd_sett, arg_testifier_key);
 
       RpcServerConfig::initOptions(desc_cmd_sett);
    CoreConfig::initOptions(desc_cmd_sett);
@@ -335,6 +338,35 @@ int main(int argc, char* argv[])
 
     logger(INFO) << "Core initialized OK";
 
+    // Initialize elderfier broadcaster if --testifier-key provided
+    std::unique_ptr<CryptoNote::ElderfierSignatureBroadcaster> elderfierBroadcaster;
+    {
+      std::string keyHex = command_line::get_arg(vm, arg_testifier_key);
+      if (!keyHex.empty()) {
+        if (keyHex.size() == 64) {
+          Crypto::SecretKey sigSec;
+          Crypto::PublicKey sigPub;
+          if (Common::podFromHex(keyHex, sigSec) && Crypto::secret_key_to_public_key(sigSec, sigPub)) {
+            logger(INFO, BRIGHT_CYAN) << "";
+            logger(INFO, BRIGHT_CYAN) << "========================================";
+            logger(INFO, BRIGHT_CYAN) << "  TESTIFIER SIGNING MODE (TESTNET)";
+            logger(INFO, BRIGHT_CYAN) << "========================================";
+            logger(INFO, BRIGHT_CYAN) << "  Signing pubkey: " << Common::podToHex(sigPub);
+            logger(INFO, BRIGHT_CYAN) << "========================================";
+            logger(INFO, BRIGHT_CYAN) << "";
+            elderfierBroadcaster = std::make_unique<CryptoNote::ElderfierSignatureBroadcaster>(ccore, p2psrv, &p2psrv);
+            elderfierBroadcaster->setSigningKeys(sigPub, sigSec);
+            elderfierBroadcaster->start();
+            logger(INFO, BRIGHT_GREEN) << "Testifier signature broadcaster started";
+          } else {
+            logger(ERROR, BRIGHT_RED) << "Invalid --testifier-key hex";
+          }
+        } else {
+          logger(ERROR, BRIGHT_RED) << "Invalid --testifier-key: must be 64 hex characters";
+        }
+      }
+    }
+
     // start components
     if (!command_line::has_arg(vm, arg_console)) {
       dch.start_handling();
@@ -382,6 +414,13 @@ int main(int argc, char* argv[])
     logger(INFO) << "p2p net loop stopped";
 
     dch.stop_handling();
+
+    // Stop elderfier signing before teardown
+    if (elderfierBroadcaster) {
+      logger(INFO) << "Stopping TESTIFIER broadcaster...";
+      elderfierBroadcaster->stop();
+      elderfierBroadcaster.reset();
+    }
 
     //stop components
     logger(INFO) << "Stopping core rpc server...";

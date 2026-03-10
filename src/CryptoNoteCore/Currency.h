@@ -539,7 +539,7 @@ public:
 
   // Money supply builders
   CurrencyBuilder& baseMoneySupply(uint64_t val) { m_currency.m_baseMoneySupply = val; return *this; }
-  CurrencyBuilder& ethernalXFG(uint64_t val) { m_currency.m_ethereal_xfg = val; return *this; }
+  CurrencyBuilder& etherealXfg(uint64_t val) { m_currency.m_ethereal_xfg = val; return *this; }
 
   // Network validation builder
   CurrencyBuilder& fuegoNetworkId(uint64_t val) { m_currency.m_fuegoNetworkId = val; return *this; }

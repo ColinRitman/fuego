@@ -5,27 +5,6 @@
 // Fuego is free software distributed under the GNU General Public License v3.
 // See file labeled LICENSE for more details.
 
-// #include "AdaptiveDifficulty.h"
-
-// MWLWMA implementation is in Currency.cpp::nextDifficultyV6()
-// This file is kept for build compatibility (CMakeLists references it).
-// Copyright (c) 2017-2025 Fuego Developers
-// Copyright (c) 2018-2019 Conceal Network & Conceal Devs
-// Copyright (c) 2016-2019 The Karbowanec developers
-// Copyright (c) 2012-2018 The CryptoNote developers
-//
-// This file is part of Fuego.
-//
-// Fuego is free software distributed in the hope that it
-// will be useful, but WITHOUT ANY WARRANTY; without even the
-// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
-// PURPOSE. You may redistribute it and/or modify it under the terms
-// of the GNU General Public License v3 or later versions as published
-// by the Free Software Foundation. Fuego includes elements written
-// by third parties. See file labeled LICENSE for more details.
-// You should have received a copy of the GNU General Public License
-// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
-
 #include "AdaptiveDifficulty.h"
 #include "../CryptoNoteConfig.h"
 #include <algorithm>
@@ -35,343 +14,385 @@
 
 namespace CryptoNote {
 
-    AdaptiveDifficulty::AdaptiveDifficulty(const DifficultyConfig& config)
-        : m_config(config) {
+// ============================================================================
+// DMWDA PARAMETER EPOCH TABLES
+//
+// To tune difficulty without a chain reset or major-version bump:
+//   1. Add a new entry to TESTNET_DMWDA_EPOCHS (or MAINNET_DMWDA_EPOCHS).
+//   2. Set activationHeight to a future block height on that network.
+//   3. Rebuild and deploy. Old blocks re-validate with their epoch's config.
+//
+// Epochs MUST be sorted by activationHeight ascending.
+// ============================================================================
+
+struct DmwdaEpoch {
+    uint32_t activationHeight;
+    AdaptiveDifficulty::DifficultyConfig config;
+};
+
+// ---------------------------------------------------------------------------
+// TESTNET epochs
+// ---------------------------------------------------------------------------
+static const DmwdaEpoch TESTNET_DMWDA_EPOCHS[] = {
+    {
+        // Epoch 0 — v10 genesis. Fixed-indexing DMWDA (uses recent blocks correctly).
+        // Tuned for single-miner testnet with bursty behaviour.
+        /* activationHeight */ 0,
+        {
+            /* targetTime                */ 480,
+            /* shortWindow               */ 8,
+            /* mediumWindow              */ 20,
+            /* longWindow                */ 45,
+            /* emergencyWindow           */ 5,
+            /* minAdjustment             */ 0.70,   // max 30% drop per block
+            /* maxAdjustment             */ 5.00,   // up to 5x rise per block
+            /* emergencyThreshold        */ 0.40,   // emergency clamp [0.4x, 2.5x]
+            /* smoothingFactor           */ 0.70,   // 70% new / 30% prev
+            /* weightShort               */ 0.60,   // volatile → trust recent
+            /* weightMedium              */ 0.30,   // fixed anchor
+            /* weightLong                */ 0.10,   // stable → smooth with history
+            /* confidenceMin             */ 0.10,
+            /* confidenceMax             */ 1.00,
+            /* defaultConfidence         */ 0.50,
+            /* recentWindowSize          */ 5,
+            /* historicalWindowSize      */ 20,
+            /* blockStealingCheckBlocks  */ 5,
+            /* blockStealingTimeThreshold*/ 0.10,   // <48s = "fast" block
+            /* blockStealingThreshold    */ 4,      // 4 of 5 fast blocks triggers
+            /* hashRateChangeThreshold   */ 5.0,
+        }
+    },
+    // Add future testnet epochs here, e.g.:
+    // { 5000, { 480, 10, 30, 60, 5, 0.75, 4.0, 0.40, 0.70, 0.55, 0.30, 0.15, 0.10, 1.0, 0.50, 5, 20, 5, 0.10, 4, 5.0 } },
+};
+
+// ---------------------------------------------------------------------------
+// MAINNET epochs
+// ---------------------------------------------------------------------------
+static const DmwdaEpoch MAINNET_DMWDA_EPOCHS[] = {
+    {
+        // Epoch 0 — activates at UPGRADE_HEIGHT_V10 (999999).
+        // Conservative multi-miner mainnet params.
+        /* activationHeight */ 0,
+        {
+            /* targetTime                */ 480,
+            /* shortWindow               */ parameters::DMWDA_SHORT_WINDOW,
+            /* mediumWindow              */ parameters::DMWDA_MEDIUM_WINDOW,
+            /* longWindow                */ parameters::DMWDA_LONG_WINDOW,
+            /* emergencyWindow           */ parameters::DMWDA_EMERGENCY_WINDOW,
+            /* minAdjustment             */ parameters::DMWDA_MIN_ADJUSTMENT,
+            /* maxAdjustment             */ parameters::DMWDA_MAX_ADJUSTMENT,
+            /* emergencyThreshold        */ parameters::DMWDA_EMERGENCY_THRESHOLD,
+            /* smoothingFactor           */ parameters::DMWDA_SMOOTHING_FACTOR,
+            /* weightShort               */ parameters::DMWDA_WEIGHT_SHORT,
+            /* weightMedium              */ parameters::DMWDA_WEIGHT_MEDIUM,
+            /* weightLong                */ parameters::DMWDA_WEIGHT_LONG,
+            /* confidenceMin             */ parameters::DMWDA_CONFIDENCE_MIN,
+            /* confidenceMax             */ parameters::DMWDA_CONFIDENCE_MAX,
+            /* defaultConfidence         */ parameters::DMWDA_DEFAULT_CONFIDENCE,
+            /* recentWindowSize          */ parameters::DMWDA_RECENT_WINDOW_SIZE,
+            /* historicalWindowSize      */ parameters::DMWDA_HISTORICAL_WINDOW_SIZE,
+            /* blockStealingCheckBlocks  */ parameters::DMWDA_BLOCK_STEALING_CHECK_BLOCKS,
+            /* blockStealingTimeThreshold*/ parameters::DMWDA_BLOCK_STEALING_TIME_THRESHOLD,
+            /* blockStealingThreshold    */ parameters::DMWDA_BLOCK_STEALING_THRESHOLD,
+            /* hashRateChangeThreshold   */ parameters::DMWDA_HASH_RATE_CHANGE_THRESHOLD,
+        }
+    },
+    // Add future mainnet epochs here.
+};
+
+// ---------------------------------------------------------------------------
+// Epoch lookup — returns config for the latest epoch whose activationHeight <= height
+// ---------------------------------------------------------------------------
+AdaptiveDifficulty::DifficultyConfig getDefaultFuegoConfig(bool testnet, uint32_t height) {
+    const DmwdaEpoch* epochs     = testnet ? TESTNET_DMWDA_EPOCHS : MAINNET_DMWDA_EPOCHS;
+    size_t            epochCount = testnet ? (sizeof(TESTNET_DMWDA_EPOCHS) / sizeof(TESTNET_DMWDA_EPOCHS[0]))
+                                           : (sizeof(MAINNET_DMWDA_EPOCHS) / sizeof(MAINNET_DMWDA_EPOCHS[0]));
+
+    // Walk backwards — pick the last epoch whose activationHeight <= height
+    const AdaptiveDifficulty::DifficultyConfig* active = &epochs[0].config;
+    for (size_t i = 0; i < epochCount; ++i) {
+        if (height >= epochs[i].activationHeight) {
+            active = &epochs[i].config;
+        }
+    }
+    return *active;
+}
+
+// ============================================================================
+// AdaptiveDifficulty implementation
+// ============================================================================
+
+AdaptiveDifficulty::AdaptiveDifficulty(const DifficultyConfig& config)
+    : m_config(config) {
+}
+
+uint64_t AdaptiveDifficulty::calculateNextDifficulty(
+    uint32_t height,
+    const std::vector<uint64_t>& timestamps,
+    const std::vector<uint64_t>& cumulativeDifficulties,
+    bool testnet) {
+
+    if (timestamps.size() < 3) {
+        return 10000;
     }
 
-    uint64_t AdaptiveDifficulty::calculateNextDifficulty(
-        uint32_t height,
-        const std::vector<uint64_t>& timestamps,
-        const std::vector<uint64_t>& cumulativeDifficulties,
-        bool testnet) {
-
-        // Early chain protection
-        if (timestamps.size() < 3) {
-            return 10000; // Minimum difficulty
-        }
-
-        // Check for emergency conditions
-        if (detectHashRateAnomaly(timestamps, cumulativeDifficulties, testnet)) {
-            return calculateEmergencyDifficulty(timestamps, cumulativeDifficulties);
-        }
-
-        // Check for block stealing attempts
-        if (detectBlockStealingAttempt(timestamps, cumulativeDifficulties, testnet)) {
-            return calculateEmergencyDifficulty(timestamps, cumulativeDifficulties);
-        }
-
-        // Use multi-window adaptive algorithm
-        return calculateMultiWindowDifficulty(timestamps, cumulativeDifficulties, testnet);
+    if (detectHashRateAnomaly(timestamps, cumulativeDifficulties, testnet)) {
+        return calculateEmergencyDifficulty(timestamps, cumulativeDifficulties, testnet);
     }
 
-    uint64_t AdaptiveDifficulty::calculateMultiWindowDifficulty(
-        const std::vector<uint64_t>& timestamps,
-        const std::vector<uint64_t>& cumulativeDifficulties,
-        bool testnet) {
-
-        // Calculate LWMA for different windows
-        double shortLWMA = calculateLWMA(timestamps, cumulativeDifficulties, m_config.shortWindow);
-        double mediumLWMA = calculateLWMA(timestamps, cumulativeDifficulties, m_config.mediumWindow);
-        double longLWMA = calculateLWMA(timestamps, cumulativeDifficulties, m_config.longWindow);
-
-        // Calculate EMA for trend analysis (currently unused but available for future enhancements)
-        // double shortEMA = calculateEMA(timestamps, m_config.shortWindow, 0.2);
-        // double mediumEMA = calculateEMA(timestamps, m_config.mediumWindow, 0.1);
-
-        // Weighted combination based on confidence
-        double confidence = calculateConfidenceScore(timestamps, cumulativeDifficulties, testnet);
-
-        // Adaptive weighting based on network conditions
-        double shortWeight = (testnet ? CryptoNote::TESTNET_DMWDA_WEIGHT_SHORT : CryptoNote::parameters::DMWDA_WEIGHT_SHORT) * confidence;
-        double mediumWeight = (testnet ? CryptoNote::TESTNET_DMWDA_WEIGHT_MEDIUM : CryptoNote::parameters::DMWDA_WEIGHT_MEDIUM) * confidence;
-        double longWeight = (testnet ? CryptoNote::TESTNET_DMWDA_WEIGHT_LONG : CryptoNote::parameters::DMWDA_WEIGHT_LONG) * (1.0 - confidence);
-
-        // Calculate weighted average solve time
-        double weightedSolveTime = (shortLWMA * shortWeight +
-                                   mediumLWMA * mediumWeight +
-                                   longLWMA * longWeight) /
-                                   (shortWeight + mediumWeight + longWeight);
-
-        // Calculate current average difficulty
-        uint32_t effectiveWindow = std::min(static_cast<uint32_t>(timestamps.size() - 1), m_config.mediumWindow);
-
-        // Prevent division by zero
-        if (effectiveWindow == 0) {
-            return 10000; // Minimum difficulty
-        }
-
-        uint64_t avgDifficulty = (cumulativeDifficulties[effectiveWindow] - cumulativeDifficulties[0]) / effectiveWindow;
-
-        // Calculate new difficulty
-        if (weightedSolveTime <= 0.0) {
-            return 10000; // Minimum difficulty for invalid solve time
-        }
-
-        // Additional safety check: prevent extremely small solve times that could cause overflow
-        if (weightedSolveTime < m_config.targetTime / 1000.0) {
-            weightedSolveTime = m_config.targetTime / 1000.0;
-        }
-
-        double difficultyRatio = static_cast<double>(m_config.targetTime) / weightedSolveTime;
-
-        // Apply bounds - use more conservative bounds to prevent extreme values
-        difficultyRatio = std::max(m_config.minAdjustment,
-                                  std::min(m_config.maxAdjustment, difficultyRatio));
-
-        // Additional safety check: prevent extreme difficulty ratios
-        if (difficultyRatio > 1000.0) {
-            difficultyRatio = 1000.0;
-        }
-
-        // Prevent overflow in multiplication
-        double calculatedDifficulty = static_cast<double>(avgDifficulty) * difficultyRatio;
-
-        // Additional safety check: prevent extreme calculated difficulties
-        if (calculatedDifficulty > static_cast<double>(avgDifficulty) * 1000.0) {
-            calculatedDifficulty = static_cast<double>(avgDifficulty) * 1000.0;
-        }
-
-        // Clamp to prevent overflow
-        if (calculatedDifficulty > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
-            calculatedDifficulty = static_cast<double>(std::numeric_limits<uint64_t>::max());
-        }
-
-        uint64_t newDifficulty = static_cast<uint64_t>(calculatedDifficulty);
-
-        // Apply smoothing to prevent oscillations
-        if (timestamps.size() > 1) {
-            uint64_t prevDifficulty = cumulativeDifficulties[effectiveWindow] - cumulativeDifficulties[effectiveWindow - 1];
-            newDifficulty = applySmoothing(newDifficulty, prevDifficulty, testnet);
-        }
-
-        // Minimum difficulty protection
-        return std::max(static_cast<uint64_t>(10000), newDifficulty);
+    if (detectBlockStealingAttempt(timestamps, cumulativeDifficulties, testnet)) {
+        return calculateEmergencyDifficulty(timestamps, cumulativeDifficulties, testnet);
     }
 
-    double AdaptiveDifficulty::calculateLWMA(
-        const std::vector<uint64_t>& timestamps,
-        const std::vector<uint64_t>& cumulativeDifficulties,
-        uint32_t windowSize) {
+    return calculateMultiWindowDifficulty(timestamps, cumulativeDifficulties, testnet);
+}
 
-        uint32_t effectiveWindow = std::min(static_cast<uint32_t>(timestamps.size() - 1), windowSize);
+uint64_t AdaptiveDifficulty::calculateMultiWindowDifficulty(
+    const std::vector<uint64_t>& timestamps,
+    const std::vector<uint64_t>& cumulativeDifficulties,
+    bool testnet) {
 
-        // Safety check: prevent excessive window sizes that could cause overflow
-        if (effectiveWindow > 200) {
-            effectiveWindow = 200;
-        }
+    size_t n = timestamps.size();
 
-        double weightedSum = 0.0;
-        double weightSum = 0.0;
+    double shortLWMA  = calculateLWMA(timestamps, cumulativeDifficulties, m_config.shortWindow);
+    double mediumLWMA = calculateLWMA(timestamps, cumulativeDifficulties, m_config.mediumWindow);
+    double longLWMA   = calculateLWMA(timestamps, cumulativeDifficulties, m_config.longWindow);
 
-        for (uint32_t i = 1; i <= effectiveWindow; ++i) {
-            int64_t solveTime = static_cast<int64_t>(timestamps[i]) - static_cast<int64_t>(timestamps[i - 1]);
+    double confidence = calculateConfidenceScore(timestamps, cumulativeDifficulties, testnet);
 
-            // Clamp solve time to prevent manipulation and overflow
-            solveTime = std::max(static_cast<int64_t>(m_config.targetTime / 10),
-                                std::min(static_cast<int64_t>(m_config.targetTime * 10), solveTime));
+    // Low confidence (volatile) → more weight on short window (recent data).
+    // High confidence (stable)  → more weight on long window  (smooth history).
+    double shortWeight  = m_config.weightShort  * (1.0 - confidence);
+    double mediumWeight = m_config.weightMedium;
+    double longWeight   = m_config.weightLong   * confidence;
 
-            double weight = static_cast<double>(i);
+    double totalWeight = shortWeight + mediumWeight + longWeight;
+    if (totalWeight <= 0.0) totalWeight = 1.0;
 
-            // Prevent overflow in weighted sum calculation
-            double weightedContribution = static_cast<double>(solveTime) * weight;
-            if (weightedContribution > 1e15) {
-                weightedContribution = 1e15; // Cap to prevent overflow
-            }
+    double weightedSolveTime = (shortLWMA * shortWeight + mediumLWMA * mediumWeight + longLWMA * longWeight)
+                               / totalWeight;
 
-            weightedSum += weightedContribution;
-            weightSum += weight;
-        }
+    // avgDifficulty: most recent mediumWindow blocks (end of array = newest).
+    uint32_t effectiveWindow = std::min(static_cast<uint32_t>(n - 1), m_config.mediumWindow);
+    if (effectiveWindow == 0) return 10000;
 
-        // Prevent division by zero
-        if (weightSum == 0.0) {
-            return static_cast<double>(m_config.targetTime);
-        }
+    uint64_t avgDifficulty = (cumulativeDifficulties[n - 1] - cumulativeDifficulties[n - 1 - effectiveWindow])
+                             / effectiveWindow;
+    if (avgDifficulty < 10000) avgDifficulty = 10000;
 
-        double lwma = weightedSum / weightSum;
-
-        // Additional safety check: prevent extremely small LWMA values that could cause overflow
-        if (lwma < m_config.targetTime / 100.0) {
-            lwma = m_config.targetTime / 100.0;
-        }
-
-        return lwma;
+    if (weightedSolveTime < m_config.targetTime / 1000.0) {
+        weightedSolveTime = m_config.targetTime / 1000.0;
     }
 
-    double AdaptiveDifficulty::calculateEMA(
-        const std::vector<uint64_t>& timestamps,
-        uint32_t windowSize,
-        double alpha) {
+    double difficultyRatio = static_cast<double>(m_config.targetTime) / weightedSolveTime;
+    difficultyRatio = std::max(m_config.minAdjustment, std::min(m_config.maxAdjustment, difficultyRatio));
 
-        uint32_t effectiveWindow = std::min(static_cast<uint32_t>(timestamps.size() - 1), windowSize);
-
-        if (effectiveWindow == 0) return static_cast<double>(m_config.targetTime);
-
-        double ema = static_cast<double>(timestamps[1] - timestamps[0]);
-
-        for (uint32_t i = 2; i <= effectiveWindow; ++i) {
-            int64_t solveTime = static_cast<int64_t>(timestamps[i]) - static_cast<int64_t>(timestamps[i - 1]);
-            solveTime = std::max(static_cast<int64_t>(m_config.targetTime / 10),
-                               std::min(static_cast<int64_t>(m_config.targetTime * 10), solveTime));
-
-            ema = alpha * solveTime + (1.0 - alpha) * ema;
-        }
-
-        return ema;
+    double calculatedDifficulty = static_cast<double>(avgDifficulty) * difficultyRatio;
+    if (calculatedDifficulty > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+        calculatedDifficulty = static_cast<double>(std::numeric_limits<uint64_t>::max());
     }
 
-    uint64_t AdaptiveDifficulty::calculateEmergencyDifficulty(
-        const std::vector<uint64_t>& timestamps,
-        const std::vector<uint64_t>& cumulativeDifficulties) {
+    uint64_t newDifficulty = static_cast<uint64_t>(calculatedDifficulty);
 
-        uint32_t emergencyWindow = std::min(static_cast<uint32_t>(timestamps.size() - 1), m_config.emergencyWindow);
-
-        if (emergencyWindow == 0) return 10000;
-
-        // Calculate recent solve time
-        double recentSolveTime = static_cast<double>(timestamps[emergencyWindow] - timestamps[0]) / emergencyWindow;
-
-        if (recentSolveTime <= 0.0) {
-            return 10000; // Minimum difficulty for invalid solve time
-        }
-
-        // Calculate current difficulty
-        uint64_t currentDifficulty = (cumulativeDifficulties[emergencyWindow] - cumulativeDifficulties[0]) / emergencyWindow;
-
-        // Emergency adjustment
-        double emergencyRatio = static_cast<double>(m_config.targetTime) / recentSolveTime;
-
-        // Apply emergency bounds
-        emergencyRatio = std::max(m_config.emergencyThreshold,
-                                 std::min(1.0 / m_config.emergencyThreshold, emergencyRatio));
-
-        // Prevent overflow in emergency calculation
-        double emergencyDifficultyCalc = static_cast<double>(currentDifficulty) * emergencyRatio;
-
-        // Clamp to prevent overflow
-        if (emergencyDifficultyCalc > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
-            emergencyDifficultyCalc = static_cast<double>(std::numeric_limits<uint64_t>::max());
-        }
-
-        uint64_t emergencyDifficulty = static_cast<uint64_t>(emergencyDifficultyCalc);
-
-        return std::max(static_cast<uint64_t>(10000), emergencyDifficulty);
+    // Smooth against most recent block's actual difficulty.
+    if (n >= 2) {
+        uint64_t prevDifficulty = cumulativeDifficulties[n - 1] - cumulativeDifficulties[n - 2];
+        newDifficulty = applySmoothing(newDifficulty, prevDifficulty, testnet);
     }
 
-    bool AdaptiveDifficulty::detectHashRateAnomaly(
-        const std::vector<uint64_t>& timestamps,
-        const std::vector<uint64_t>& difficulties,
-        bool testnet) {
+    return std::max(static_cast<uint64_t>(10000), newDifficulty);
+}
 
-        if (timestamps.size() < 5) return false;
+double AdaptiveDifficulty::calculateLWMA(
+    const std::vector<uint64_t>& timestamps,
+    const std::vector<uint64_t>& cumulativeDifficulties,
+    uint32_t windowSize) {
 
-        // Calculate recent vs historical solve times
-        uint32_t recentWindow = std::min(testnet ? CryptoNote::TESTNET_DMWDA_RECENT_WINDOW_SIZE : CryptoNote::parameters::DMWDA_RECENT_WINDOW_SIZE, static_cast<uint32_t>(timestamps.size() - 1));
-        uint32_t historicalWindow = std::min(testnet ? CryptoNote::TESTNET_DMWDA_HISTORICAL_WINDOW_SIZE : CryptoNote::parameters::DMWDA_HISTORICAL_WINDOW_SIZE, static_cast<uint32_t>(timestamps.size() - 1));
+    size_t   n               = timestamps.size();
+    uint32_t effectiveWindow = std::min(static_cast<uint32_t>(n - 1), windowSize);
+    if (effectiveWindow > 200) effectiveWindow = 200;
+    if (effectiveWindow == 0)  return static_cast<double>(m_config.targetTime);
 
-        double recentSolveTime = static_cast<double>(timestamps[recentWindow] - timestamps[0]) / recentWindow;
-        double historicalSolveTime = static_cast<double>(timestamps[historicalWindow] - timestamps[historicalWindow - recentWindow]) / recentWindow;
+    // Use MOST RECENT effectiveWindow blocks (end of array = newest).
+    size_t startIdx = n - 1 - effectiveWindow;
 
-        // Detect if recent solve time is significantly different
-        double ratio = recentSolveTime / historicalSolveTime;
+    double weightedSum = 0.0;
+    double weightSum   = 0.0;
 
-        double threshold = testnet ? CryptoNote::TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD : CryptoNote::parameters::DMWDA_HASH_RATE_CHANGE_THRESHOLD;
-        return (ratio < (1.0 / threshold) || ratio > threshold); // Configurable change threshold
+    for (uint32_t j = 0; j < effectiveWindow; ++j) {
+        size_t  idx       = startIdx + 1 + j;
+        int64_t solveTime = static_cast<int64_t>(timestamps[idx]) - static_cast<int64_t>(timestamps[idx - 1]);
+
+        // Clamp: min=T/10, max=T*3.  T*3 limit prevents long offline gaps from
+        // poisoning the window (old code used T*10 = 80 min which was too much).
+        solveTime = std::max(static_cast<int64_t>(m_config.targetTime / 10),
+                             std::min(static_cast<int64_t>(m_config.targetTime * 3), solveTime));
+
+        // LWMA-1 increasing weight: oldest=1, newest=effectiveWindow.
+        double weight  = static_cast<double>(j + 1);
+        weightedSum   += static_cast<double>(solveTime) * weight;
+        weightSum     += weight;
     }
 
-    bool AdaptiveDifficulty::detectBlockStealingAttempt(
-        const std::vector<uint64_t>& timestamps,
-        const std::vector<uint64_t>& difficulties,
-        bool testnet) {
+    if (weightSum == 0.0) return static_cast<double>(m_config.targetTime);
 
-        if (timestamps.size() < 3) return false;
+    double lwma = weightedSum / weightSum;
+    if (lwma < m_config.targetTime / 100.0) lwma = m_config.targetTime / 100.0;
+    return lwma;
+}
 
-        // Detect suspiciously fast consecutive blocks
-        uint32_t fastBlockCount = 0;
-        uint32_t checkBlocks = std::min(CryptoNote::parameters::DMWDA_BLOCK_STEALING_CHECK_BLOCKS, static_cast<uint32_t>(timestamps.size() - 1));
+double AdaptiveDifficulty::calculateEMA(
+    const std::vector<uint64_t>& timestamps,
+    uint32_t windowSize,
+    double alpha) {
 
-        for (size_t i = 1; i <= checkBlocks; ++i) {
-            int64_t solveTime = static_cast<int64_t>(timestamps[i]) - static_cast<int64_t>(timestamps[i - 1]);
+    size_t   n               = timestamps.size();
+    uint32_t effectiveWindow = std::min(static_cast<uint32_t>(n - 1), windowSize);
+    if (effectiveWindow == 0) return static_cast<double>(m_config.targetTime);
 
-            // If blocks are coming too fast (configurable threshold)
-            double timeThreshold = testnet ? CryptoNote::TESTNET_DMWDA_BLOCK_STEALING_TIME_THRESHOLD : CryptoNote::parameters::DMWDA_BLOCK_STEALING_TIME_THRESHOLD;
-            if (solveTime < static_cast<int64_t>(m_config.targetTime * timeThreshold)) {
-                fastBlockCount++;
-            }
-        }
+    size_t startIdx = n - 1 - effectiveWindow;
 
-        // Trigger if more than threshold blocks are suspiciously fast
-        return fastBlockCount >= (testnet ? CryptoNote::TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD : CryptoNote::parameters::DMWDA_BLOCK_STEALING_THRESHOLD);
+    double ema = static_cast<double>(timestamps[startIdx + 1] - timestamps[startIdx]);
+    for (uint32_t j = 1; j < effectiveWindow; ++j) {
+        size_t  idx       = startIdx + 1 + j;
+        int64_t solveTime = static_cast<int64_t>(timestamps[idx]) - static_cast<int64_t>(timestamps[idx - 1]);
+        solveTime = std::max(static_cast<int64_t>(m_config.targetTime / 10),
+                             std::min(static_cast<int64_t>(m_config.targetTime * 10), solveTime));
+        ema = alpha * static_cast<double>(solveTime) + (1.0 - alpha) * ema;
+    }
+    return ema;
+}
+
+uint64_t AdaptiveDifficulty::calculateEmergencyDifficulty(
+    const std::vector<uint64_t>& timestamps,
+    const std::vector<uint64_t>& cumulativeDifficulties,
+    bool testnet) {
+
+    size_t   n               = timestamps.size();
+    uint32_t emergencyWindow = std::min(static_cast<uint32_t>(n - 1), m_config.emergencyWindow);
+    if (emergencyWindow == 0) return 10000;
+
+    // Most recent emergencyWindow blocks.
+    size_t startIdx = n - 1 - emergencyWindow;
+
+    double recentSolveTime = static_cast<double>(timestamps[n - 1] - timestamps[startIdx]) / emergencyWindow;
+    if (recentSolveTime <= 0.0) return 10000;
+
+    uint64_t currentDifficulty = (cumulativeDifficulties[n - 1] - cumulativeDifficulties[startIdx]) / emergencyWindow;
+    if (currentDifficulty < 10000) currentDifficulty = 10000;
+
+    double emergencyRatio = static_cast<double>(m_config.targetTime) / recentSolveTime;
+    emergencyRatio = std::max(m_config.emergencyThreshold,
+                              std::min(1.0 / m_config.emergencyThreshold, emergencyRatio));
+
+    double calc = static_cast<double>(currentDifficulty) * emergencyRatio;
+    if (calc > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+        calc = static_cast<double>(std::numeric_limits<uint64_t>::max());
     }
 
-    uint64_t AdaptiveDifficulty::applySmoothing(uint64_t newDifficulty, uint64_t previousDifficulty, bool testnet) {
-        // Apply exponential smoothing to prevent oscillations
-        double alpha = testnet ? CryptoNote::TESTNET_DMWDA_SMOOTHING_FACTOR : CryptoNote::parameters::DMWDA_SMOOTHING_FACTOR; // Smoothing factor
+    uint64_t emergencyDiff = static_cast<uint64_t>(calc);
 
-        // Prevent overflow by using double precision arithmetic
-        double smoothed = alpha * static_cast<double>(newDifficulty) +
-                         (1.0 - alpha) * static_cast<double>(previousDifficulty);
-
-        // Clamp to prevent overflow
-        if (smoothed > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
-            return std::numeric_limits<uint64_t>::max();
-        }
-
-        return static_cast<uint64_t>(smoothed);
+    // Smooth in emergency path too — prevents giant single-block swings.
+    if (n >= 2) {
+        uint64_t prevDiff = cumulativeDifficulties[n - 1] - cumulativeDifficulties[n - 2];
+        emergencyDiff = applySmoothing(emergencyDiff, prevDiff, testnet);
     }
 
-    double AdaptiveDifficulty::calculateConfidenceScore(
-        const std::vector<uint64_t>& timestamps,
-        const std::vector<uint64_t>& difficulties,
-        bool testnet) {
+    return std::max(static_cast<uint64_t>(10000), emergencyDiff);
+}
 
-        if (timestamps.size() < 3) return testnet ? CryptoNote::TESTNET_DMWDA_DEFAULT_CONFIDENCE : CryptoNote::parameters::DMWDA_DEFAULT_CONFIDENCE;
+bool AdaptiveDifficulty::detectHashRateAnomaly(
+    const std::vector<uint64_t>& timestamps,
+    const std::vector<uint64_t>& difficulties,
+    bool testnet) {
 
-        // Calculate coefficient of variation for solve times
-        std::vector<double> solveTimes;
-        for (size_t i = 1; i < timestamps.size(); ++i) {
-            solveTimes.push_back(static_cast<double>(timestamps[i] - timestamps[i - 1]));
+    size_t n = timestamps.size();
+    if (n < 5) return false;
+
+    uint32_t recentW = std::min(m_config.recentWindowSize,    static_cast<uint32_t>(n - 1));
+    uint32_t histW   = std::min(m_config.historicalWindowSize, static_cast<uint32_t>(n - 1));
+
+    if (histW <= recentW) return false;
+
+    // Recent = last recentW blocks; historical = the period just before that.
+    double recentSolveTime     = static_cast<double>(timestamps[n - 1] - timestamps[n - 1 - recentW]) / recentW;
+    double historicalSolveTime = static_cast<double>(timestamps[n - 1 - recentW] - timestamps[n - 1 - histW])
+                                 / static_cast<double>(histW - recentW);
+
+    if (historicalSolveTime <= 0.0) return false;
+
+    double ratio = recentSolveTime / historicalSolveTime;
+    return (ratio < 1.0 / m_config.hashRateChangeThreshold || ratio > m_config.hashRateChangeThreshold);
+}
+
+bool AdaptiveDifficulty::detectBlockStealingAttempt(
+    const std::vector<uint64_t>& timestamps,
+    const std::vector<uint64_t>& difficulties,
+    bool testnet) {
+
+    size_t n = timestamps.size();
+    if (n < 3) return false;
+
+    uint32_t checkBlocks = std::min(m_config.blockStealingCheckBlocks, static_cast<uint32_t>(n - 1));
+    uint32_t fastCount   = 0;
+
+    // Check MOST RECENT checkBlocks blocks.
+    for (size_t i = n - checkBlocks; i < n; ++i) {
+        int64_t solveTime = static_cast<int64_t>(timestamps[i]) - static_cast<int64_t>(timestamps[i - 1]);
+        if (solveTime < static_cast<int64_t>(m_config.targetTime * m_config.blockStealingTimeThreshold)) {
+            ++fastCount;
         }
-
-        double mean = std::accumulate(solveTimes.begin(), solveTimes.end(), 0.0) / solveTimes.size();
-        double variance = 0.0;
-
-        for (double solveTime : solveTimes) {
-            variance += (solveTime - mean) * (solveTime - mean);
-        }
-        variance /= solveTimes.size();
-
-        double coefficientOfVariation = std::sqrt(variance) / mean;
-
-        // Convert to confidence score (lower variation = higher confidence)
-        return std::max(testnet ? CryptoNote::TESTNET_DMWDA_CONFIDENCE_MIN : CryptoNote::parameters::DMWDA_CONFIDENCE_MIN,
-                       std::min(testnet ? CryptoNote::TESTNET_DMWDA_CONFIDENCE_MAX : CryptoNote::parameters::DMWDA_CONFIDENCE_MAX, 1.0 - coefficientOfVariation));
     }
 
-    AdaptiveDifficulty::DifficultyConfig getDefaultFuegoConfig(bool testnet) {
-        AdaptiveDifficulty::DifficultyConfig config;
-        config.targetTime = CryptoNote::parameters::DIFFICULTY_TARGET; // 480 seconds
+    return fastCount >= m_config.blockStealingThreshold;
+}
 
-        if (testnet) {
-            // Use testnet-specific DMWDA parameters
-            config.shortWindow = CryptoNote::TESTNET_DMWDA_SHORT_WINDOW;    // Rapid response
-            config.mediumWindow = CryptoNote::TESTNET_DMWDA_MEDIUM_WINDOW;   // Current window
-            config.longWindow = CryptoNote::TESTNET_DMWDA_LONG_WINDOW;    // Trend analysis
-            config.minAdjustment = CryptoNote::TESTNET_DMWDA_MIN_ADJUSTMENT; // 50% minimum change
-            config.maxAdjustment = CryptoNote::TESTNET_DMWDA_MAX_ADJUSTMENT; // 400% maximum change
-            config.emergencyThreshold = CryptoNote::TESTNET_DMWDA_EMERGENCY_THRESHOLD; // 10% emergency threshold
-            config.emergencyWindow = CryptoNote::TESTNET_DMWDA_EMERGENCY_WINDOW; // Emergency response window
-        } else {
-            // Use mainnet DMWDA parameters
-            config.shortWindow = CryptoNote::parameters::DMWDA_SHORT_WINDOW;    // Rapid response
-            config.mediumWindow = CryptoNote::parameters::DMWDA_MEDIUM_WINDOW;   // Current window
-            config.longWindow = CryptoNote::parameters::DMWDA_LONG_WINDOW;    // Trend analysis
-            config.minAdjustment = CryptoNote::parameters::DMWDA_MIN_ADJUSTMENT; // 50% minimum change
-            config.maxAdjustment = CryptoNote::parameters::DMWDA_MAX_ADJUSTMENT; // 400% maximum change
-            config.emergencyThreshold = CryptoNote::parameters::DMWDA_EMERGENCY_THRESHOLD; // 10% emergency threshold
-            config.emergencyWindow = CryptoNote::parameters::DMWDA_EMERGENCY_WINDOW; // Emergency response window
-        }
+uint64_t AdaptiveDifficulty::applySmoothing(uint64_t newDifficulty, uint64_t previousDifficulty, bool testnet) {
+    double alpha    = m_config.smoothingFactor;
+    double smoothed = alpha * static_cast<double>(newDifficulty)
+                    + (1.0 - alpha) * static_cast<double>(previousDifficulty);
 
-        return config;
+    if (smoothed > static_cast<double>(std::numeric_limits<uint64_t>::max())) {
+        return std::numeric_limits<uint64_t>::max();
     }
+    return static_cast<uint64_t>(smoothed);
+}
+
+double AdaptiveDifficulty::calculateConfidenceScore(
+    const std::vector<uint64_t>& timestamps,
+    const std::vector<uint64_t>& difficulties,
+    bool testnet) {
+
+    size_t n = timestamps.size();
+    if (n < 3) return m_config.defaultConfidence;
+
+    // Use most recent 15 blocks for confidence — old data shouldn't affect variance measure.
+    size_t windowForConfidence = std::min(static_cast<size_t>(15), n - 1);
+    size_t startIdx            = n - 1 - windowForConfidence;
+
+    std::vector<double> solveTimes;
+    solveTimes.reserve(windowForConfidence);
+    for (size_t i = startIdx + 1; i < n; ++i) {
+        solveTimes.push_back(static_cast<double>(timestamps[i] - timestamps[i - 1]));
+    }
+
+    if (solveTimes.empty()) return m_config.defaultConfidence;
+
+    double mean = std::accumulate(solveTimes.begin(), solveTimes.end(), 0.0) / solveTimes.size();
+    if (mean <= 0.0) return m_config.confidenceMin;
+
+    double variance = 0.0;
+    for (double st : solveTimes) {
+        variance += (st - mean) * (st - mean);
+    }
+    variance /= solveTimes.size();
+
+    // Low CV → stable → high confidence. High CV → volatile → low confidence.
+    double cv         = std::sqrt(variance) / mean;
+    double confidence = 1.0 - std::min(1.0, cv);
+
+    return std::max(m_config.confidenceMin, std::min(m_config.confidenceMax, confidence));
+}
 
 } // namespace CryptoNote

@@ -125,7 +125,7 @@ std::error_code getViewKey(std::string &viewSecretKey);
   std::error_code getDynamicSupplyOverview(GetDynamicSupplyOverview::Response &response);
   std::error_code getBaseMoneySupply(uint64_t &baseMoneySupply);
   std::error_code getCirculatingSupply(uint64_t &circulatingSupply);
-  std::error_code getEternalFlame(uint64_t &ethernalXFG);
+  std::error_code getEternalFlame(uint64_t &ethereal_xfg);
   std::error_code getTotalRebornXfg(uint64_t &totalRebornXfg);
   std::error_code getBurnPercentage(double &burnPercentage);
   std::error_code getRebornPercentage(double &rebornPercentage);

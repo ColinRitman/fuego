@@ -340,29 +340,9 @@ namespace CryptoNote
 
  	// TESTNET DMWDA parameters
 //--------------------------------------------------------------------------------------------------------------------------
- 		const uint32_t TESTNET_DMWDA_SHORT_WINDOW                            = 15;   // Rapid response window (smaller = snappier)
- 		const uint32_t TESTNET_DMWDA_MEDIUM_WINDOW                           = 45;   // Stability anchor
- 		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 90;   // Trend window (capped by difficulty data window anyway)
- 		const uint32_t TESTNET_DMWDA_EMERGENCY_WINDOW                        = 5;    // Emergency response window
- 		const double   TESTNET_DMWDA_MIN_ADJUSTMENT                          = 0.65; // Max 35% drop per block — prevents instant floor crash
- 		const double   TESTNET_DMWDA_MAX_ADJUSTMENT                          = 4.0;  // Max 4x increase per block — faster recovery from low floor
- 		const double   TESTNET_DMWDA_EMERGENCY_THRESHOLD                     = 0.35; // Emergency clamp [0.35x, 2.86x] — tighter than before
- 		const double   TESTNET_DMWDA_SMOOTHING_FACTOR                        = 0.65; // 65% new / 35% old — damp oscillation vs 80% which overshot
- 		const double   TESTNET_DMWDA_CONFIDENCE_MIN                          = 0.2;  // Minimum confidence score
- 		const double   TESTNET_DMWDA_CONFIDENCE_MAX                          = 1.0;  // Maximum confidence score
- 	    const double   TESTNET_DMWDA_DEFAULT_CONFIDENCE                      = 0.5;  // Default confidence score
-
-    const double   TESTNET_DMWDA_WEIGHT_SHORT                            = 0.5;  // 50% short window weight (responsive)
- 	const double   TESTNET_DMWDA_WEIGHT_MEDIUM                           = 0.35; // 35% medium
- 	const double   TESTNET_DMWDA_WEIGHT_LONG                             = 0.15; // 15% long (trend dampening)
- 	const double   TESTNET_DMWDA_ADJUSTMENT_RANGE                        = 0.33;  // Adjustment range for confidence-based bounds
- 	const uint32_t TESTNET_DMWDA_RECENT_WINDOW_SIZE                      = 5;    // Recent window size for anomaly detection
- 	const uint32_t TESTNET_DMWDA_HISTORICAL_WINDOW_SIZE                  = 20;   // Historical window size for anomaly detection
- 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_CHECK_BLOCKS             = 5;    // Number of blocks to check for stealing attempts
- 	const double   TESTNET_DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.15; // 15% of target = 72s threshold (was 38s — too many false positives)
-
- 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD                = 3;    // Need 3 of 5 fast blocks to trigger (was 2 — too sensitive)
-    const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 6.0;  // Hash rate change threshold (was 8.0)
+ 	// TESTNET DMWDA params are now defined in AdaptiveDifficulty.cpp epoch tables.
+ 	// To tune: add a new DmwdaEpoch row to TESTNET_DMWDA_EPOCHS with the desired
+ 	// activationHeight. No chain reset required for param-only changes.
 
  	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 

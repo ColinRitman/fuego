@@ -251,25 +251,23 @@ struct DepositSecretPayload {
 #pragma pack(pop)
 static_assert(sizeof(DepositSecretPayload) == 45, "DepositSecretPayload size mismatch");
 
-// On-chain representation: raw encrypted bytes.
+// On-chain representation: ephemeral pubkey (32) + encrypted payload (45) = 77 bytes.
 // Node stores without decrypting; only the owning wallet can read.
 struct TransactionExtraDepositSecret {
+  Crypto::PublicKey ephPubKey;            // one-time key for ECDH
   std::vector<uint8_t> encryptedPayload; // exactly 45 bytes (sizeof DepositSecretPayload)
 };
 
-// Encrypt a DepositSecretPayload into TransactionExtraDepositSecret.
-// Encryption: chacha8(key=ECDH(recipientViewPub, txSecKey), iv=txPubKey[0:8])
-// The txPubKey is already in tx_extra (0x01) so no extra on-chain data needed.
+// Encrypt a DepositSecretPayload for the wallet owner.
+// Generates an ephemeral keypair internally — no tx secret key needed.
+// Encryption: chacha8(key=ECDH(recipientViewPub, ephSecKey), iv=ephPubKey[0:8])
 bool encryptDepositSecret(const DepositSecretPayload& plaintext,
                           const Crypto::PublicKey& recipientViewPubKey,
-                          const Crypto::SecretKey& txSecKey,
-                          const Crypto::PublicKey& txPubKey,
                           TransactionExtraDepositSecret& out);
 
 // Decrypt a TransactionExtraDepositSecret using the wallet's view key.
-// txPubKey is recovered from TX_EXTRA_TAG_PUBKEY (already in tx_extra).
+// Uses the embedded ephPubKey for ECDH — no tx pubkey needed.
 bool decryptDepositSecret(const TransactionExtraDepositSecret& encrypted,
-                          const Crypto::PublicKey& txPubKey,
                           const Crypto::SecretKey& walletViewSecKey,
                           DepositSecretPayload& out);
 
