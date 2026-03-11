@@ -137,7 +137,7 @@ namespace CryptoNote
     bool elder_council(const std::vector<std::string> &args); // fier_panel
 
     // Sub-address commands
-    bool new_sub(const std::vector<std::string> &args);
+    bool gen_new_sub(const std::vector<std::string> &args);
     bool list_subs(const std::vector<std::string> &args);
 
     bool ask_wallet_create_if_needed();

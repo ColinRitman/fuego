@@ -558,7 +558,7 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // Hidden command — empty usage string keeps it out of help output.
   // Only shows content to registered Elderfiers.
   m_consoleHandler.setHandler("elder_council", boost::bind(&simple_wallet::elder_council, this, boost::arg<1>()), "");
-  m_consoleHandler.setHandler("new_sub", boost::bind(&simple_wallet::new_sub, this, boost::arg<1>()), "new_sub [major] [minor] - Generate a sub-address at index (major, minor). Omit args for auto-increment (0, N).");
+  m_consoleHandler.setHandler("gen_new_sub", boost::bind(&simple_wallet::gen_new_sub, this, boost::arg<1>()), "gen_new_sub [major] [minor] - Generate a sub-address at index (major, minor). Omit args for auto-increment (0, N).");
   m_consoleHandler.setHandler("list_subs", boost::bind(&simple_wallet::list_subs, this, boost::arg<1>()), "list_subs - List all sub-addresses for this wallet");
 }
 
@@ -3896,7 +3896,7 @@ void simple_wallet::saveSubAddresses() const {
 }
 
 //----------------------------------------------------------------------------------------------------
-bool simple_wallet::new_sub(const std::vector<std::string>& args) {
+bool simple_wallet::gen_new_sub(const std::vector<std::string>& args) {
   // Determine index.
   uint32_t major = 0;
   uint32_t minor = 0;
@@ -3906,11 +3906,11 @@ bool simple_wallet::new_sub(const std::vector<std::string>& args) {
       major = static_cast<uint32_t>(std::stoul(args[0]));
       minor = static_cast<uint32_t>(std::stoul(args[1]));
     } catch (...) {
-      fail_msg_writer() << "Usage: new_sub [major] [minor]";
+      fail_msg_writer() << "Usage: gen_new_sub [major] [minor]";
       return true;
     }
   } else if (args.size() == 1) {
-    fail_msg_writer() << "Usage: new_sub [major] [minor]  (provide both or neither)";
+    fail_msg_writer() << "Usage: gen_new_sub [major] [minor]  (provide both or neither)";
     return true;
   } else {
     // Auto-increment: major=0, minor = next unused
@@ -3975,7 +3975,7 @@ bool simple_wallet::new_sub(const std::vector<std::string>& args) {
 //----------------------------------------------------------------------------------------------------
 bool simple_wallet::list_subs(const std::vector<std::string>& args) {
   if (m_subAddresses.empty()) {
-    success_msg_writer() << "No sub-addresses generated yet. Use: new_sub";
+    success_msg_writer() << "No sub-addresses generated yet. Use: gen_new_sub";
     return true;
   }
   success_msg_writer() << "Sub-addresses for this wallet:";

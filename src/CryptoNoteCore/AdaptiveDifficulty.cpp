@@ -62,6 +62,37 @@ static const DmwdaEpoch TESTNET_DMWDA_EPOCHS[] = {
             /* hashRateChangeThreshold   */ 5.0,
         }
     },
+    {
+        // Epoch 1 — height 900+.
+        // Fixes wild single-block swings observed in epoch 0 data (3-5x spikes/crashes
+        // with constant hashrate). Key changes: maxAdj 5→2, smooth 0.7→0.5,
+        // larger windows so single outlier blocks can't dominate the LWMA.
+        // With maxAdj=2 + smooth=0.5: max per-block change = ±50% up / ±12.5% down.
+        /* activationHeight */ 420,
+        {
+            /* targetTime                */ 480,
+            /* shortWindow               */ 15,    // was 8  — single outlier = 1/15 weight not 1/8
+            /* mediumWindow              */ 35,    // was 20
+            /* longWindow                */ 60,    // was 45
+            /* emergencyWindow           */ 8,     // was 5  — more data = calmer emergency
+            /* minAdjustment             */ 0.75,  // max 25% drop per block (was 0.70)
+            /* maxAdjustment             */ 2.00,  // max 2x rise per block (was 5.0!)
+            /* emergencyThreshold        */ 0.50,  // clamp [0.5x, 2.0x] (was 0.40 = [0.4, 2.5])
+            /* smoothingFactor           */ 0.50,  // 50/50 new/prev (was 0.70 — too reactive)
+            /* weightShort               */ 0.60,
+            /* weightMedium              */ 0.30,
+            /* weightLong                */ 0.10,
+            /* confidenceMin             */ 0.10,
+            /* confidenceMax             */ 1.00,
+            /* defaultConfidence         */ 0.50,
+            /* recentWindowSize          */ 5,
+            /* historicalWindowSize      */ 20,
+            /* blockStealingCheckBlocks  */ 5,
+            /* blockStealingTimeThreshold*/ 0.10,
+            /* blockStealingThreshold    */ 4,
+            /* hashRateChangeThreshold   */ 5.0,
+        }
+    },
     // Add future testnet epochs here, e.g.:
     // { 5000, { 480, 10, 30, 60, 5, 0.75, 4.0, 0.40, 0.70, 0.55, 0.30, 0.15, 0.10, 1.0, 0.50, 5, 20, 5, 0.10, 4, 5.0 } },
 };
