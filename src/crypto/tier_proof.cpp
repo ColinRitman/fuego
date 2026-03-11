@@ -39,7 +39,7 @@ namespace Crypto {
 
 extern std::mutex random_lock;
 
-static const char DOMAIN[]    = "FuegoMemberProof";
+static const char PROOF_DOMAIN[] = "FuegoMemberProof";
 static const size_t DOMAIN_LEN = 16;
 
 // Hash layout for Fiat-Shamir challenge:
@@ -68,9 +68,9 @@ static void compute_challenge(EllipticCurveScalar &result,
                               const unsigned char *C,
                               const unsigned char R[][32]) {
   ProofHashData buf;
-  memcpy(buf.domain, DOMAIN, DOMAIN_LEN);
-  memcpy(buf.C, C, 32);
-  memcpy(buf.R, R, FUEGO_MEMBERSHIP_N * 32);
+  std::memcpy(buf.domain, PROOF_DOMAIN, DOMAIN_LEN); 
+  std::memcpy(buf.C, C, 32); 
+  std::memcpy(buf.R, R, FUEGO_MEMBERSHIP_N * 32); 
 
   unsigned char hash[32];
   cn_fast_hash(&buf, sizeof(buf), reinterpret_cast<char*>(hash));
