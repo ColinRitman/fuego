@@ -1,7 +1,19 @@
 // Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2020-2026 Elderfire Privacy Group
 //
-// Pedersen commitment primitives for Fuego tiered deposits.
+// This file is part of Fuego.
+//
+// Fuego is free & open source software distributed in the hope
+// it will be useful, but WITHOUT ANY WARRANTY; without even an
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+// PURPOSE. You may redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
+
+
 // H generator: nothing-up-my-sleeve point derived from fixed seed.
 // Commitment: C = amount*H + mask*G (standard Pedersen over Ed25519).
 

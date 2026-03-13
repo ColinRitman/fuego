@@ -35,40 +35,12 @@ struct DmwdaEpoch {
 // ---------------------------------------------------------------------------
 static const DmwdaEpoch TESTNET_DMWDA_EPOCHS[] = {
     {
-        // Epoch 0 — v10 genesis. Fixed-indexing DMWDA (uses recent blocks correctly).
-        // Tuned for single-miner testnet with bursty behaviour.
-        /* activationHeight */ 0,
-        {
-            /* targetTime                */ 480,
-            /* shortWindow               */ 8,
-            /* mediumWindow              */ 20,
-            /* longWindow                */ 45,
-            /* emergencyWindow           */ 5,
-            /* minAdjustment             */ 0.70,   // max 30% drop per block
-            /* maxAdjustment             */ 5.00,   // up to 5x rise per block
-            /* emergencyThreshold        */ 0.40,   // emergency clamp [0.4x, 2.5x]
-            /* smoothingFactor           */ 0.70,   // 70% new / 30% prev
-            /* weightShort               */ 0.60,   // volatile → trust recent
-            /* weightMedium              */ 0.30,   // fixed anchor
-            /* weightLong                */ 0.10,   // stable → smooth with history
-            /* confidenceMin             */ 0.10,
-            /* confidenceMax             */ 1.00,
-            /* defaultConfidence         */ 0.50,
-            /* recentWindowSize          */ 5,
-            /* historicalWindowSize      */ 20,
-            /* blockStealingCheckBlocks  */ 5,
-            /* blockStealingTimeThreshold*/ 0.10,   // <48s = "fast" block
-            /* blockStealingThreshold    */ 4,      // 4 of 5 fast blocks triggers
-            /* hashRateChangeThreshold   */ 5.0,
-        }
-    },
-    {
         // Epoch 1 — height 900+.
         // Fixes wild single-block swings observed in epoch 0 data (3-5x spikes/crashes
         // with constant hashrate). Key changes: maxAdj 5→2, smooth 0.7→0.5,
         // larger windows so single outlier blocks can't dominate the LWMA.
         // With maxAdj=2 + smooth=0.5: max per-block change = ±50% up / ±12.5% down.
-        /* activationHeight */ 420,
+        /* activationHeight */ 0,
         {
             /* targetTime                */ 480,
             /* shortWindow               */ 15,    // was 8  — single outlier = 1/15 weight not 1/8

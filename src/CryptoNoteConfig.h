@@ -90,15 +90,6 @@ namespace CryptoNote
 		const size_t   DIFFICULTY_WINDOW_V3                          = 60;  // blocks  Zawy-LWMA1
 		const size_t   DIFFICULTY_WINDOW_V4                          = 45;  // blocks  Zawy-LWMA1 Fuego (~180 block per day)
 
-		// MWLWMA (Multi-Window LWMA) MAINNET parameters — 3 Ns and 3 weights
-		const uint64_t MWLWMA_N_SHORT                                 = 21;   // Short window (~4 hours at T=480)
-		const uint64_t MWLWMA_N_MEDIUM                                = 45;   // Medium window (~8 hours) — Zawy-recommended N for T≈480
-		const uint64_t MWLWMA_N_LONG                                  = 90;   // Long window (~12 hours)
-		const uint64_t MWLWMA_W_SHORT                                 = 25;   // 25% weight — responsiveness
-		const uint64_t MWLWMA_W_MEDIUM                                = 50;   // 50% weight — stability anchor
-		const uint64_t MWLWMA_W_LONG                                  = 25;   // 25% weight — trend dampening
-		const size_t   MWLWMA_DIFFICULTY_WINDOW                       = 92;   // N_long+2 = 90+2; replaces DIFFICULTY_WINDOW_V4 for v10+
-
 		// DMWDA MAINNET parameters
 		const uint32_t DMWDA_SHORT_WINDOW                            = 15;   // Rapid response window
 		const uint32_t DMWDA_MEDIUM_WINDOW                           = 45;   // Stability window
@@ -315,8 +306,11 @@ namespace CryptoNote
  		   "207.244.247.64:20808"
 		};
 
- 	// TESTNET DEFAULTS
- 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd08807121015c7bd08f34012b7cb1c366fdd90655596818d133be69ae9916f0832ece64549b";
+//__________________________________________________________________________________________________________________________
+                                     	// TESTNET parameters
+//--------------------------------------------------------------------------------------------------------------------------
+
+ 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101ff7c1d75c0284194656482f95ece982020aa504f353c4615e8ee593e6362221d";
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */
@@ -324,19 +318,6 @@ namespace CryptoNote
 
 	const uint32_t TESTNET_DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
-
-//__________________________________________________________________________________________________________________________
-                                     	// TESTNET parameters
-//--------------------------------------------------------------------------------------------------------------------------
-
-		const uint64_t TESTNET_MWLWMA_N_SHORT                                = 17;   // Short window (was 9; 17 reduces burst-mining oscillation)
-		const uint64_t TESTNET_MWLWMA_N_MEDIUM                               = 33;   // Medium window (unchanged)
-		const uint64_t TESTNET_MWLWMA_N_LONG                                 = 45;   // Long window (was 69, but capped to 45 by DIFFICULTY_WINDOW_V4 — now explicit)
-		const uint64_t TESTNET_MWLWMA_W_SHORT                                = 20;   // 20% weight — reduced; burst-mining spikes were distorting difficulty
-		const uint64_t TESTNET_MWLWMA_W_MEDIUM                               = 55;   // 55% weight — primary stability anchor
-		const uint64_t TESTNET_MWLWMA_W_LONG                                 = 25;   // 25% weight — trend smoothing
-		const uint32_t TESTNET_MWLWMA_V2_HEIGHT                              = 21;  // Legacy: unused after DMWDA activation
-
 
  	// TESTNET DMWDA parameters
 //--------------------------------------------------------------------------------------------------------------------------
