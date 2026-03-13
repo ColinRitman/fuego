@@ -172,13 +172,13 @@ public:
     {
       if (blockMajorVersion >= BLOCK_MAJOR_VERSION_10)
       {
-        // MWLWMA (v10+) needs a window sized to N_long+2 so every sub-window runs at full depth.
+        // DMWDA (v10+) needs a window sized to N_long+2 so every sub-window runs at full depth.
         // DIFFICULTY_WINDOW_V4=45 silently capped N_medium and N_long to effectiveN=45,
         // Testnet:  N_long=45 → window=47  (no change to effective computation vs old 46-block window)
         // Mainnet:  N_long=90 → window=92  (safe: UPGRADE_HEIGHT_V10=999999 not yet reached on mainnet)
         return isTestnet()
-          ? static_cast<size_t>(CryptoNote::TESTNET_MWLWMA_N_LONG + 2)  // 47
-          : parameters::MWLWMA_DIFFICULTY_WINDOW;                         // 92
+          ? static_cast<size_t>(CryptoNote::parameters::TESTNET_DMWDA_LONG_WINDOW + 2)  // 62
+          : parameters::DMWDA_LONG_WINDOW;                         // 120
       }
       else if (blockMajorVersion >= BLOCK_MAJOR_VERSION_7)
       {

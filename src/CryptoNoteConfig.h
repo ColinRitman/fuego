@@ -112,6 +112,7 @@ namespace CryptoNote
 		const uint32_t DMWDA_BLOCK_STEALING_CHECK_BLOCKS             = 5;    // Number of blocks to check for stealing attempts
 		const uint32_t DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
 		const double   DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.05; // 5% of target time threshold for fast blocks
+		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 60;  // Trend analysis window
 
         // MIXIN
 		const uint64_t MIN_TX_MIXIN_SIZE_V2                          = 2;  // Legacy mixin

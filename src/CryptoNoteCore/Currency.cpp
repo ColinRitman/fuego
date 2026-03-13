@@ -1237,7 +1237,7 @@ double Currency::getBurnPercentage() const {
 		uint64_t next_D = algo.calculateNextDifficulty(height, timestamps, cumulativeDifficulties, isTestnet());
 		next_D = std::max(minDifficulty, next_D);
 
-		// Round to clean numbers for readability (same as MWLWMA did)
+		// Round to clean numbers for readability
 		uint64_t i = 1000000000;
 		while (i > 1) {
 			if (next_D > i * 100) {
