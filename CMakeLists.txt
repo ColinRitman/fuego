@@ -189,24 +189,19 @@ message(STATUS "Found Boost Version: ${Boost_VERSION}")
 if(MINGW)
   set(Boost_LIBRARIES "${Boost_LIBRARIES};ws2_32;mswsock;iphlpapi;bcrypt")
 elseif(APPLE)
-  # Ensure proper linking on macOS - use BOOST_ROOT if provided, else probe Homebrew
-  if(DEFINED BOOST_ROOT AND EXISTS "${BOOST_ROOT}/lib")
-      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L${BOOST_ROOT}/lib -Wl,-rpath,${BOOST_ROOT}/lib")
-      link_directories("${BOOST_ROOT}/lib")
-  else()
-      foreach(_boost_lib_path
-          "/opt/homebrew/opt/boost@1.86/lib"
-          "/opt/homebrew/opt/boost@1.85/lib"
-          "/opt/homebrew/opt/boost/lib"
-          "/usr/local/opt/boost@1.86/lib"
-          "/usr/local/opt/boost@1.85/lib"
-          "/usr/local/opt/boost/lib")
-        if(EXISTS "${_boost_lib_path}")
-            set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L${_boost_lib_path} -Wl,-rpath,${_boost_lib_path}")
-            link_directories("${_boost_lib_path}")
-            break()
-        endif()
-      endforeach()
+  # Ensure proper linking on macOS
+  if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
+      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
+  elseif(EXISTS "/usr/local/opt/boost@1.85/lib")
+      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/boost@1.85/lib -Wl,-rpath,/usr/local/opt/boost@1.85/lib")
+  endif()
+
+  # Ensure we're using the correct Boost libraries path
+  if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
+      link_directories("/opt/homebrew/opt/boost@1.85/lib")
+  endif()
+  if(EXISTS "/usr/local/opt/boost@1.85/lib")
+      link_directories("/usr/local/opt/boost@1.85/lib")
   endif()
 elseif(OPENBSD OR ANDROID)
   set(Boost_LIBRARIES "${Boost_LIBRARIES}")
@@ -309,26 +304,17 @@ message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
 # Configure runtime path for Boost libraries on macOS
 if(APPLE)
-    # ICU rpath - use ICU_ROOT if set, else probe versioned Homebrew paths
-    set(_apple_icu_lib_dir "")
-    if(DEFINED ICU_ROOT AND EXISTS "${ICU_ROOT}/lib")
-        set(_apple_icu_lib_dir "${ICU_ROOT}/lib")
-    else()
-        foreach(_icu_lib_path
-            "/opt/homebrew/opt/icu4c/lib"
-            "/opt/homebrew/opt/icu4c@77/lib"
-            "/opt/homebrew/opt/icu4c@76/lib"
-            "/usr/local/opt/icu4c/lib"
-            "/usr/local/opt/icu4c@77/lib"
-            "/usr/local/opt/icu4c@76/lib")
-          if(EXISTS "${_icu_lib_path}")
-              set(_apple_icu_lib_dir "${_icu_lib_path}")
-              break()
-          endif()
-        endforeach()
+    if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
+    elseif(EXISTS "/usr/local/opt/boost@1.85/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/boost@1.85/lib -Wl,-rpath,/usr/local/opt/boost@1.85/lib")
     endif()
-    if(_apple_icu_lib_dir)
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L${_apple_icu_lib_dir} -Wl,-rpath,${_apple_icu_lib_dir}")
+
+    # Also add ICU library paths
+    if(EXISTS "/opt/homebrew/opt/icu4c/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/icu4c/lib -Wl,-rpath,/opt/homebrew/opt/icu4c/lib")
+    elseif(EXISTS "/usr/local/opt/icu4c/lib")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/icu4c/lib -Wl,-rpath,/usr/local/opt/icu4c/lib")
     endif()
 endif()
 
@@ -339,23 +325,13 @@ if(ANDROID)
     message(STATUS "Android build detected: skipping ICU discovery")
 else()
     if(APPLE)
-        # Ensure proper ICU paths for macOS - only auto-detect if ICU_ROOT not already set
-        if(NOT DEFINED ICU_ROOT OR NOT ICU_ROOT)
-            foreach(_icu_candidate
-                "/opt/homebrew/opt/icu4c"
-                "/opt/homebrew/opt/icu4c@77"
-                "/opt/homebrew/opt/icu4c@76"
-                "/usr/local/opt/icu4c"
-                "/usr/local/opt/icu4c@77"
-                "/usr/local/opt/icu4c@76")
-              if(EXISTS "${_icu_candidate}")
-                  set(ICU_ROOT "${_icu_candidate}")
-                  break()
-              endif()
-            endforeach()
-        endif()
-        if(ICU_ROOT)
-            list(APPEND CMAKE_PREFIX_PATH "${ICU_ROOT}")
+        # Ensure proper ICU paths for macOS
+        if(EXISTS "/opt/homebrew/opt/icu4c")
+            list(APPEND CMAKE_PREFIX_PATH "/opt/homebrew/opt/icu4c")
+            set(ICU_ROOT "/opt/homebrew/opt/icu4c")
+        elseif(EXISTS "/usr/local/opt/icu4c")
+            list(APPEND CMAKE_PREFIX_PATH "/usr/local/opt/icu4c")
+            set(ICU_ROOT "/usr/local/opt/icu4c")
         endif()
     endif()
 
@@ -381,11 +357,11 @@ else()
 
         # On macOS, ensure we have the correct ICU library paths
         if(APPLE)
-            # Add ICU library directories - use ICU_ROOT if set
-            if(DEFINED ICU_ROOT AND EXISTS "${ICU_ROOT}/lib")
-                link_directories("${ICU_ROOT}/lib")
-            elseif(_apple_icu_lib_dir)
-                link_directories("${_apple_icu_lib_dir}")
+            # Add ICU library directories
+            if(EXISTS "/opt/homebrew/opt/icu4c/lib")
+                link_directories("/opt/homebrew/opt/icu4c/lib")
+            elseif(EXISTS "/usr/local/opt/icu4c/lib")
+                link_directories("/usr/local/opt/icu4c/lib")
             endif()
 
             if(ICU_DATA_LIBRARY)
@@ -473,15 +449,12 @@ if(APPLE AND ICU_FOUND)
             target_link_libraries(${exec_target} PRIVATE ${ICU_LIBRARIES})
 
             # Ensure proper rpath for ICU libraries on macOS
-            set(_icu_rpath_dir "")
-            if(DEFINED ICU_ROOT AND EXISTS "${ICU_ROOT}/lib")
-                set(_icu_rpath_dir "${ICU_ROOT}/lib")
-            elseif(_apple_icu_lib_dir)
-                set(_icu_rpath_dir "${_apple_icu_lib_dir}")
-            endif()
-            if(_icu_rpath_dir)
+            if(EXISTS "/opt/homebrew/opt/icu4c/lib")
                 set_target_properties(${exec_target} PROPERTIES
-                    LINK_FLAGS "-L${_icu_rpath_dir} -Wl,-rpath,${_icu_rpath_dir}")
+                    LINK_FLAGS "-L/opt/homebrew/opt/icu4c/lib -Wl,-rpath,/opt/homebrew/opt/icu4c/lib")
+            elseif(EXISTS "/usr/local/opt/icu4c/lib")
+                set_target_properties(${exec_target} PROPERTIES
+                    LINK_FLAGS "-L/usr/local/opt/icu4c/lib -Wl,-rpath,/usr/local/opt/icu4c/lib")
             endif()
         endif()
     endforeach()
