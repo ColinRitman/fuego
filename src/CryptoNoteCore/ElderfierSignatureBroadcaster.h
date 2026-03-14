@@ -73,6 +73,17 @@ private:
   std::atomic<uint32_t> m_lastSignedHeight{0};
   void signingThread();
 
+  // Sign-once-per-height lock (persisted across restarts to prevent accidental double-signs).
+  // Maps blockHeight → merkleRoot we committed to for that height.
+  // Any signing attempt at a height already in this map with a DIFFERENT root is refused.
+  std::map<uint32_t, Crypto::Hash> m_signedRoots;
+  std::string m_signLockPath;  // Set from data dir on construction
+  void loadSignLock();
+  void persistSignLock(uint32_t height, const Crypto::Hash& root);
+  // Returns false if signing would produce a double-sign, true if safe to proceed.
+  // also_same_root is set true when the height is already locked to the SAME root (idempotent skip).
+  bool checkSignLock(uint32_t height, const Crypto::Hash& root, bool& also_same_root);
+
   // Helper method to validate signatures
   bool validateSignature(const CachedElderfierSignature& sig) const;
 };

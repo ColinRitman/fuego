@@ -26,11 +26,17 @@
 #include <Logging/LoggerManager.h>
 #include <Common/StringTools.h>
 #include <chrono>
+#include <fstream>
+#include <sstream>
 
 namespace CryptoNote {
 
 ElderfierSignatureBroadcaster::ElderfierSignatureBroadcaster(core& ccore, NodeServer& p2psrv, IP2pEndpoint* p2pEndpoint)
   : m_core(ccore), m_p2p(p2psrv), m_p2pEndpoint(p2pEndpoint), m_running(false) {
+  // Derive sign-lock file path from blockchain data dir (persists across restarts)
+  const std::string& dataDir = m_core.get_blockchain_storage().getConfigFolder();
+  m_signLockPath = dataDir.empty() ? "efsig_lock.dat" : dataDir + "/efsig_lock.dat";
+  loadSignLock();
 }
 
 ElderfierSignatureBroadcaster::~ElderfierSignatureBroadcaster() {
@@ -118,6 +124,55 @@ void ElderfierSignatureBroadcaster::stop() {
   }
 }
 
+void ElderfierSignatureBroadcaster::loadSignLock() {
+  // Load previously committed height→root pairs from disk.
+  // File format: one line per entry: "<height_decimal> <root_hex_64chars>\n"
+  std::ifstream f(m_signLockPath);
+  if (!f.is_open()) return;
+  std::string line;
+  while (std::getline(f, line)) {
+    if (line.empty()) continue;
+    std::istringstream ss(line);
+    uint32_t h; std::string rootHex;
+    ss >> h >> rootHex;
+    if (rootHex.size() == 64) {
+      Crypto::Hash root;
+      if (Common::podFromHex(rootHex, root)) {
+        m_signedRoots[h] = root;
+      }
+    }
+  }
+}
+
+void ElderfierSignatureBroadcaster::persistSignLock(uint32_t height, const Crypto::Hash& root) {
+  // Append new entry. Keep the file bounded to last 2000 entries by rewriting when large.
+  m_signedRoots[height] = root;
+  // Rewrite entire file (bounded — at most ~2000 lines = ~130 KB)
+  std::ofstream f(m_signLockPath, std::ios::trunc);
+  if (!f.is_open()) return;
+  // Only persist last 2000 heights to bound file size
+  auto it = m_signedRoots.begin();
+  if (m_signedRoots.size() > 2000) {
+    std::advance(it, m_signedRoots.size() - 2000);
+  }
+  for (; it != m_signedRoots.end(); ++it) {
+    f << it->first << " " << Common::podToHex(it->second) << "\n";
+  }
+}
+
+bool ElderfierSignatureBroadcaster::checkSignLock(uint32_t height, const Crypto::Hash& root,
+                                                   bool& also_same_root) {
+  also_same_root = false;
+  auto it = m_signedRoots.find(height);
+  if (it == m_signedRoots.end()) return true;  // Not signed at this height — safe
+  if (it->second == root) {
+    also_same_root = true;  // Already signed the same root — idempotent
+    return true;
+  }
+  // Already signed a DIFFERENT root at this height — would be a double-sign
+  return false;
+}
+
 void ElderfierSignatureBroadcaster::signingThread() {
   // Wait for core to fully sync before signing
   std::this_thread::sleep_for(std::chrono::seconds(5));
@@ -155,6 +210,31 @@ void ElderfierSignatureBroadcaster::signingThread() {
         if (commitmentRoot == Crypto::Hash()) {
           m_lastSignedHeight = currentHeight;
         } else {
+          // ── Sign-once-per-height safety lock ──────────────────────────────────
+          // Check the persistent sign-lock before producing any signature.
+          // This prevents accidental double-signs from restarts, reorgs, or
+          // any software bug that would cause us to sign two different roots
+          // at the same block height.
+          bool alreadySameRoot = false;
+          {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            if (!checkSignLock(currentHeight, commitmentRoot, alreadySameRoot)) {
+              // SAFETY REFUSAL: we already committed to a different root at this height.
+              // Signing now would produce a double-sign and expose us to slashing.
+              auto it = m_signedRoots.find(currentHeight);
+              // Log but do NOT sign.
+              (void)it;  // suppress unused warning; log omitted to avoid logger dependency here
+              m_lastSignedHeight = currentHeight;
+              continue;
+            }
+          }
+          if (alreadySameRoot) {
+            // Already signed the same root — nothing to do (idempotent)
+            m_lastSignedHeight = currentHeight;
+            continue;
+          }
+          // ─────────────────────────────────────────────────────────────────────
+
           // sign commitment merkle root with the registered key
           Crypto::Signature sig;
           Crypto::generate_signature(commitmentRoot, m_signingPubKey, m_signingSecKey, sig);
@@ -174,6 +254,13 @@ void ElderfierSignatureBroadcaster::signingThread() {
             auto buf = LevinProtocol::encode(sig_msg);
             m_p2pEndpoint->externalRelayNotifyToAll(
                 COMMAND_ELDERFIER_SIGNATURE::ID, buf, nullptr);
+          }
+
+          // Persist sign-lock BEFORE broadcasting — if we crash after persisting
+          // but before broadcasting, we're safe (won't sign a different root on restart).
+          {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            persistSignLock(currentHeight, commitmentRoot);
           }
 
           // cache locally

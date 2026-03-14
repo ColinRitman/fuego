@@ -65,6 +65,11 @@ struct CommitmentEntry {
   std::string ceremonyAlias;   // 8-char alias from 0xEF deposit metadata (0xEA tag), auto-registered with EFiD
   Crypto::PublicKey signingPubKey = {};  // Ed25519 signing pubkey from 0xEA metadata (for EFier signature verification)
 
+  // Slashing flag (ELDERFIER_STAKING only).
+  // When true, the commitment output is forbidden as a ring member — effectively burns the stake.
+  // Only set by Blockchain.cpp when a 0xEC QUORUM slash verdict names this deposit's txHash.
+  bool isSlashed = false;
+
   void serialize(ISerializer& s);
 };
 
@@ -92,6 +97,49 @@ struct ElderfierEpochRewards {
   std::map<uint8_t, uint64_t> distribution;  // EFiD -> fee amount (only for signers)
   uint64_t epochStartBlock = 0;
   uint64_t epochEndBlock = 0;
+};
+
+// Double-sign event: same EFier signed two different merkle roots at the same block height
+struct DoubleSignEvent {
+  uint8_t elderfier_id;
+  Crypto::Hash root_a;       // First root signed
+  Crypto::Hash root_b;       // Conflicting root signed
+  uint64_t block_height;     // Block height at which both signatures claim to apply
+  uint64_t detected_at_block;
+  std::string ceremony_alias;  // For human-readable logs
+};
+
+// Per-epoch activity report for elder_council review
+struct EpochReport {
+  uint64_t epochNumber = 0;
+  uint64_t epochStartBlock = 0;
+  uint64_t epochEndBlock = 0;
+  uint64_t generatedAtBlock = 0;
+
+  struct EFierActivity {
+    uint8_t elderfier_id = 0;
+    std::string address;
+    std::string ceremonyAlias;
+    bool signedThisEpoch = false;
+    uint64_t signaturesSubmitted = 0;
+    uint64_t feesEarned = 0;
+    bool isSlashed = false;
+    bool isUnstaking = false;
+    uint32_t consecutiveMissedEpochs = 0;
+  };
+
+  std::vector<EFierActivity> efierActivity;
+  std::vector<uint8_t> signingEfierIds;
+  std::vector<uint8_t> missingEfierIds;
+  std::vector<DoubleSignEvent> doubleSignEvents;  // double-signs detected this epoch
+  uint64_t totalFeesDistributed = 0;
+  uint64_t activeEfierCount = 0;
+  uint64_t participatingEfierCount = 0;
+
+  // Advisory notices for elder_council — informational only, never auto-acted upon.
+  // A council member must explicitly run `propose_slash` in the wallet to act on these.
+  // "DOUBLE_SIGN:<efid>" or "INACTIVE:<efid>:<N>_epochs_missed"
+  std::vector<std::string> slash_advisory;
 };
 
 // Elderfier registration status tracking (public for method signatures)
@@ -212,6 +260,52 @@ public:
   size_t heatCount() const;
   size_t coldCount() const;
 
+  // Lookup a commitment entry by the tx hash that created it (for slash processing)
+  bool getCommitmentEntryByTxHash(const Crypto::Hash& txHash, CommitmentEntry& out) const;
+
+  // Slash vote accumulation — each EFier independently submits a 0xEC QUORUM proposal.
+  // Slash executes only when vote_count / active_efiers >= requiredThresholdPct (e.g. 80).
+  // Returns true if the quorum threshold was just reached and slash should execute NOW.
+  // Returns false if the vote was recorded but threshold not yet met (or already executed).
+  bool addSlashVote(const Crypto::Hash& depositTxHash, uint8_t efid,
+                    const std::string& reason, uint64_t blockHeight,
+                    uint8_t requiredThresholdPct);
+
+  // How many EFiers have voted to slash this deposit (0 if none / unknown)
+  size_t getSlashVoteCount(const Crypto::Hash& depositTxHash) const;
+
+  // Mark the slash proposal as executed (called right after markCommitmentSlashed)
+  void markSlashProposalExecuted(const Crypto::Hash& depositTxHash);
+
+  // Slash an EFier's staking deposits.
+  // Marks all CommitmentEntry records whose txHash matches depositTxHash as isSlashed=true.
+  // Called by Blockchain.cpp ONLY after addSlashVote returns true (quorum reached).
+  // Returns false if no matching commitment found.
+  bool markCommitmentSlashed(const Crypto::Hash& depositTxHash);
+
+  // Check if a commitment (by its hash hex) is slashed
+  bool isCommitmentSlashed(const std::string& commitHashHex) const;
+
+  // Record a detected double-sign event (called from addSignatureToCache)
+  void recordDoubleSign(const DoubleSignEvent& event);
+
+  // Get all double-sign events (for epoch report generation)
+  std::vector<DoubleSignEvent> getDoubleSignEvents() const;
+
+  // Generate an epoch report covering [startBlock, endBlock]
+  // Called by Blockchain.cpp at each EPOCH_DURATION_BLOCKS boundary
+  EpochReport generateEpochReport(uint64_t epochNumber, uint64_t startBlock, uint64_t endBlock,
+                                  uint64_t generatedAtBlock) const;
+
+  // Store a finalized epoch report (Blockchain calls this after generating)
+  void storeEpochReport(const EpochReport& report);
+
+  // Retrieve a stored epoch report by epoch number
+  std::optional<EpochReport> getEpochReport(uint64_t epochNumber) const;
+
+  // Get the most recent stored epoch report
+  std::optional<EpochReport> getLatestEpochReport() const;
+
   // Serialization support
   void serialize(ISerializer& s) {}
 
@@ -258,6 +352,27 @@ private:
 
   // Currency reference for network detection
   const CryptoNote::Currency& m_currency;
+
+  // Double-sign events detected across all time (trimmed to last 10 epochs)
+  std::vector<DoubleSignEvent> m_doubleSignEvents;
+
+  // Per-epoch reports stored for elder_council query (last 10 epochs)
+  std::vector<EpochReport> m_epochReports;
+
+  // Consecutive missed epoch counter per EFiD
+  std::map<uint8_t, uint32_t> m_consecutiveMissedEpochs;
+
+  // txHash hex -> commitment hash hex index (for fast slash lookup)
+  std::map<std::string, std::string> m_txHashToCommitHash;
+
+  // Slash proposal accumulation — keyed by depositTxHash hex
+  struct SlashProposal {
+    std::set<uint8_t> votingEfids;  // EFiDs that have submitted a proposal for this deposit
+    std::string reason;             // Reason from the most recent vote
+    uint64_t firstVoteBlock = 0;
+    bool executed = false;          // True once quorum was reached and slash applied
+  };
+  std::map<std::string, SlashProposal> m_slashProposals;  // depositTxHash hex → proposal
 
   // Helper methods
   bool isElderfierRegistrationDeposit(const CommitmentEntry& entry);

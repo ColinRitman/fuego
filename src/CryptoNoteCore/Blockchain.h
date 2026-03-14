@@ -154,6 +154,9 @@ namespace CryptoNote {
     CommitmentIndex& getCommitmentIndex() { return m_commitmentIndex; }
     const CommitmentIndex& getCommitmentIndex() const { return m_commitmentIndex; }
 
+    // Data directory (for broadcaster sign-lock file placement)
+    const std::string& getConfigFolder() const { return m_config_folder; }
+
     template <class visitor_t>
     bool scanOutputKeysForIndexes(const KeyInput &tx_in_to_key, visitor_t &vis, uint32_t *pmax_related_block_height = NULL);
 
@@ -306,12 +309,14 @@ namespace CryptoNote {
       uint16_t          outputInTransaction;
       Crypto::PublicKey commitKey;  // cached for ring signature verification
       uint32_t          term;       // lock term in blocks; 0xFFFFFFFF = FOREVER (HEAT burns, never unlocked)
+      bool              isSlashed = false;  // true = forbidden ring member (slashed EFier stake)
 
       void serialize(ISerializer& s) {
         s(transactionIndex, "txindex");
         s(outputInTransaction, "outindex");
         s(commitKey, "commitKey");
         s(term, "term");
+        s(isSlashed, "is_slashed");
       }
     };
     typedef parallel_flat_hash_map<uint64_t, std::vector<CommitmentOutputRef>> CommitmentOutputsContainer;

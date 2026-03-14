@@ -35,6 +35,7 @@ void CommitmentEntry::serialize(ISerializer& s) {
   s(term, "term");
   s(targetChainId, "target_chain_id");
   s(isLegacyMigration, "is_legacy_migration");
+  s(isSlashed, "is_slashed");
 }
 
 CommitmentIndex::CommitmentIndex(const CryptoNote::Currency& currency) : m_currency(currency) {
@@ -57,6 +58,10 @@ void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
   m_commitments[commitHex] = entry;
   m_merkle_leaves.push_back(entry.commitment);
   m_heightIndex[entry.blockHeight].push_back(commitHex);
+
+  // Index by txHash for fast slash lookup
+  std::string txHashHex = Common::podToHex(entry.txHash);
+  m_txHashToCommitHash[txHashHex] = commitHex;
 
   // Update type counters
   switch (entry.type) {
@@ -136,6 +141,38 @@ void CommitmentIndex::addSignatureToCache(const CachedElderfierSignature& sig) {
 
   std::string merkle_root_hex = Common::podToHex(sig.merkle_root);
   auto key = std::make_pair(sig.elderfier_id, merkle_root_hex);
+
+  // Double-sign detection: same EFier, same block height, different merkle root
+  if (verified_sig.is_valid) {
+    for (auto it = m_signatures.begin(); it != m_signatures.end(); ++it) {
+      if (it->first.first == sig.elderfier_id &&
+          it->first.second != merkle_root_hex &&
+          it->second.block_height == sig.block_height &&
+          it->second.is_valid) {
+        // Found conflicting signature for the same EFier at the same height
+        DoubleSignEvent event;
+        event.elderfier_id = sig.elderfier_id;
+        event.root_a = it->second.merkle_root;
+        event.root_b = sig.merkle_root;
+        event.block_height = sig.block_height;
+        event.detected_at_block = sig.received_block_height;
+        // Look up ceremony alias for readable logs
+        for (auto& reg : m_elderfierRegistrations) {
+          if (reg.second.elderfier_id == sig.elderfier_id) {
+            // alias not stored in registration; leave empty
+            break;
+          }
+        }
+        m_doubleSignEvents.push_back(event);
+        // Keep double-sign list bounded (last 10,000 events)
+        if (m_doubleSignEvents.size() > 10000) {
+          m_doubleSignEvents.erase(m_doubleSignEvents.begin());
+        }
+        break;
+      }
+    }
+  }
+
   m_signatures[key] = verified_sig;
 
   // Track when root was first seen
@@ -843,6 +880,296 @@ std::vector<ElderfierRegistration> CommitmentIndex::getElderfierRegistrationsByA
   }
 
   return results;
+}
+
+bool CommitmentIndex::getCommitmentEntryByTxHash(const Crypto::Hash& txHash, CommitmentEntry& out) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  std::string txHashHex = Common::podToHex(txHash);
+  auto it = m_txHashToCommitHash.find(txHashHex);
+  if (it == m_txHashToCommitHash.end()) return false;
+  auto cit = m_commitments.find(it->second);
+  if (cit == m_commitments.end()) return false;
+  out = cit->second;
+  return true;
+}
+
+bool CommitmentIndex::addSlashVote(const Crypto::Hash& depositTxHash, uint8_t efid,
+                                    const std::string& reason, uint64_t blockHeight,
+                                    uint8_t requiredThresholdPct) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = Common::podToHex(depositTxHash);
+
+  // Already executed — don't re-trigger
+  auto it = m_slashProposals.find(key);
+  if (it != m_slashProposals.end() && it->second.executed) {
+    return false;
+  }
+
+  // The accused EFier may not vote on their own slashing.
+  // Determine the owner of the targeted deposit by matching its signingPubKey
+  // against EFier registrations.
+  auto txIt = m_txHashToCommitHash.find(key);
+  if (txIt != m_txHashToCommitHash.end()) {
+    auto cIt = m_commitments.find(txIt->second);
+    if (cIt != m_commitments.end()) {
+      const CommitmentEntry& entry = cIt->second;
+      // Find which EFiD owns this deposit
+      for (auto& reg : m_elderfierRegistrations) {
+        if (reg.second.signing_pubkey == entry.signingPubKey) {
+          if (reg.second.elderfier_id == efid) {
+            // Voter IS the accused — reject silently
+            return false;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Record this EFier's vote
+  SlashProposal& proposal = m_slashProposals[key];
+  if (proposal.firstVoteBlock == 0) {
+    proposal.firstVoteBlock = blockHeight;
+  }
+  proposal.votingEfids.insert(efid);
+  proposal.reason = reason;
+
+  // Count active EFiers to determine quorum
+  size_t activeCount = 0;
+  for (auto& reg : m_elderfierRegistrations) {
+    if (reg.second.status == ElderfierStatus::ACTIVE) {
+      ++activeCount;
+    }
+  }
+  if (activeCount == 0) return false;
+
+  size_t voteCount = proposal.votingEfids.size();
+  uint64_t pct = (voteCount * 100) / activeCount;
+
+  // Quorum reached — caller should now execute the slash
+  return pct >= static_cast<uint64_t>(requiredThresholdPct);
+}
+
+size_t CommitmentIndex::getSlashVoteCount(const Crypto::Hash& depositTxHash) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  std::string key = Common::podToHex(depositTxHash);
+  auto it = m_slashProposals.find(key);
+  if (it == m_slashProposals.end()) return 0;
+  return it->second.votingEfids.size();
+}
+
+void CommitmentIndex::markSlashProposalExecuted(const Crypto::Hash& depositTxHash) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  std::string key = Common::podToHex(depositTxHash);
+  auto it = m_slashProposals.find(key);
+  if (it != m_slashProposals.end()) {
+    it->second.executed = true;
+  }
+}
+
+bool CommitmentIndex::markCommitmentSlashed(const Crypto::Hash& depositTxHash) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  std::string txHashHex = Common::podToHex(depositTxHash);
+  auto idxIt = m_txHashToCommitHash.find(txHashHex);
+  if (idxIt == m_txHashToCommitHash.end()) return false;
+  auto cit = m_commitments.find(idxIt->second);
+  if (cit == m_commitments.end()) return false;
+  cit->second.isSlashed = true;
+  return true;
+}
+
+bool CommitmentIndex::isCommitmentSlashed(const std::string& commitHashHex) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  auto it = m_commitments.find(commitHashHex);
+  if (it == m_commitments.end()) return false;
+  return it->second.isSlashed;
+}
+
+void CommitmentIndex::recordDoubleSign(const DoubleSignEvent& event) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_doubleSignEvents.push_back(event);
+  if (m_doubleSignEvents.size() > 10000) {
+    m_doubleSignEvents.erase(m_doubleSignEvents.begin());
+  }
+}
+
+std::vector<DoubleSignEvent> CommitmentIndex::getDoubleSignEvents() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  return m_doubleSignEvents;
+}
+
+EpochReport CommitmentIndex::generateEpochReport(uint64_t epochNumber, uint64_t startBlock,
+                                                  uint64_t endBlock, uint64_t generatedAtBlock) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  EpochReport report;
+  report.epochNumber = epochNumber;
+  report.epochStartBlock = startBlock;
+  report.epochEndBlock = endBlock;
+  report.generatedAtBlock = generatedAtBlock;
+
+  // Collect which EFiers signed during this epoch by scanning the signature cache.
+  // Signatures are ephemeral (flushed after consensus), so we use the epoch-level
+  // ElderfierEpochRewards records if available; otherwise fall back to live cache.
+  std::set<uint8_t> signersThisEpoch;
+  for (auto& kv : m_signatures) {
+    uint8_t efid = kv.first.first;
+    const CachedElderfierSignature& sig = kv.second;
+    if (sig.is_valid &&
+        sig.received_block_height >= startBlock &&
+        sig.received_block_height <= endBlock) {
+      signersThisEpoch.insert(efid);
+    }
+  }
+
+  // Collect all registered active EFiers
+  std::set<uint8_t> allActiveEfids;
+  for (auto& reg : m_elderfierRegistrations) {
+    if (reg.second.status == ElderfierStatus::ACTIVE ||
+        reg.second.status == ElderfierStatus::UNSTAKING) {
+      allActiveEfids.insert(reg.second.elderfier_id);
+    }
+  }
+  report.activeEfierCount = allActiveEfids.size();
+  report.participatingEfierCount = signersThisEpoch.size();
+
+  // Build per-EFier activity records
+  for (uint8_t efid : allActiveEfids) {
+    EpochReport::EFierActivity activity;
+    activity.elderfier_id = efid;
+    activity.signedThisEpoch = signersThisEpoch.count(efid) > 0;
+    if (activity.signedThisEpoch) {
+      report.signingEfierIds.push_back(efid);
+    } else {
+      report.missingEfierIds.push_back(efid);
+    }
+
+    // Look up address and alias from registration
+    for (auto& reg : m_elderfierRegistrations) {
+      if (reg.second.elderfier_id == efid) {
+        activity.address = reg.first;
+        break;
+      }
+    }
+    // Look up ceremony alias from staking commitments
+    for (auto& kv : m_commitments) {
+      const CommitmentEntry& e = kv.second;
+      if (e.type == CommitmentEntry::Type::ELDERFIER_STAKING && !e.ceremonyAlias.empty()) {
+        // Find the EFier whose signing pubkey matches the registration
+        bool matched = false;
+        for (auto& reg : m_elderfierRegistrations) {
+          if (reg.second.elderfier_id == efid &&
+              e.signingPubKey == reg.second.signing_pubkey) {
+            activity.ceremonyAlias = e.ceremonyAlias;
+            matched = true;
+            break;
+          }
+        }
+        if (matched) break;
+      }
+    }
+
+    // Check slashed/unstaking status
+    for (auto& reg : m_elderfierRegistrations) {
+      if (reg.second.elderfier_id == efid) {
+        activity.isUnstaking = (reg.second.status == ElderfierStatus::UNSTAKING);
+        break;
+      }
+    }
+    // Check if any of their deposits are slashed
+    for (auto& kv : m_commitments) {
+      const CommitmentEntry& e = kv.second;
+      if (e.type == CommitmentEntry::Type::ELDERFIER_STAKING && e.isSlashed) {
+        for (auto& reg : m_elderfierRegistrations) {
+          if (reg.second.elderfier_id == efid &&
+              e.signingPubKey == reg.second.signing_pubkey) {
+            activity.isSlashed = true;
+            break;
+          }
+        }
+      }
+    }
+
+    // Consecutive missed epochs (from tracking map)
+    auto missIt = m_consecutiveMissedEpochs.find(efid);
+    if (missIt != m_consecutiveMissedEpochs.end()) {
+      activity.consecutiveMissedEpochs = missIt->second;
+    }
+
+    // Fees (from block fee map for this epoch's range)
+    // Simple: total fees for epoch / number of active EFiers (same split as coinbase)
+    uint64_t epochFeeTotal = 0;
+    for (auto& feeKv : m_blockBankingFees) {
+      if (feeKv.first >= startBlock && feeKv.first <= endBlock) {
+        epochFeeTotal += feeKv.second;
+      }
+    }
+    report.totalFeesDistributed = epochFeeTotal;
+    if (!allActiveEfids.empty()) {
+      activity.feesEarned = activity.signedThisEpoch ? (epochFeeTotal / allActiveEfids.size()) : 0;
+    }
+
+    report.efierActivity.push_back(activity);
+  }
+
+  // Collect double-sign events in this epoch's block range
+  for (auto& ev : m_doubleSignEvents) {
+    if (ev.detected_at_block >= startBlock && ev.detected_at_block <= endBlock) {
+      report.doubleSignEvents.push_back(ev);
+    }
+  }
+
+  // Build slash recommendations for elder_council
+  for (auto& activity : report.efierActivity) {
+    if (!activity.signedThisEpoch && !activity.isSlashed) {
+      if (activity.consecutiveMissedEpochs >= 3) {
+        report.slash_advisory.push_back(
+            "INACTIVE:" + std::to_string(activity.elderfier_id) +
+            ":" + std::to_string(activity.consecutiveMissedEpochs) + "_epochs_missed");
+      }
+    }
+  }
+  for (auto& ev : report.doubleSignEvents) {
+    report.slash_advisory.push_back(
+        "DOUBLE_SIGN:" + std::to_string(ev.elderfier_id) +
+        ":height=" + std::to_string(ev.block_height));
+  }
+
+  return report;
+}
+
+void CommitmentIndex::storeEpochReport(const EpochReport& report) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  // Update consecutive missed epoch counters
+  std::set<uint8_t> signers(report.signingEfierIds.begin(), report.signingEfierIds.end());
+  for (uint8_t efid : report.missingEfierIds) {
+    m_consecutiveMissedEpochs[efid]++;
+  }
+  for (uint8_t efid : report.signingEfierIds) {
+    m_consecutiveMissedEpochs[efid] = 0;  // reset streak on participation
+  }
+
+  m_epochReports.push_back(report);
+  // Keep only last 10 epochs in memory
+  if (m_epochReports.size() > 10) {
+    m_epochReports.erase(m_epochReports.begin());
+  }
+}
+
+std::optional<EpochReport> CommitmentIndex::getEpochReport(uint64_t epochNumber) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  for (auto it = m_epochReports.rbegin(); it != m_epochReports.rend(); ++it) {
+    if (it->epochNumber == epochNumber) return *it;
+  }
+  return std::nullopt;
+}
+
+std::optional<EpochReport> CommitmentIndex::getLatestEpochReport() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (m_epochReports.empty()) return std::nullopt;
+  return m_epochReports.back();
 }
 
 }  // namespace CryptoNote

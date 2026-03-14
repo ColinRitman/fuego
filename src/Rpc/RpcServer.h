@@ -90,8 +90,9 @@ private:
   bool on_get_commitment_merkle_root(const COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::response& res);
   bool on_get_commitment_merkle_proof(const COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::response& res);
   bool on_check_commitment_exists(const COMMAND_RPC_CHECK_COMMITMENT_EXISTS::request& req, COMMAND_RPC_CHECK_COMMITMENT_EXISTS::response& res);
+  bool on_get_epoch_report(const COMMAND_RPC_GET_EPOCH_REPORT::request& req, COMMAND_RPC_GET_EPOCH_REPORT::response& res);
 
-  // Phase 4: Elderfier RPC endpoints
+  // Elderfier RPC endpoints
   bool on_get_elderfier_signatures(const COMMAND_RPC_GET_ELDERFIER_SIGNATURES::request& req,
                                     COMMAND_RPC_GET_ELDERFIER_SIGNATURES::response& res);
   bool on_get_elderfier_consensus_status(const COMMAND_RPC_GET_ELDERFIER_CONSENSUS_STATUS::request& req,

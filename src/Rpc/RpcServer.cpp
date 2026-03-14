@@ -129,6 +129,7 @@ std::unordered_map<std::string, RpcServer::RpcHandler<RpcServer::HandlerFunction
   { "/get_commitment_merkle_root", { jsonMethod<COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT>(&RpcServer::on_get_commitment_merkle_root), true } },
   { "/get_commitment_merkle_proof", { jsonMethod<COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF>(&RpcServer::on_get_commitment_merkle_proof), true } },
   { "/check_commitment_exists", { jsonMethod<COMMAND_RPC_CHECK_COMMITMENT_EXISTS>(&RpcServer::on_check_commitment_exists), true } },
+  { "/get_epoch_report", { jsonMethod<COMMAND_RPC_GET_EPOCH_REPORT>(&RpcServer::on_get_epoch_report), true } },
 
   // json rpc
   { "/json_rpc", { std::bind(&RpcServer::processJsonRpcRequest, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3), true } }
@@ -1934,6 +1935,67 @@ bool RpcServer::on_check_commitment_exists(const COMMAND_RPC_CHECK_COMMITMENT_EX
     return true;
   } catch (const std::exception& e) {
     res.exists = false;
+    res.status = CORE_RPC_STATUS_OK;
+    return true;
+  }
+}
+
+bool RpcServer::on_get_epoch_report(const COMMAND_RPC_GET_EPOCH_REPORT::request& req,
+                                     COMMAND_RPC_GET_EPOCH_REPORT::response& res) {
+  try {
+    std::optional<EpochReport> report;
+    if (req.epoch == 0) {
+      report = m_core.getCommitmentIndex().getLatestEpochReport();
+    } else {
+      report = m_core.getCommitmentIndex().getEpochReport(req.epoch);
+    }
+
+    if (!report) {
+      res.found = false;
+      res.status = CORE_RPC_STATUS_OK;
+      return true;
+    }
+
+    res.found = true;
+    res.epoch_number = report->epochNumber;
+    res.epoch_start_block = report->epochStartBlock;
+    res.epoch_end_block = report->epochEndBlock;
+    res.generated_at_block = report->generatedAtBlock;
+    res.active_efer_count = report->activeEfierCount;
+    res.participating_efer_count = report->participatingEfierCount;
+    res.total_fees_distributed = report->totalFeesDistributed;
+    res.signing_efier_ids = report->signingEfierIds;
+    res.missing_efier_ids = report->missingEfierIds;
+    res.slash_advisory = report->slash_advisory;
+
+    for (auto& a : report->efierActivity) {
+      COMMAND_RPC_GET_EPOCH_REPORT::EFierActivityRpc rpc;
+      rpc.elderfier_id = a.elderfier_id;
+      rpc.address = a.address;
+      rpc.ceremony_alias = a.ceremonyAlias;
+      rpc.signed_this_epoch = a.signedThisEpoch;
+      rpc.signatures_submitted = a.signaturesSubmitted;
+      rpc.fees_earned = a.feesEarned;
+      rpc.is_slashed = a.isSlashed;
+      rpc.is_unstaking = a.isUnstaking;
+      rpc.consecutive_missed_epochs = a.consecutiveMissedEpochs;
+      res.efier_activity.push_back(rpc);
+    }
+
+    for (auto& ev : report->doubleSignEvents) {
+      COMMAND_RPC_GET_EPOCH_REPORT::DoubleSignRpc rpc;
+      rpc.elderfier_id = ev.elderfier_id;
+      rpc.root_a = Common::podToHex(ev.root_a);
+      rpc.root_b = Common::podToHex(ev.root_b);
+      rpc.block_height = ev.block_height;
+      rpc.detected_at_block = ev.detected_at_block;
+      res.double_sign_events.push_back(rpc);
+    }
+
+    res.status = CORE_RPC_STATUS_OK;
+    return true;
+  } catch (const std::exception& e) {
+    res.found = false;
     res.status = CORE_RPC_STATUS_OK;
     return true;
   }

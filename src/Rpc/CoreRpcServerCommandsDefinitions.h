@@ -1456,6 +1456,93 @@ struct COMMAND_RPC_CHECK_COMMITMENT_EXISTS {
   };
 };
 
+/** @brief Get per-epoch EFier activity report for elder_council review
+  * Pass epoch=0 for the most recent completed epoch.
+  */
+struct COMMAND_RPC_GET_EPOCH_REPORT {
+  struct request {
+    uint64_t epoch = 0;  // 0 = latest completed epoch
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(epoch)
+    }
+  };
+
+  struct EFierActivityRpc {
+    uint8_t elderfier_id;
+    std::string address;
+    std::string ceremony_alias;
+    bool signed_this_epoch;
+    uint64_t signatures_submitted;
+    uint64_t fees_earned;
+    bool is_slashed;
+    bool is_unstaking;
+    uint32_t consecutive_missed_epochs;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(elderfier_id)
+      KV_MEMBER(address)
+      KV_MEMBER(ceremony_alias)
+      KV_MEMBER(signed_this_epoch)
+      KV_MEMBER(signatures_submitted)
+      KV_MEMBER(fees_earned)
+      KV_MEMBER(is_slashed)
+      KV_MEMBER(is_unstaking)
+      KV_MEMBER(consecutive_missed_epochs)
+    }
+  };
+
+  struct DoubleSignRpc {
+    uint8_t elderfier_id;
+    std::string root_a;
+    std::string root_b;
+    uint64_t block_height;
+    uint64_t detected_at_block;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(elderfier_id)
+      KV_MEMBER(root_a)
+      KV_MEMBER(root_b)
+      KV_MEMBER(block_height)
+      KV_MEMBER(detected_at_block)
+    }
+  };
+
+  struct response {
+    bool found;
+    uint64_t epoch_number;
+    uint64_t epoch_start_block;
+    uint64_t epoch_end_block;
+    uint64_t generated_at_block;
+    uint64_t active_efer_count;
+    uint64_t participating_efer_count;
+    uint64_t total_fees_distributed;
+    std::vector<uint8_t> signing_efier_ids;
+    std::vector<uint8_t> missing_efier_ids;
+    std::vector<EFierActivityRpc> efier_activity;
+    std::vector<DoubleSignRpc> double_sign_events;
+    std::vector<std::string> slash_advisory;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(found)
+      KV_MEMBER(epoch_number)
+      KV_MEMBER(epoch_start_block)
+      KV_MEMBER(epoch_end_block)
+      KV_MEMBER(generated_at_block)
+      KV_MEMBER(active_efer_count)
+      KV_MEMBER(participating_efer_count)
+      KV_MEMBER(total_fees_distributed)
+      KV_MEMBER(signing_efier_ids)
+      KV_MEMBER(missing_efier_ids)
+      KV_MEMBER(efier_activity)
+      KV_MEMBER(double_sign_events)
+      KV_MEMBER(slash_advisory)
+      KV_MEMBER(status)
+    }
+  };
+};
+
 /** @brief Get total burned XFG amount (eternal flame)
   */
  struct COMMAND_RPC_GET_ETHERNAL_FLAME {

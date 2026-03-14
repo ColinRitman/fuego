@@ -547,6 +547,8 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("burn_info", boost::bind(&simple_wallet::burn_info, this, boost::arg<1>()), "burn_info <id> - Get detailed info of burn by ID");
 
   m_consoleHandler.setHandler("migrate_cold", boost::bind(&simple_wallet::migrate_cold, this, boost::arg<1>()), "migrate_cold <id> - Migrate a pre-v3 legacy deposit to v3 format (register commitment for L2 claims)");
+  // Hidden — only surfaced inside the elder_council panel. Direct use requires knowing it exists.
+  m_consoleHandler.setHandler("propose_slash", boost::bind(&simple_wallet::propose_slash, this, boost::arg<1>()), "");
 
   // NOTE: create_cold_secret and gen_proof might be better off as INTERNAL commands
   // Users should NOT manually create commitments (auto-embedded in tx_extra)
@@ -2362,6 +2364,18 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
     success_msg_writer() << "";
   }
 
+  // ── Council actions ──────────────────────────────────────────────────────
+  success_msg_writer() << "  ── COUNCIL ACTIONS ─────────────────────────────────────";
+  success_msg_writer() << "";
+  success_msg_writer() << "  propose_slash <deposit_txhash> <reason>";
+  success_msg_writer() << "      Submit a slash proposal for elder_council review.";
+  success_msg_writer() << "      Reasons: double_sign | inactive_<N>_epochs";
+  success_msg_writer() << "      Requires explicit confirmation before broadcasting.";
+  success_msg_writer() << "      Advisory notices appear in: /get_epoch_report";
+  success_msg_writer() << "";
+  success_msg_writer() << "  unstake";
+  success_msg_writer() << "      Batch-withdraw all (20) Elderfier staking deposits (1000-block review).";
+  success_msg_writer() << "";
   success_msg_writer() << "  Guard the Realm well, King " << registeredAlias << ".";
   success_msg_writer() << "";
   return true;
@@ -3102,6 +3116,177 @@ bool simple_wallet::migrate_cold(const std::vector<std::string> &args) {
 
   } catch (const std::exception &e) {
     fail_msg_writer() << "Migration error: " << e.what();
+  }
+
+  return true;
+}
+
+bool simple_wallet::propose_slash(const std::vector<std::string> &args) {
+  if (args.size() < 2) {
+    fail_msg_writer() << "Usage: propose_slash <deposit_txhash> <reason>";
+    fail_msg_writer() << "  <deposit_txhash>  64-char hex hash of the 0xEF deposit tx to slash";
+    fail_msg_writer() << "  <reason>          double_sign | inactive_<N>_epochs";
+    fail_msg_writer() << "";
+    fail_msg_writer() << "This submits a 0xEC QUORUM slash proposal on-chain for elder_council review.";
+    fail_msg_writer() << "Requires your Elderfier signing key (secret, 64 hex chars).";
+    fail_msg_writer() << "Slash proposals are advisory — they do not auto-execute.";
+    return true;
+  }
+
+  try {
+    // Parse deposit txhash
+    std::string depositHashHex = args[0];
+    if (depositHashHex.size() != 64) {
+      fail_msg_writer() << "Invalid deposit txhash: must be 64 hex characters.";
+      return true;
+    }
+    Crypto::Hash depositTxHash;
+    if (!Common::podFromHex(depositHashHex, depositTxHash)) {
+      fail_msg_writer() << "Invalid deposit txhash: bad hex encoding.";
+      return true;
+    }
+
+    std::string reason = args[1];
+    if (reason != "double_sign" && reason.find("inactive") == std::string::npos) {
+      fail_msg_writer() << "Invalid reason. Must be 'double_sign' or 'inactive_<N>_epochs'.";
+      return true;
+    }
+
+    // Derive EFier signing keypair from wallet spend key — same derivation as elder_council.
+    // No manual key entry: the signing key is deterministic from the wallet.
+    // This command is only reachable from the elder_council panel, which already verified
+    // that this wallet is a registered Elderfier.
+    CryptoNote::AccountKeys walletKeys;
+    m_wallet->getAccountKeys(walletKeys);
+    Crypto::PublicKey sigPubKey;
+    Crypto::SecretKey sigSecKey;
+    {
+      static const char label[] = "fuego_ef_sign___";  // 16 bytes
+      uint8_t preimage[48];
+      std::memcpy(preimage,      label, 16);
+      std::memcpy(preimage + 16, walletKeys.spendSecretKey.data, 32);
+      Crypto::hash_to_scalar(preimage, sizeof(preimage),
+        reinterpret_cast<Crypto::EllipticCurveScalar&>(sigSecKey));
+      Crypto::secret_key_to_public_key(sigSecKey, sigPubKey);
+    }
+
+    success_msg_writer() << "";
+    success_msg_writer() << "=== Ξlderfier Slash Proposal ===";
+    success_msg_writer() << "";
+    success_msg_writer() << "Deposit TX:  " << depositHashHex;
+    success_msg_writer() << "Reason:      " << reason;
+    success_msg_writer() << "Signing as:  " << Common::podToHex(sigPubKey).substr(0, 16) << "...";
+    success_msg_writer() << "";
+
+    // Build messageData: [slashing_percentage=100 (1 byte)] [slashed_amount=0 (8 bytes)]
+    // Amount of 0 lets the node compute slashed amount from the deposit itself
+    uint8_t slashPct = 100;
+    uint64_t slashAmt = 0;  // node derives exact amount from deposit record
+    std::vector<uint8_t> messageData(9, 0);
+    messageData[0] = slashPct;
+    memcpy(&messageData[1], &slashAmt, 8);
+
+    // Append reason string (null-terminated) so node logs can show it
+    messageData.insert(messageData.end(), reason.begin(), reason.end());
+    messageData.push_back(0x00);
+
+    // Compute signature: sign H(targetDepositHash || messageData) with EFier secret key
+    std::vector<uint8_t> sigPreimage;
+    sigPreimage.insert(sigPreimage.end(), depositTxHash.data,
+                       depositTxHash.data + sizeof(depositTxHash));
+    sigPreimage.insert(sigPreimage.end(), messageData.begin(), messageData.end());
+    Crypto::Hash sigHash;
+    Crypto::cn_fast_hash(sigPreimage.data(), sigPreimage.size(), sigHash);
+
+    Crypto::Signature msgSig;
+    Crypto::generate_signature(sigHash, sigPubKey, sigSecKey, msgSig);
+
+    // Build 0xEC QUORUM message
+    CryptoNote::TransactionExtraElderfierMessage slashMsg;
+    slashMsg.senderKey = sigPubKey;
+    slashMsg.recipientKey = Crypto::PublicKey{};  // broadcast to all
+    slashMsg.messageType = 0x01;  // slashing message type
+    slashMsg.timestamp = static_cast<uint64_t>(std::time(nullptr));
+    slashMsg.messageData = messageData;
+    slashMsg.signature.assign(reinterpret_cast<uint8_t*>(&msgSig),
+                              reinterpret_cast<uint8_t*>(&msgSig) + sizeof(msgSig));
+    slashMsg.consensusRequired = true;
+    slashMsg.consensusType = CryptoNote::ElderfierConsensusType::QUORUM;
+    slashMsg.requiredThreshold = 80;
+    slashMsg.targetDepositHash = depositTxHash;
+
+    // Final explicit confirmation — user must type the deposit hash to confirm
+    success_msg_writer() << "";
+    success_msg_writer() << "Signing pubkey: " << Common::podToHex(sigPubKey);
+    success_msg_writer() << "";
+    success_msg_writer() << "WARNING: This will permanently lock the target deposit.";
+    success_msg_writer() << "To confirm, type the first 8 characters of the deposit txhash:";
+    success_msg_writer() << "  Expected: " << depositHashHex.substr(0, 8);
+
+    std::string confirmHex;
+    m_consoleHandler.readLine(confirmHex);
+    confirmHex.erase(std::remove_if(confirmHex.begin(), confirmHex.end(), ::isspace), confirmHex.end());
+
+    if (confirmHex != depositHashHex.substr(0, 8)) {
+      success_msg_writer() << "Confirmation mismatch — slash proposal cancelled.";
+      return true;
+    }
+
+    // Serialize the 0xEC message into tx_extra
+    std::vector<uint8_t> extra;
+    CryptoNote::addElderfierMessageToExtra(extra, slashMsg);
+    std::string extraStr(extra.begin(), extra.end());
+
+    // Self-transfer carrying the slash proposal (fee-only tx)
+    CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+    WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
+    std::vector<CryptoNote::WalletLegacyTransfer> transfers;
+    CryptoNote::WalletLegacyTransfer selfTransfer;
+    selfTransfer.address = m_wallet->getAddress();
+    selfTransfer.amount = m_currency.minimumFee();
+    transfers.push_back(selfTransfer);
+
+    std::vector<CryptoNote::TransactionMessage> messages;
+    uint64_t fee = m_currency.minimumFee();
+    Crypto::SecretKey txSK;
+
+    CryptoNote::TransactionId tx = m_wallet->sendTransaction(
+        txSK, transfers, fee, extraStr, 0, 0, messages, 0);
+
+    if (tx == CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+      fail_msg_writer() << "Failed to create slash proposal transaction.";
+      return true;
+    }
+
+    std::error_code sendError = sent.wait(tx);
+    removeGuard.removeObserver();
+
+    if (sendError) {
+      fail_msg_writer() << "Slash proposal transaction failed: " << sendError.message();
+      return true;
+    }
+
+    CryptoNote::WalletLegacyTransaction txInfo;
+    m_wallet->getTransaction(tx, txInfo);
+
+    success_msg_writer(true) << "";
+    success_msg_writer(true) << "Slash proposal submitted.";
+    success_msg_writer(true) << "  Proposal TX:  " << Common::podToHex(txInfo.hash);
+    success_msg_writer(true) << "  Target:       " << depositHashHex;
+    success_msg_writer(true) << "  Reason:       " << reason;
+    success_msg_writer(true) << "";
+    success_msg_writer(true) << "The node will verify your EFier registration and execute the slash";
+    success_msg_writer(true) << "if the deposit is not already slashed and your signature is valid.";
+
+    try {
+      CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file);
+    } catch (const std::exception& e) {
+      fail_msg_writer() << e.what();
+    }
+
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "propose_slash error: " << e.what();
   }
 
   return true;

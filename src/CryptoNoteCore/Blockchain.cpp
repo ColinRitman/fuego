@@ -2250,6 +2250,15 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
       }
     }
 
+    // Slashed EFier stake guard: reject rings containing any slashed output.
+    // A slashed EFier must include their own output as a ring member to spend it,
+    // so rejecting all rings with slashed members makes withdrawal permanently impossible.
+    if (ref.isSlashed) {
+      logger(INFO) << "CommitmentSpend: ring member at index " << absIdx
+                   << " is a slashed EFier stake — tx rejected";
+      return false;
+    }
+
     // Track max referenced block height.
     if (pmax_related_block_height) {
       uint32_t blockHeight = ref.transactionIndex.block;
@@ -2984,24 +2993,148 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             const auto& elderfierMsg = boost::get<TransactionExtraElderfierMessage>(field);
 
             // If this is a quorum consensus message with a target deposit hash,
-            // it may represent a slashing decision
+            // it represents a slashing verdict from the elder_council
             if (elderfierMsg.consensusRequired &&
                 elderfierMsg.consensusType == ElderfierConsensusType::QUORUM &&
                 elderfierMsg.targetDepositHash != Crypto::Hash()) {
 
-              // Parse messageData to extract slashing amount
-              // Message format: [slashing_percentage (1 byte)] [slashed_amount (8 bytes)]
-              if (elderfierMsg.messageData.size() >= 9) {
-                uint8_t slashingPercentage = elderfierMsg.messageData[0];
-                uint64_t slashedAmount = 0;
-                memcpy(&slashedAmount, &elderfierMsg.messageData[1], 8);
+              // ── Slash Safeguards ──────────────────────────────────────────────
+              // Three gates before any slash executes:
+              //   1. Sender must be a registered ACTIVE EFier (proven by senderKey)
+              //   2. Target deposit must not already be slashed (no double-slash)
+              //   3. Sender signature on the message must be cryptographically valid
+              // Any gate failure silently skips — this tx is still valid (fees paid),
+              // the slash just doesn't execute. Malformed slash proposals are a protocol
+              // violation but not a chain-stall event.
 
-                if (slashedAmount > 0) {
-                  permanentBurns += slashedAmount;
+              bool slashGatesOk = false;
 
-                  logger(INFO) << "ElderFier Stake Slashing: " << slashedAmount
-                               << " XFG (" << static_cast<int>(slashingPercentage)
-                               << "% of deposit) permanently burned & added to Ethernal Flame";
+              // Gate 1: Verify senderKey is a registered ACTIVE EFier's signing pubkey
+              uint8_t senderEfid = 255;
+              for (uint8_t id = 0; id < 255; ++id) {
+                Crypto::PublicKey regPubkey;
+                if (m_commitmentIndex.getElderfierSigningPubkey(id, regPubkey) &&
+                    regPubkey == elderfierMsg.senderKey) {
+                  senderEfid = id;
+                  break;
+                }
+              }
+              if (senderEfid == 255) {
+                logger(WARNING) << "Slash verdict ignored: senderKey not a registered ACTIVE EFier";
+              }
+              // Gate 2: Check target deposit not already slashed
+              else {
+                CommitmentEntry targetEntry;
+                bool targetFound = m_commitmentIndex.getCommitmentEntryByTxHash(
+                    elderfierMsg.targetDepositHash, targetEntry);
+                if (targetFound && targetEntry.isSlashed) {
+                  logger(WARNING) << "Slash verdict ignored: deposit "
+                                  << Common::podToHex(elderfierMsg.targetDepositHash)
+                                  << " is already slashed (double-slash prevented)";
+                } else if (!targetFound) {
+                  logger(WARNING) << "Slash verdict ignored: deposit "
+                                  << Common::podToHex(elderfierMsg.targetDepositHash)
+                                  << " not found in commitment index";
+                } else {
+                  // Gate 3: Verify the sender's Ed25519 signature over the message data
+                  // Signature covers: targetDepositHash || messageData
+                  std::vector<uint8_t> sigPreimage;
+                  sigPreimage.insert(sigPreimage.end(),
+                      elderfierMsg.targetDepositHash.data,
+                      elderfierMsg.targetDepositHash.data + sizeof(elderfierMsg.targetDepositHash));
+                  sigPreimage.insert(sigPreimage.end(),
+                      elderfierMsg.messageData.begin(), elderfierMsg.messageData.end());
+                  Crypto::Hash sigHash;
+                  Crypto::cn_fast_hash(sigPreimage.data(), sigPreimage.size(), sigHash);
+                  Crypto::Signature msgSig;
+                  bool sigValid = false;
+                  if (elderfierMsg.signature.size() == sizeof(Crypto::Signature)) {
+                    memcpy(&msgSig, elderfierMsg.signature.data(), sizeof(Crypto::Signature));
+                    sigValid = Crypto::check_signature(sigHash, elderfierMsg.senderKey, msgSig);
+                  }
+                  if (!sigValid) {
+                    logger(WARNING) << "Slash verdict ignored: invalid EFier signature from EFiD "
+                                    << static_cast<int>(senderEfid);
+                  } else {
+                    slashGatesOk = true;
+                  }
+                }
+              }
+
+              // Record this EFier's slash vote.
+              // addSlashVote returns true ONLY when the quorum threshold is FIRST crossed.
+              // A single propose_slash tx is just one vote — nothing is slashed until
+              // ≥80% of active EFiers have independently submitted proposals.
+              if (slashGatesOk) {
+                // Extract reason string from messageData (after the 9-byte header)
+                std::string slashReason;
+                if (elderfierMsg.messageData.size() > 9) {
+                  const uint8_t* rs = elderfierMsg.messageData.data() + 9;
+                  size_t rl = elderfierMsg.messageData.size() - 9;
+                  size_t nl = 0;
+                  while (nl < rl && rs[nl] != 0x00) ++nl;
+                  slashReason = std::string(reinterpret_cast<const char*>(rs), nl);
+                }
+
+                uint32_t blockHeight = static_cast<uint32_t>(
+                    m_blocks.size() > 0 ? m_blocks.size() - 1 : 0);
+
+                bool quorumReached = m_commitmentIndex.addSlashVote(
+                    elderfierMsg.targetDepositHash,
+                    senderEfid,
+                    slashReason,
+                    blockHeight,
+                    static_cast<uint8_t>(elderfierMsg.requiredThreshold));
+
+                size_t votesNow   = m_commitmentIndex.getSlashVoteCount(elderfierMsg.targetDepositHash);
+                size_t activeEfiers = m_commitmentIndex.getActiveElderfierCount();
+
+                if (!quorumReached) {
+                  // Just a vote — not a slash. Wait for quorum.
+                  logger(INFO) << "Slash vote recorded: EFiD " << static_cast<int>(senderEfid)
+                               << " → deposit " << Common::podToHex(elderfierMsg.targetDepositHash)
+                               << " | votes: " << votesNow << "/" << activeEfiers
+                               << " (need " << static_cast<int>(elderfierMsg.requiredThreshold) << "%)";
+                } else {
+                  // Quorum just reached — execute slash
+                  uint8_t slashPct = elderfierMsg.messageData.size() >= 1
+                      ? elderfierMsg.messageData[0] : 100;
+                  uint64_t slashedAmount = 0;
+                  if (elderfierMsg.messageData.size() >= 9) {
+                    memcpy(&slashedAmount, &elderfierMsg.messageData[1], 8);
+                  }
+
+                  bool markedInIndex = m_commitmentIndex.markCommitmentSlashed(
+                      elderfierMsg.targetDepositHash);
+                  m_commitmentIndex.markSlashProposalExecuted(elderfierMsg.targetDepositHash);
+
+                  // Mark in m_commitmentOutputs (prevents ring membership / withdrawal)
+                  CommitmentEntry slashedEntry;
+                  if (markedInIndex &&
+                      m_commitmentIndex.getCommitmentEntryByTxHash(
+                          elderfierMsg.targetDepositHash, slashedEntry)) {
+                    auto txIt = m_transactionMap.find(elderfierMsg.targetDepositHash);
+                    if (txIt != m_transactionMap.end()) {
+                      const TransactionIndex& slashTxIdx = txIt->second;
+                      auto oIt = m_commitmentOutputs.find(slashedEntry.amount);
+                      if (oIt != m_commitmentOutputs.end()) {
+                        for (auto& ref : oIt->second) {
+                          if (ref.transactionIndex.block == slashTxIdx.block &&
+                              ref.transactionIndex.transaction == slashTxIdx.transaction) {
+                            ref.isSlashed = true;
+                          }
+                        }
+                      }
+                    }
+                  }
+
+                  if (slashedAmount > 0) permanentBurns += slashedAmount;
+
+                  logger(INFO) << "Slash EXECUTED (quorum: " << votesNow << "/" << activeEfiers
+                               << " EFiers, " << static_cast<int>(slashPct) << "%)"
+                               << " | reason=" << slashReason
+                               << " | deposit=" << Common::podToHex(elderfierMsg.targetDepositHash)
+                               << " | ring-withdrawal blocked: " << (markedInIndex ? "YES" : "NO");
                 }
               }
             }
@@ -3096,6 +3229,30 @@ bool Blockchain::pushBlock(BlockEntry &block) {
 
   // Check elderfier consensus threshold and flush if needed
   checkElderfierConsensusThreshold();
+
+  // Generate epoch report at epoch boundaries
+  uint32_t newHeight = static_cast<uint32_t>(m_blocks.size()) - 1;
+  uint64_t epochDuration = m_currency.isTestnet()
+      ? CryptoNote::parameters::TESTNET_EPOCH_DURATION_BLOCKS
+      : CryptoNote::parameters::EPOCH_DURATION_BLOCKS;
+  if (newHeight > 0 && newHeight % epochDuration == 0) {
+    uint64_t epochNumber = newHeight / epochDuration;
+    uint64_t epochStart = (epochNumber - 1) * epochDuration;
+    uint64_t epochEnd = epochStart + epochDuration - 1;
+    EpochReport report = m_commitmentIndex.generateEpochReport(
+        epochNumber, epochStart, epochEnd, newHeight);
+    m_commitmentIndex.storeEpochReport(report);
+    logger(INFO) << "=== Epoch " << epochNumber << " Report ==="
+                 << " blocks=" << epochStart << "-" << epochEnd
+                 << " active=" << report.activeEfierCount
+                 << " signed=" << report.participatingEfierCount
+                 << " missing=" << report.missingEfierIds.size()
+                 << " double_signs=" << report.doubleSignEvents.size()
+                 << " recommendations=" << report.slash_advisory.size();
+    for (auto& rec : report.slash_advisory) {
+      logger(WARNING) << "elder_council ADVISORY (use `propose_slash` to act): " << rec;
+    }
+  }
 
   return true;
 }

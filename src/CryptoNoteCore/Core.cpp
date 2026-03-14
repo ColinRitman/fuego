@@ -1340,6 +1340,10 @@ bool core::hasCommitment(const Crypto::Hash& commitment) const {
   return m_blockchain.hasCommitment(commitment);
 }
 
+const CommitmentIndex& core::getCommitmentIndex() const {
+  return m_blockchain.getCommitmentIndex();
+}
+
 size_t core::getCommitmentCount() const {
   return m_blockchain.getCommitmentCount();
 }
