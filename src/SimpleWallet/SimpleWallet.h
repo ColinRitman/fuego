@@ -124,10 +124,12 @@ namespace CryptoNote
     bool cold(const std::vector<std::string> &args);
     bool elderking_ceremony(const std::vector<std::string> &args);
     bool withdraw(const std::vector<std::string> &args);
+    bool unstake(const std::vector<std::string> &args);
     bool list_cold(const std::vector<std::string> &args);
     bool cold_info(const std::vector<std::string> &args);
     bool list_burns(const std::vector<std::string> &args);
     bool burn_info(const std::vector<std::string> &args);
+    bool migrate_cold(const std::vector<std::string> &args);
 
      bool create_cold_secret(const std::vector<std::string> &args);
 

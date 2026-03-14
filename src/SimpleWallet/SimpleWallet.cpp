@@ -538,12 +538,15 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   // TODO: Re-enable burn and cold commands in next release
   // m_consoleHandler.setHandler("burn", boost::bind(&simple_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn deposit (0.8, 8, 80, 800 XFG). Term automatically set to FOREVER.");
   // m_consoleHandler.setHandler("cold", boost::bind(&simple_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a COLD deposit (0.8, 8, 80, 800 XFG with terms 3=3mo, 12=1yr).");
-  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begins Ælderfire StayKing Ceremony. Details on what is, & how to become, an Ξlderfier (interactive, 5x 800 XFG stakes req'd).");
+  m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&simple_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begins Ælderfire StayKing Ceremony. Details on what is, & how to become, an Ξlderfier (interactive, 20 deposits across all tiers, 4,444 XFG req'd).");
   m_consoleHandler.setHandler("withdraw", boost::bind(&simple_wallet::withdraw, this, boost::arg<1>()), "withdraw <id> - Withdraw a deposit");
+  m_consoleHandler.setHandler("unstake", boost::bind(&simple_wallet::unstake, this, boost::arg<1>()), "unstake - Batch-withdraw all Elderfier staking deposits (single tx)");
   m_consoleHandler.setHandler("list_cold", boost::bind(&simple_wallet::list_cold, this, boost::arg<1>()), "list_cold - List all COLD yield deposits");
   m_consoleHandler.setHandler("cold_info", boost::bind(&simple_wallet::cold_info, this, boost::arg<1>()), "cold_info <id> - Get detailed info on your Certificate of Ledger Deposits");
   m_consoleHandler.setHandler("list_burns", boost::bind(&simple_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all XFG burn transactions (HEAT)");
   m_consoleHandler.setHandler("burn_info", boost::bind(&simple_wallet::burn_info, this, boost::arg<1>()), "burn_info <id> - Get detailed info of burn by ID");
+
+  m_consoleHandler.setHandler("migrate_cold", boost::bind(&simple_wallet::migrate_cold, this, boost::arg<1>()), "migrate_cold <id> - Migrate a pre-v3 legacy deposit to v3 format (register commitment for L2 claims)");
 
   // NOTE: create_cold_secret and gen_proof might be better off as INTERNAL commands
   // Users should NOT manually create commitments (auto-embedded in tx_extra)
@@ -1790,13 +1793,14 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
   success_msg_writer() << "            Run your Elderfier node at all times. A Guardian";
   success_msg_writer() << "            of the Flame must protect the Realm of Privacy.";
   success_msg_writer() << "";
-  success_msg_writer() << "  HONOUR    Your 4,000 XFG stake is your bond to the Realm.";
+  success_msg_writer() << "  HONOUR    Your 4,444 XFG stake is your bond to the Realm.";
   success_msg_writer() << "            Betrayal will result in SLASHING — your stake";
   success_msg_writer() << "            burned and your name struck from the registry.";
   success_msg_writer() << "";
   success_msg_writer() << "  ── WHAT THE CEREMONY REQUIRES ───────────────────────────";
   success_msg_writer() << "";
-  success_msg_writer() << "    5 deposits of 800 XFG each  (4,000 XFG total stake)";
+  success_msg_writer() << "    20 deposits across all 4 tiers (4,444 XFG total stake)";
+  success_msg_writer() << "    5x 0.8 XFG + 5x 8 XFG + 5x 80 XFG + 5x 800 XFG";
   success_msg_writer() << "    Tagged 0xEF — the Ælderfier mark — slashable stake";
   success_msg_writer() << "    A unique 8-character Ælder King name (your on-chain ID)";
   success_msg_writer() << "    You MUST run an Elderfier node to sign roots & earn fees";
@@ -1826,7 +1830,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
   success_msg_writer() << "  ── CHOOSE YOUR ELDER KING NAME ─────────────────────────";
   success_msg_writer() << "";
   success_msg_writer() << "  Your Ælder King name is your eternal identity on the Fuego";
-  success_msg_writer() << "  network. It will be embedded in all 5 of your stakes and";
+  success_msg_writer() << "  network. It will be embedded in all of your stakes and";
   success_msg_writer() << "  registered on-chain the moment your deposits confirm.";
   success_msg_writer() << "";
   success_msg_writer() << "  Rules:  Exactly 8 characters  |  A-Z  0-9  & only";
@@ -1949,23 +1953,101 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
   {
     // ── Balance check ────────────────────────────────────────────────────
     uint64_t balance = m_wallet->actualBalance();
-    uint64_t amount_per_deposit = 800 * CryptoNote::parameters::COIN;
-    uint64_t required = 5 * amount_per_deposit;
+    const uint64_t tierAmounts[] = {
+      CryptoNote::parameters::AMOUNT_TIER_0,  // 0.8 XFG
+      CryptoNote::parameters::AMOUNT_TIER_1,  // 8 XFG
+      CryptoNote::parameters::AMOUNT_TIER_2,  // 80 XFG
+      CryptoNote::parameters::AMOUNT_TIER_3   // 800 XFG
+    };
+    const uint32_t depositsPerTier = CryptoNote::parameters::ELDERKING_DEPOSITS_PER_TIER;
+    const uint32_t totalDeposits = CryptoNote::parameters::ELDERKING_TOTAL_DEPOSITS;
+    uint64_t required = CryptoNote::parameters::ELDERKING_CEREMONY_AMOUNT;
     uint64_t fee = m_currency.minimumFee();
 
     success_msg_writer() << "  ── PREPARING THE RITUAL ─────────────────────────────────";
     success_msg_writer() << "";
-    success_msg_writer() << "  Wallet balance:    " << m_currency.formatAmount(balance) << " XFG";
-    success_msg_writer() << "  5 stakes (800x5):  " << m_currency.formatAmount(required) << " XFG";
-    success_msg_writer() << "  Network fees (x5): " << m_currency.formatAmount(5 * fee) << " XFG";
-    success_msg_writer() << "  Total required:    " << m_currency.formatAmount(required + (5 * fee)) << " XFG";
+    success_msg_writer() << "  Wallet balance:      " << m_currency.formatAmount(balance) << " XFG";
+    success_msg_writer() << "  20 stakes (5/tier):  " << m_currency.formatAmount(required) << " XFG";
+    success_msg_writer() << "    5x 0.8 + 5x 8 + 5x 80 + 5x 800 XFG";
+    success_msg_writer() << "  Network fees (x" << totalDeposits << "): " << m_currency.formatAmount(totalDeposits * fee) << " XFG";
+    success_msg_writer() << "  Total required:      " << m_currency.formatAmount(required + (totalDeposits * fee)) << " XFG";
     success_msg_writer() << "";
 
-    if (balance < required + (5 * fee)) {
+    if (balance < required + (totalDeposits * fee)) {
       fail_msg_writer() << "  The flame requires more ħeat.";
-      fail_msg_writer() << "  You need " << m_currency.formatAmount(required + (5 * fee) - balance) << " more XFG.";
+      fail_msg_writer() << "  You need " << m_currency.formatAmount(required + (totalDeposits * fee) - balance) << " more XFG.";
       fail_msg_writer() << "  Ceremony aborted. Return when your coffers are ready.";
       return true;
+    }
+
+    // ── DRY RUN: simulate output allocation across all 20 deposits ──────
+    // Verify spendable outputs can cover each tier's deposits sequentially.
+    // The wallet creates change outputs, so we simulate greedy allocation:
+    // sort outputs descending, allocate to each deposit, track change.
+    {
+      auto unspent = m_wallet->getUnspentOutputs();
+      std::vector<uint64_t> available;
+      for (const auto& out : unspent) {
+        available.push_back(out.amount);
+      }
+      std::sort(available.begin(), available.end(), std::greater<uint64_t>());
+
+      // Simulate: for each deposit (largest tier first to use big outputs early),
+      // find an output >= deposit+fee, consume it, add change back.
+      struct DepositReq { uint64_t amount; uint32_t count; };
+      DepositReq reqs[] = {
+        {tierAmounts[3], depositsPerTier},  // 800 XFG first (biggest)
+        {tierAmounts[2], depositsPerTier},  // 80 XFG
+        {tierAmounts[1], depositsPerTier},  // 8 XFG
+        {tierAmounts[0], depositsPerTier},  // 0.8 XFG last (smallest)
+      };
+
+      bool dryRunOk = true;
+      for (const auto& req : reqs) {
+        for (uint32_t d = 0; d < req.count; ++d) {
+          uint64_t needed = req.amount + fee;
+          // Find first output >= needed
+          auto it = std::lower_bound(available.begin(), available.end(), needed, std::greater<uint64_t>());
+          if (it == available.end()) {
+            // Try combining: just check if sum of remaining >= needed
+            uint64_t sum = 0;
+            for (auto v : available) sum += v;
+            if (sum < needed) {
+              dryRunOk = false;
+              fail_msg_writer() << "  Dry run failed: cannot cover "
+                                << m_currency.formatAmount(req.amount) << " XFG deposit #" << (d+1)
+                                << " — outputs too fragmented.";
+              fail_msg_writer() << "  Send funds to yourself first to consolidate outputs.";
+              break;
+            }
+            // Wallet can combine multiple inputs — assume it works and consume from top
+            uint64_t consumed = 0;
+            while (consumed < needed && !available.empty()) {
+              consumed += available.back();
+              available.pop_back();
+            }
+            if (consumed > needed) {
+              // Change goes back
+              available.push_back(consumed - needed);
+              std::sort(available.begin(), available.end(), std::greater<uint64_t>());
+            }
+          } else {
+            uint64_t change = *it - needed;
+            available.erase(it);
+            if (change > 0) {
+              available.push_back(change);
+              std::sort(available.begin(), available.end(), std::greater<uint64_t>());
+            }
+          }
+        }
+        if (!dryRunOk) break;
+      }
+
+      if (!dryRunOk) {
+        fail_msg_writer() << "  Ceremony aborted. Consolidate your outputs and try again.";
+        return true;
+      }
+      success_msg_writer() << "  Dry run passed: outputs can cover all 20 deposits.";
     }
 
     success_msg_writer() << "  The balance holds. The Ritual of Five Flames begins.";
@@ -1975,7 +2057,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
 
-    static const char* const flameNames[] = { "First", "Second", "Third", "Fourth", "Fifth" };
+    static const char* const tierNames[] = { "(0.8 XFG)", "(8 XFG)", "(80 XFG)", "(800 XFG)" };
 
     // Fetch spend public key once — used to build per-deposit commitment
     CryptoNote::AccountKeys walletKeys;
@@ -1996,84 +2078,90 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       Crypto::secret_key_to_public_key(signingSecKey, signingPubKey);
     }
 
-    for (int i = 0; i < 5; ++i) {
-      success_msg_writer() << "  The " << flameNames[i] << " Flame — forging stake " << (i + 1) << " of 5...";
+    uint32_t flameCount = 0;
+    bool firstDeposit = true;
+    for (uint32_t tier = 0; tier < 4; ++tier) {
+      success_msg_writer() << "";
+      success_msg_writer() << "  ── Tier " << tier << ": " << tierNames[tier] << " ──";
 
-      std::vector<uint8_t> extra;
-      Crypto::PublicKey public_key;
-      Crypto::SecretKey secret_key;
-      Crypto::generate_keys(public_key, secret_key);
-      Crypto::Hash commitment_hash = Crypto::cn_fast_hash(public_key.data, sizeof(public_key.data));
+      for (uint32_t d = 0; d < depositsPerTier; ++d) {
+        ++flameCount;
+        uint64_t depositAmount = tierAmounts[tier];
+        success_msg_writer() << "    Flame " << flameCount << "/" << totalDeposits
+                             << " — " << m_currency.formatAmount(depositAmount) << " XFG...";
 
-      // Build one-way commitment: H(spendPublicKey || ephemeralPublicKey)
-      // Binds deposit to staker without embedding wallet address on-chain.
-      // The ephemeral public key is unique per deposit, so each commitment is distinct.
-      uint8_t commit_preimage[64];
-      std::memcpy(commit_preimage,      walletKeys.address.spendPublicKey.data, 32);
-      std::memcpy(commit_preimage + 32, public_key.data,                         32);
-      Crypto::Hash elderfier_commitment = Crypto::cn_fast_hash(commit_preimage, sizeof(commit_preimage));
+        std::vector<uint8_t> extra;
+        Crypto::PublicKey public_key;
+        Crypto::SecretKey secret_key;
+        Crypto::generate_keys(public_key, secret_key);
+        Crypto::Hash commitment_hash = Crypto::cn_fast_hash(public_key.data, sizeof(public_key.data));
 
-      CryptoNote::TransactionExtraElderfierDeposit elderfierDeposit;
-      elderfierDeposit.depositHash        = commitment_hash;
-      elderfierDeposit.depositAmount      = amount_per_deposit;
-      elderfierDeposit.elderfierCommitment = elderfier_commitment;
-      elderfierDeposit.securityWindow     = 28800;
-      elderfierDeposit.metadata.clear();
-      elderfierDeposit.metadata.push_back(0xEA);
-      elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(), alias.begin(), alias.end());
-      // Append signing public key (32 bytes) — used by daemon to verify elderfier identity
-      elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(),
-        signingPubKey.data, signingPubKey.data + 32);
-      elderfierDeposit.signature.clear();
-      elderfierDeposit.isSlashable        = true;
+        // Build one-way commitment: H(spendPublicKey || ephemeralPublicKey)
+        uint8_t commit_preimage[64];
+        std::memcpy(commit_preimage,      walletKeys.address.spendPublicKey.data, 32);
+        std::memcpy(commit_preimage + 32, public_key.data,                         32);
+        Crypto::Hash elderfier_commitment = Crypto::cn_fast_hash(commit_preimage, sizeof(commit_preimage));
 
-      // First flame also carries the 0xEA alias registration so the daemon
-      // registers the alias in AliasIndex with addressHash = cn_fast_hash(walletAddress).
-      // This makes lookup_alias and the "already registered" ceremony check work correctly.
-      if (i == 0) {
-        CryptoNote::TransactionExtraAliasRegistration aliasReg;
-        aliasReg.alias = alias;
-        aliasReg.aliasHash = Crypto::cn_fast_hash(alias.data(), alias.size());
-        std::string walletAddr = m_wallet->getAddress();
-        aliasReg.addressHash = Crypto::cn_fast_hash(walletAddr.data(), walletAddr.size());
-        aliasReg.ownerAddress = "";  // privacy — never stored on-chain
-        aliasReg.aliasType = 0;     // Elderfier
-        CryptoNote::addAliasToExtra(extra, aliasReg);
-      }
+        CryptoNote::TransactionExtraElderfierDeposit elderfierDeposit;
+        elderfierDeposit.depositHash        = commitment_hash;
+        elderfierDeposit.depositAmount      = depositAmount;
+        elderfierDeposit.elderfierCommitment = elderfier_commitment;
+        elderfierDeposit.securityWindow     = 28800;
+        elderfierDeposit.metadata.clear();
+        elderfierDeposit.metadata.push_back(0xEA);
+        elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(), alias.begin(), alias.end());
+        elderfierDeposit.metadata.insert(elderfierDeposit.metadata.end(),
+          signingPubKey.data, signingPubKey.data + 32);
+        elderfierDeposit.signature.clear();
+        elderfierDeposit.isSlashable        = true;
 
-      CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
-      std::string extraString = std::string(extra.begin(), extra.end());
+        // First deposit carries the 0xEA alias registration
+        if (firstDeposit) {
+          CryptoNote::TransactionExtraAliasRegistration aliasReg;
+          aliasReg.alias = alias;
+          aliasReg.aliasHash = Crypto::cn_fast_hash(alias.data(), alias.size());
+          std::string walletAddr = m_wallet->getAddress();
+          aliasReg.addressHash = Crypto::cn_fast_hash(walletAddr.data(), walletAddr.size());
+          aliasReg.ownerAddress = "";
+          aliasReg.aliasType = 0;     // Elderfier
+          CryptoNote::addAliasToExtra(extra, aliasReg);
+          firstDeposit = false;
+        }
 
-      CryptoNote::WalletHelper::SendCompleteResultObserver sent;
-      WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+        CryptoNote::addElderfierDepositToExtra(extra, elderfierDeposit);
+        std::string extraString = std::string(extra.begin(), extra.end());
 
-      CryptoNote::TransactionId txId = m_wallet->deposit(
-        CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING,
-        amount_per_deposit,
-        fee,
-        extraString,
-        0
-      );
+        CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+        WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
 
-      if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+        CryptoNote::TransactionId txId = m_wallet->deposit(
+          CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING,
+          depositAmount,
+          fee,
+          extraString,
+          0
+        );
+
+        if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+          removeGuard.removeObserver();
+          fail_msg_writer() << "";
+          fail_msg_writer() << "  The ritual faltered at flame " << flameCount << " of " << totalDeposits << ".";
+          fail_msg_writer() << "  " << (flameCount - 1) << " stake(s) were forged before it broke.";
+          fail_msg_writer() << "  Check your balance and connection, then try again.";
+          return true;
+        }
+
+        std::error_code sendError = sent.wait(txId);
         removeGuard.removeObserver();
-        fail_msg_writer() << "";
-        fail_msg_writer() << "  The ritual faltered at flame " << (i + 1) << " of 5.";
-        fail_msg_writer() << "  " << i << " stake(s) were forged before it broke.";
-        fail_msg_writer() << "  Check your balance and connection, then try again.";
-        return true;
-      }
+        if (sendError) {
+          fail_msg_writer() << "";
+          fail_msg_writer() << "  Flame " << flameCount << " failed: " << sendError.message();
+          fail_msg_writer() << "  " << (flameCount - 1) << " stake(s) were forged before this flame broke.";
+          return true;
+        }
 
-      std::error_code sendError = sent.wait(txId);
-      removeGuard.removeObserver();
-      if (sendError) {
-        fail_msg_writer() << "";
-        fail_msg_writer() << "  Flame " << (i + 1) << " failed: " << sendError.message();
-        fail_msg_writer() << "  " << i << " stake(s) were forged before this flame broke.";
-        return true;
+        success_msg_writer() << "      Sealed.  TX: " << txId;
       }
-
-      success_msg_writer() << "    Sealed.  TX: " << txId;
     }
 
     // ── Completion ───────────────────────────────────────────────────────
@@ -2082,10 +2170,10 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     success_msg_writer() << "║           CEREMONY COMPLETE — ΞLDERFIER CREATED            ║";
     success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
     success_msg_writer() << "";
-    success_msg_writer() << "  Ælder King " << alias << " — all 5 Elderfire stakes have been";
+    success_msg_writer() << "  Ælder King " << alias << " — all 20 Elderfire stakes have been";
     success_msg_writer() << "  broadcast to the network. Your name is embedded in each.";
     success_msg_writer() << "";
-    success_msg_writer() << "  When all 5 deposits confirm on-chain, the network will";
+    success_msg_writer() << "  When all 20 deposits confirm on-chain, the network will";
     success_msg_writer() << "  register you as Ælder King @" << alias;
     success_msg_writer() << "  and add you to the active Ξlderfiers registry.";
     success_msg_writer() << "";
@@ -2350,6 +2438,108 @@ bool simple_wallet::withdraw(const std::vector<std::string> &args)
 
   return true;
  }
+
+ //----------------------------------------------------------------------------------------------------
+bool simple_wallet::unstake(const std::vector<std::string> &args)
+{
+  try
+  {
+    size_t deposit_count = m_wallet->getDepositCount();
+    if (deposit_count == 0) {
+      fail_msg_writer() << "No deposits found in this wallet.";
+      return true;
+    }
+
+    // Collect all EFier staking deposits that are unlocked and unspent
+    std::vector<CryptoNote::DepositId> efierIds;
+    uint64_t totalAmount = 0;
+
+    for (size_t i = 0; i < deposit_count; ++i) {
+      CryptoNote::Deposit deposit;
+      if (!m_wallet->getDeposit(i, deposit)) continue;
+
+      // Match EFier deposits by term (DEPOSIT_TERM_ELDERFIER_STAKING)
+      bool isEfier = (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING)
+                  || (deposit.depositType == CryptoNote::Deposit::Type::ELDERFIER);
+
+      if (!isEfier) continue;
+
+      // Skip already spent
+      if (deposit.spendingTransactionId != CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID) continue;
+
+      if (deposit.locked) {
+        success_msg_writer() << "  Deposit #" << i << " (" << m_currency.formatAmount(deposit.amount)
+                             << " XFG) still locked until block " << deposit.unlockHeight;
+        continue;
+      }
+
+      efierIds.push_back(i);
+      totalAmount += deposit.amount;
+    }
+
+    if (efierIds.empty()) {
+      fail_msg_writer() << "No withdrawable Elderfier staking deposits found.";
+      fail_msg_writer() << "  (Deposits may still be locked or already withdrawn.)";
+      return true;
+    }
+
+    success_msg_writer() << "";
+    success_msg_writer() << "  ── ΞLDERFIER UNSTAKING ──────────────────────────────────";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Found " << efierIds.size() << " Elderfier staking deposits";
+    success_msg_writer() << "  Total stake: " << m_currency.formatAmount(totalAmount) << " XFG";
+    success_msg_writer() << "";
+    success_msg_writer() << "  WARNING: Unstaking will remove you from the Elderfier";
+    success_msg_writer() << "  registry- permanently. You will no longer sign merkle roots or";
+    success_msg_writer() << "  earn fees. This address cannot be used as an Elderfier and";
+    success_msg_writer() << "  your current Elder King name shall be voided forevermore.";
+    success_msg_writer() << "  This action can not be undone.";
+    success_msg_writer() << "";
+    success_msg_writer() << "  Type 'confirm' to proceed, or Enter to cancel: ";
+
+    std::string confirmation;
+    m_consoleHandler.readLine(confirmation);
+    while (!confirmation.empty() && std::isspace((unsigned char)confirmation.front())) confirmation.erase(confirmation.begin());
+    while (!confirmation.empty() && std::isspace((unsigned char)confirmation.back()))  confirmation.pop_back();
+
+    if (confirmation != "confirm") {
+      success_msg_writer() << "  Unstaking cancelled. Your stake remains.";
+      return true;
+    }
+
+    uint64_t fee = m_currency.minimumFee();
+
+    CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+    WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
+    CryptoNote::TransactionId txId = m_wallet->withdrawDeposits(efierIds, fee);
+    if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == txId) {
+      removeGuard.removeObserver();
+      fail_msg_writer() << "  Failed to create batch withdrawal transaction.";
+      return true;
+    }
+
+    std::error_code sendError = sent.wait(txId);
+    removeGuard.removeObserver();
+    if (sendError) {
+      fail_msg_writer() << "  Unstaking failed: " << sendError.message();
+      return true;
+    }
+
+    success_msg_writer() << "";
+    success_msg_writer() << "  Unstaking transaction sent!";
+    success_msg_writer() << "  Transaction ID: " << txId;
+    success_msg_writer() << "  Deposits withdrawn: " << efierIds.size();
+    success_msg_writer() << "  Total returned: " << m_currency.formatAmount(totalAmount) << " XFG";
+    success_msg_writer() << "";
+  }
+  catch (std::exception &e)
+  {
+    fail_msg_writer() << "Failed to unstake: " << e.what();
+  }
+
+  return true;
+}
 
  //----------------------------------------------------------------------------------------------------
 // USER-FACING: Users MUST generate STARK proofs from deposits for L2 claims
@@ -2729,6 +2919,189 @@ bool simple_wallet::burn_info(const std::vector<std::string> &args)
   } catch (const std::exception &e) {
     fail_msg_writer() << "Error: " << e.what();
     return false;
+  }
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::migrate_cold(const std::vector<std::string> &args) {
+  if (args.size() != 1) {
+    fail_msg_writer() << "Usage: migrate_cold <deposit_id>";
+    fail_msg_writer() << "Migrates a pre-v3 legacy deposit to v3 format, registering a commitment for L2 claims.";
+    return true;
+  }
+
+  try {
+    size_t depositId = std::stoull(args[0]);
+    size_t depositCount = m_wallet->getDepositCount();
+
+    if (depositId >= depositCount) {
+      fail_msg_writer() << "Invalid deposit ID: " << depositId << ". You have " << depositCount << " deposits.";
+      return true;
+    }
+
+    CryptoNote::Deposit deposit;
+    if (!m_wallet->getDeposit(depositId, deposit)) {
+      fail_msg_writer() << "Failed to retrieve deposit " << depositId;
+      return true;
+    }
+
+    // Must be a COLD deposit (not HEAT burn or EFier)
+    if (deposit.depositType == CryptoNote::Deposit::Type::HEAT) {
+      fail_msg_writer() << "Deposit " << depositId << " is a HEAT burn. Use burn_info to view it.";
+      fail_msg_writer() << "HEAT burns already have v3 commitments if created after the v3 upgrade.";
+      return true;
+    }
+    if (deposit.depositType == CryptoNote::Deposit::Type::ELDERFIER) {
+      fail_msg_writer() << "Deposit " << depositId << " is an Elderfier stake. Migration not applicable.";
+      return true;
+    }
+
+    // Check if already has a 0xD5 secret (already v3)
+    std::vector<uint8_t> extraBytes(deposit.extra.begin(), deposit.extra.end());
+    CryptoNote::TransactionExtraDepositSecret existingSecret;
+    if (CryptoNote::getDepositSecretFromExtra(extraBytes, existingSecret)) {
+      fail_msg_writer() << "Deposit " << depositId << " already has a STARK secret (v3 format).";
+      fail_msg_writer() << "Use 'cold_info " << depositId << "' to view it.";
+      return true;
+    }
+
+    // Check if already has a 0xCE migration tag
+    std::vector<CryptoNote::TransactionExtraField> extraFields;
+    if (CryptoNote::parseTransactionExtra(extraBytes, extraFields)) {
+      for (const auto& field : extraFields) {
+        if (field.type() == typeid(CryptoNote::TransactionExtraColdMigration)) {
+          fail_msg_writer() << "Deposit " << depositId << " already has a migration tag.";
+          return true;
+        }
+      }
+    }
+
+    // Display deposit info and confirm
+    success_msg_writer() << "";
+    success_msg_writer() << "=== Legacy COLD Deposit Migration ===";
+    success_msg_writer() << "";
+    success_msg_writer() << "Deposit ID:    " << depositId;
+    success_msg_writer() << "Amount:        " << m_currency.formatAmount(deposit.amount) << " XFG";
+    if (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+      success_msg_writer() << "Term:          FOREVER";
+    } else {
+      success_msg_writer() << "Term:          " << deposit.term << " blocks";
+    }
+    success_msg_writer() << "TX Hash:       " << Common::podToHex(deposit.transactionHash);
+    success_msg_writer() << "";
+    success_msg_writer() << "This will create a migration transaction that registers a v3";
+    success_msg_writer() << "commitment for this legacy deposit, enabling L2 claims via xfg-stark-cli.";
+    success_msg_writer() << "Cost: network fee only (" << m_currency.formatAmount(m_currency.minimumFee()) << " XFG)";
+    success_msg_writer() << "";
+    success_msg_writer() << "Confirm? (1) OK  (2) No ";
+
+    std::string confirm;
+    m_consoleHandler.readLine(confirm);
+
+    if (confirm != "1" && confirm != "OK" && confirm != "Ok" && confirm != "ok") {
+      success_msg_writer() << "Cancelled.";
+      return true;
+    }
+
+    // Generate v3 STARK commitment for this legacy deposit
+    uint32_t networkId = m_currency.isTestnet()
+        ? CryptoNote::parameters::STARK_NETWORK_ID_TESTNET
+        : CryptoNote::parameters::STARK_NETWORK_ID_MAINNET;
+    auto starkResult = CryptoNote::StarkCommitmentGenerator::generate(
+        deposit.amount,
+        deposit.term,
+        networkId,
+        CryptoNote::parameters::STARK_TARGET_CHAIN_ETH,
+        CryptoNote::parameters::STARK_COMMITMENT_VERSION);
+
+    // Display secret
+    success_msg_writer() << "";
+    success_msg_writer() << "STARK Commitment Data (SAVE THIS — needed to claim CD interest):";
+    success_msg_writer() << "  Secret:     " << Common::podToHex(starkResult.secret);
+    success_msg_writer() << "  Commitment: " << Common::podToHex(starkResult.commitment);
+    success_msg_writer() << "  Nullifier:  " << Common::podToHex(starkResult.nullifier);
+    success_msg_writer() << "";
+
+    // Build migration extra data
+    std::vector<uint8_t> migrationExtra;
+
+    // 0xCE migration tag — references original deposit
+    CryptoNote::TransactionExtraColdMigration migration;
+    migration.originalTxHash = deposit.transactionHash;
+    migration.commitment = starkResult.commitment;
+    migration.amount = deposit.amount;
+    migration.term = deposit.term;
+    migration.claimChainCode = 1; // ETH
+    CryptoNote::addColdMigrationToExtra(migrationExtra, migration);
+
+    // 0xD5 encrypted secret — so cold_info can decrypt it later
+    CryptoNote::AccountKeys walletKeys;
+    m_wallet->getAccountKeys(walletKeys);
+    CryptoNote::DepositSecretPayload secretPayload;
+    secretPayload.depositType = 0xCD; // COLD
+    secretPayload.amount = deposit.amount;
+    secretPayload.term = deposit.term;
+    memcpy(secretPayload.depositSecret, &starkResult.secret, 32);
+    CryptoNote::TransactionExtraDepositSecret encSecret;
+    if (CryptoNote::encryptDepositSecret(secretPayload, walletKeys.address.viewPublicKey, encSecret)) {
+      CryptoNote::addDepositSecretToExtra(migrationExtra, encSecret);
+    }
+
+    std::string extraString(migrationExtra.begin(), migrationExtra.end());
+
+    // Send as self-transfer (just carries the extra data, costs only network fee)
+    CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+    WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
+    std::vector<CryptoNote::WalletLegacyTransfer> transfers;
+    CryptoNote::WalletLegacyTransfer selfTransfer;
+    selfTransfer.address = m_wallet->getAddress();
+    selfTransfer.amount = m_currency.minimumFee(); // minimum self-transfer
+    transfers.push_back(selfTransfer);
+
+    std::vector<CryptoNote::TransactionMessage> messages;
+    uint64_t fee = m_currency.minimumFee();
+    uint64_t mixIn = 0;
+    uint64_t unlockTimestamp = 0;
+    uint64_t ttl = 0;
+    Crypto::SecretKey transactionSK;
+
+    CryptoNote::TransactionId tx = m_wallet->sendTransaction(transactionSK, transfers, fee, extraString, mixIn, unlockTimestamp, messages, ttl);
+
+    if (tx == CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+      fail_msg_writer() << "Failed to create migration transaction.";
+      return true;
+    }
+
+    std::error_code sendError = sent.wait(tx);
+    removeGuard.removeObserver();
+
+    if (sendError) {
+      fail_msg_writer() << "Migration transaction failed: " << sendError.message();
+      return true;
+    }
+
+    CryptoNote::WalletLegacyTransaction txInfo;
+    m_wallet->getTransaction(tx, txInfo);
+
+    success_msg_writer(true) << "";
+    success_msg_writer(true) << "Legacy deposit migrated successfully!";
+    success_msg_writer(true) << "  Migration TX: " << Common::podToHex(txInfo.hash);
+    success_msg_writer(true) << "  Original TX:  " << Common::podToHex(deposit.transactionHash);
+    success_msg_writer(true) << "";
+    success_msg_writer(true) << "Once confirmed, use 'gen_proof " << Common::podToHex(deposit.transactionHash) << "' to generate STARK proof data.";
+
+    try {
+      CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file);
+    } catch (const std::exception& e) {
+      fail_msg_writer() << e.what();
+      return true;
+    }
+
+  } catch (const std::exception &e) {
+    fail_msg_writer() << "Migration error: " << e.what();
   }
 
   return true;

@@ -576,7 +576,7 @@ bool core::get_block_template(Block& b, const AccountPublicAddress& adr, difficu
 
     // Per-block EFier distribution: split this block's banking fees among active EFiers
     if (bankingFeesInBlock > 0) {
-      efierRewards = m_blockchain.getCommitmentIndex().computePerBlockEfierRewards(bankingFeesInBlock);
+      efierRewards = m_blockchain.getCommitmentIndex().computePerBlockEfierRewards(bankingFeesInBlock, b.previousBlockHash);
     }
 
     if (bankingFeesInBlock > 0 || !efierRewards.empty()) {
@@ -1379,6 +1379,10 @@ std::vector<uint8_t> core::getCommitmentPendingElderfierIds() const {
 
 uint64_t core::getCommitmentConsensusPercentage() const {
   return m_blockchain.getCommitmentConsensusPercentage();
+}
+
+std::vector<CommitmentIndex::ElderfierSignatureBundle> core::getSignaturesForCurrentRoot() const {
+  return m_blockchain.getSignaturesForCurrentRoot();
 }
 
 size_t core::getActiveElderfierCount() const {

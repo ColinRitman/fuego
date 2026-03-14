@@ -56,6 +56,11 @@ struct CommitmentEntry {
 
   uint32_t targetChainId = 0;  // Claim chain code: 1=ETH, 2=ARB, 3=SOL, etc. (0 = no cross-chain claim)
 
+  // True only for 0xCE migrations where Blockchain.cpp confirmed a MultisignatureOutput
+  // in the original tx. Never set for native v3 TransactionOutputCommitment outputs.
+  // Used by L2 contract to apply legacy (pre-2026) interest rates without timestamp comparison.
+  bool isLegacyMigration = false;
+
   std::string senderAddress;   // Wallet address that created this commitment (populated for 0xEF deposits)
   std::string ceremonyAlias;   // 8-char alias from 0xEF deposit metadata (0xEA tag), auto-registered with EFiD
   Crypto::PublicKey signingPubKey = {};  // Ed25519 signing pubkey from 0xEA metadata (for EFier signature verification)
@@ -147,10 +152,23 @@ public:
   // Get pending elderfier IDs
   std::vector<uint8_t> getPendingElderfierIds() const;
 
-  // Per-block EFier fee distribution (Phase 5)
+  // Get validated signatures + pubkeys for current root (for L2 relay batching)
+  struct ElderfierSignatureBundle {
+    uint8_t elderfier_id;
+    Crypto::PublicKey signing_pubkey;
+    Crypto::Signature signature;
+    uint64_t block_height;
+    uint64_t timestamp;
+  };
+  std::vector<ElderfierSignatureBundle> getSignaturesForCurrentRoot() const;
+
+  // Per-block EFier fee distribution
   // Splits bankingFees equally among all ACTIVE registered EFiers.
-  // Returns {address, amount} pairs for coinbase outputs. Pure/deterministic — no state mutation.
-  std::vector<std::pair<AccountPublicAddress, uint64_t>> computePerBlockEfierRewards(uint64_t bankingFees) const;
+  // Returns {AccountPublicAddress, amount} pairs for coinbase outputs.
+  // Output ordering is deterministically shuffled using previousBlockHash
+  // so that output position does not reveal EFiD identity.
+  std::vector<std::pair<AccountPublicAddress, uint64_t>> computePerBlockEfierRewards(
+      uint64_t bankingFees, const Crypto::Hash& previousBlockHash) const;
 
   // Per-block banking fee tracking (for coinbase split)
   void addBlockBankingFee(uint64_t height, uint64_t fee);

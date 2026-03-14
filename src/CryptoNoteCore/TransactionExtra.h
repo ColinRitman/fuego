@@ -73,6 +73,9 @@
 // 0xEA tag: @ Alias registration (on-chain)
 #define TX_EXTRA_ELDERFIER_ALIAS            0xEA  // @ alias registration for Elderfiers and users
 
+// 0xCE tag: COLD migration (register v3 commitment for a pre-v3 legacy deposit)
+#define TX_EXTRA_COLD_MIGRATION             0xCE
+
 // 0xD5 tag: Encrypted deposit secret (for COLD withdrawal_commitment_output recovery from seed)
 #define TX_EXTRA_DEPOSIT_SECRET             0xD5
 
@@ -200,6 +203,19 @@ struct TransactionExtraColdCommitment {
 // Legacy alias for backward compatibility
 using TransactionExtraCDDepositSecret = TransactionExtraColdCommitment;
 
+// COLD migration: register a v3 commitment for a pre-v3 legacy deposit.
+// Attached to a regular self-transfer (no deposit output needed).
+// Blockchain validates that originalTxHash is a real deposit with matching amount/term.
+struct TransactionExtraColdMigration {
+  Crypto::Hash originalTxHash;    // 32 bytes: tx hash of the original pre-v3 deposit
+  Crypto::Hash commitment;        // 32 bytes: v3 commitment (keccak256 of preimage)
+  uint64_t amount;                // 8 bytes: original deposit amount (must match)
+  uint32_t term;                  // 4 bytes: original deposit term (must match)
+  uint8_t claimChainCode;         // 1 byte: claim chain (1=ETH, 2=ARB, etc.)
+
+  bool serialize(ISerializer& serializer);
+};
+
 // ============================================================
 // Fuego Ring-Signature Commitment Key Derivation
 // ============================================================
@@ -279,8 +295,10 @@ bool addDepositSecretToExtra(std::vector<uint8_t>& tx_extra,
 bool getDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra,
                                TransactionExtraDepositSecret& out);
 
+bool addColdMigrationToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraColdMigration& migration);
 
-typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraAliasRegistration, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraColdCommitment, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;
+
+typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraAliasRegistration, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraColdCommitment, CryptoNote::TransactionExtraColdMigration, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;
 
 
 

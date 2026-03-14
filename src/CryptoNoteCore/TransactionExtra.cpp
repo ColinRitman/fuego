@@ -295,6 +295,25 @@ namespace CryptoNote
           break;
         }
 
+        case TX_EXTRA_COLD_MIGRATION:
+        {
+          // Format: [originalTxHash: 32] [commitment: 32] [amount: 8 LE] [term: 4 LE] [chain: 1]
+          TransactionExtraColdMigration migration;
+          read(iss, migration.originalTxHash.data, sizeof(migration.originalTxHash.data));
+          read(iss, migration.commitment.data, sizeof(migration.commitment.data));
+          migration.amount = 0;
+          for (int i = 0; i < 8; ++i) {
+            migration.amount |= static_cast<uint64_t>(read<uint8_t>(iss)) << (i * 8);
+          }
+          migration.term = 0;
+          for (int i = 0; i < 4; ++i) {
+            migration.term |= static_cast<uint32_t>(read<uint8_t>(iss)) << (i * 8);
+          }
+          migration.claimChainCode = read<uint8_t>(iss);
+          transactionExtraFields.push_back(migration);
+          break;
+        }
+
         case TX_EXTRA_BURN_RECEIPT:
         {
           TransactionExtraBurnReceipt burnReceipt;
@@ -420,6 +439,11 @@ namespace CryptoNote
     bool operator()(const TransactionExtraAliasRegistration &t)
     {
       return addAliasToExtra(extra, t);
+    }
+
+    bool operator()(const TransactionExtraColdMigration &t)
+    {
+      return addColdMigrationToExtra(extra, t);
     }
 
   };
@@ -744,6 +768,15 @@ namespace CryptoNote
     s(metadata, "metadata");
     s(claimChainCode, "claimChainCode");
     s(gift_secret, "gift_secret");
+    return true;
+  }
+
+  bool TransactionExtraColdMigration::serialize(ISerializer& s) {
+    s(originalTxHash, "originalTxHash");
+    s(commitment, "commitment");
+    s(amount, "amount");
+    s(term, "term");
+    s(claimChainCode, "claimChainCode");
     return true;
   }
 
@@ -1607,6 +1640,35 @@ namespace CryptoNote
     if (giftSecretSize > 0) {
       tx_extra.insert(tx_extra.end(), commitment.gift_secret.begin(), commitment.gift_secret.end());
     }
+
+    return true;
+  }
+
+  bool addColdMigrationToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraColdMigration& migration) {
+    tx_extra.push_back(TX_EXTRA_COLD_MIGRATION);
+
+    // Original tx hash (32 bytes)
+    tx_extra.insert(tx_extra.end(), migration.originalTxHash.data, migration.originalTxHash.data + 32);
+
+    // V3 commitment hash (32 bytes)
+    tx_extra.insert(tx_extra.end(), migration.commitment.data, migration.commitment.data + 32);
+
+    // Amount (8 bytes LE)
+    uint64_t amount = migration.amount;
+    for (int i = 0; i < 8; ++i) {
+      tx_extra.push_back(static_cast<uint8_t>(amount & 0xFF));
+      amount >>= 8;
+    }
+
+    // Term (4 bytes LE)
+    uint32_t term = migration.term;
+    for (int i = 0; i < 4; ++i) {
+      tx_extra.push_back(static_cast<uint8_t>(term & 0xFF));
+      term >>= 8;
+    }
+
+    // Chain code (1 byte)
+    tx_extra.push_back(migration.claimChainCode);
 
     return true;
   }

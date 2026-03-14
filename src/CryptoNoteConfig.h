@@ -133,12 +133,19 @@ namespace CryptoNote
         const uint64_t TEST_AMOUNT_TIER_3 =  800000000;  // 80 TEST (800,000,000 atomic units)
 
  	    // ELDERFIER constants
-        const uint64_t ELDERKING_CEREMONY_AMOUNT = UINT64_C(5) * AMOUNT_TIER_3;  /* 4000 XFG (40,000,000,000 atomic units) (5 x amount_tier_3 deposits) */
+        // Ceremony: 5 deposits per tier × 4 tiers = 20 deposits, seeds ring pool at all amounts
+        const uint32_t ELDERKING_DEPOSITS_PER_TIER = 5;
+        const uint32_t ELDERKING_TOTAL_DEPOSITS = ELDERKING_DEPOSITS_PER_TIER * 4;  // 20 deposits
+        const uint64_t ELDERKING_CEREMONY_AMOUNT =   // 4,444 XFG total
+            ELDERKING_DEPOSITS_PER_TIER * (AMOUNT_TIER_0 + AMOUNT_TIER_1 + AMOUNT_TIER_2 + AMOUNT_TIER_3);
         const uint32_t DEPOSIT_TERM_ELDERFIER_STAKING = 8;  // 0xEF deposits: term=8-block minimum, then unstakeable on demand, 1000-block review
         const uint32_t ELDERFIER_STAKING_REVIEW_WINDOW = 1000;  // 1000 blocks (~5.5 days) for review before unstaking completes
         // TESTIFIER - TESTNET Elderiers
-	    const uint64_t TESTIFIER_CEREMONY_AMOUNT = UINT64_C(5) * TEST_AMOUNT_TIER_1;  /* 4 TEST in atomic units (5 x amount_tier_0 [0.8] deposits) */
-	    const uint32_t TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING = 2;  // 0xEF deposits: term=0 (unstakeable on demand), 10-block review window
+        const uint32_t TESTIFIER_DEPOSITS_PER_TIER = 5;
+        const uint32_t TESTIFIER_TOTAL_DEPOSITS = TESTIFIER_DEPOSITS_PER_TIER * 4;  // 20 deposits
+	    const uint64_t TESTIFIER_CEREMONY_AMOUNT =   // 444.4 TEST total
+            TESTIFIER_DEPOSITS_PER_TIER * (TEST_AMOUNT_TIER_0 + TEST_AMOUNT_TIER_1 + TEST_AMOUNT_TIER_2 + TEST_AMOUNT_TIER_3);
+	    const uint32_t TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING = 2;  // 0xEF deposits: term=2 (fast for testing), 10-block review window
         const uint32_t TESTNET_ELDERFIER_STAKING_REVIEW_WINDOW = 10;  // 10 blocks (fast review for testing)
 
         // Epoch duration for EFier fee distribution
@@ -174,8 +181,8 @@ namespace CryptoNote
         static_assert(DEPOSIT_MIN_TERM > 0, "Bad DEPOSIT_MIN_TERM");
 		static_assert(DEPOSIT_MIN_TERM <= DEPOSIT_MAX_TERM, "Bad DEPOSIT_MAX_TERM");
 
-        const uint64_t MULTIPLIER_FACTOR = 100;		 /* legacy deposits */
-		const uint32_t END_MULTIPLIER_BLOCK = 50; /* legacy deposits */
+        const uint64_t MULTIPLIER_FACTOR = 100;		 /* conceal code */
+		const uint32_t END_MULTIPLIER_BLOCK = 50; /* cocneal deposit code */
 
 		static constexpr uint64_t POISSON_CHECK_TRIGGER = 10; // Reorg size that triggers poisson timestamp check
 		static constexpr uint64_t POISSON_CHECK_DEPTH = 60;   // Main-chain depth of poisson check. The attacker will have to tamper 50% of those blocks
@@ -311,7 +318,7 @@ namespace CryptoNote
                                      	// TESTNET parameters
 //--------------------------------------------------------------------------------------------------------------------------
 
- 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101ff7c1d75c0284194656482f95ece982020aa504f353c4615e8ee593e6362221d";
+ 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd08807121015858446addee6c8ba4bef2db5fbd84618bfab4a749f65badeefb9b8f04f9e5ac";
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */

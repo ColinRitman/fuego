@@ -34,6 +34,7 @@ void CommitmentEntry::serialize(ISerializer& s) {
   s(amount, "amount");
   s(term, "term");
   s(targetChainId, "target_chain_id");
+  s(isLegacyMigration, "is_legacy_migration");
 }
 
 CommitmentIndex::CommitmentIndex(const CryptoNote::Currency& currency) : m_currency(currency) {
@@ -94,9 +95,10 @@ void CommitmentIndex::addCommitment(const CommitmentEntry& entry) {
         m_pendingElderfierStakes[wallet].signing_pubkey = entry.signingPubKey;
       }
 
-      // Auto-register when five 800 XFG deposits for 4000 XFG total are confirmed
-      const uint64_t REGISTRATION_AMOUNT = CryptoNote::parameters::ELDERKING_CEREMONY_AMOUNT;  // 4000 XFG in atomic units
-      if (m_pendingElderfierStakes[wallet].deposit_count == 5 &&
+      // Auto-register when 20 deposits across all tiers (4,444 XFG total) are confirmed
+      const uint64_t REGISTRATION_AMOUNT = CryptoNote::parameters::ELDERKING_CEREMONY_AMOUNT;
+      const uint32_t REGISTRATION_COUNT = CryptoNote::parameters::ELDERKING_TOTAL_DEPOSITS;
+      if (m_pendingElderfierStakes[wallet].deposit_count == REGISTRATION_COUNT &&
           m_pendingElderfierStakes[wallet].total_amount >= REGISTRATION_AMOUNT) {
         tryRegisterElderfier(wallet, m_pendingElderfierStakes[wallet].signing_pubkey, m_pendingElderfierStakes[wallet].alias);
         m_pendingElderfierStakes.erase(wallet);
@@ -212,6 +214,40 @@ uint64_t CommitmentIndex::getConsensusPercentageForCurrentRoot() const {
   }
 
   return (valid_signatures * 100) / m_elderfier_ids.size();
+}
+
+std::vector<CommitmentIndex::ElderfierSignatureBundle> CommitmentIndex::getSignaturesForCurrentRoot() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string current_root_hex = Common::podToHex(m_current_merkle_root);
+  std::vector<ElderfierSignatureBundle> result;
+  std::set<uint8_t> seen;
+
+  for (auto it = m_signatures.begin(); it != m_signatures.end(); ++it) {
+    if (it->first.second == current_root_hex && it->second.is_valid && seen.find(it->first.first) == seen.end()) {
+      seen.insert(it->first.first);
+
+      // Look up the signing pubkey for this EFiD
+      Crypto::PublicKey pubkey = {};
+      for (const auto& pair : m_elderfierRegistrations) {
+        if (pair.second.elderfier_id == it->first.first &&
+            pair.second.status == ElderfierStatus::ACTIVE) {
+          pubkey = pair.second.signing_pubkey;
+          break;
+        }
+      }
+
+      ElderfierSignatureBundle entry;
+      entry.elderfier_id = it->first.first;
+      entry.signing_pubkey = pubkey;
+      entry.signature = it->second.signature;
+      entry.block_height = it->second.block_height;
+      entry.timestamp = it->second.timestamp;
+      result.push_back(entry);
+    }
+  }
+
+  return result;
 }
 
 std::vector<uint8_t> CommitmentIndex::getSignedElderfierIds() const {
@@ -568,7 +604,8 @@ size_t CommitmentIndex::coldCount() const {
 // PHASE 5: PER-BLOCK EFIER FEE DISTRIBUTION
 // ============================================================================
 
-std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::computePerBlockEfierRewards(uint64_t bankingFees) const {
+std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::computePerBlockEfierRewards(
+    uint64_t bankingFees, const Crypto::Hash& previousBlockHash) const {
   std::lock_guard<std::mutex> lock(m_mutex);
 
   std::vector<std::pair<AccountPublicAddress, uint64_t>> rewards;
@@ -600,11 +637,11 @@ std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::computeP
     return rewards;  // No active EFiers — banking fees stay with miner
   }
 
-  // Sort by EFiD for deterministic ordering across all nodes
+  // Sort by EFiD for canonical ordering before shuffle
   std::sort(activeEfiers.begin(), activeEfiers.end(),
     [](const ActiveEfier& a, const ActiveEfier& b) { return a.efid < b.efid; });
 
-  // Split equally, distribute remainder 1 atomic unit each (lowest EFiD first)
+  // Split equally, distribute remainder 1 atomic unit each
   uint64_t perEfier = bankingFees / activeEfiers.size();
   uint64_t remainder = bankingFees % activeEfiers.size();
 
@@ -619,6 +656,21 @@ std::vector<std::pair<AccountPublicAddress, uint64_t>> CommitmentIndex::computeP
     uint64_t share = perEfier + (i < remainder ? 1 : 0);
     if (share > 0) {
       rewards.push_back({activeEfiers[i].addr, share});
+    }
+  }
+
+  // Deterministic Fisher-Yates shuffle seeded by previous block hash.
+  // Breaks output-position-to-EFiD correlation so observers cannot map
+  // coinbase output index to a specific EFier identity.
+  if (rewards.size() > 1) {
+    Crypto::Hash rng;
+    Crypto::cn_fast_hash(previousBlockHash.data, sizeof(previousBlockHash.data), (char*)rng.data);
+    for (size_t i = rewards.size() - 1; i > 0; --i) {
+      uint64_t r;
+      std::memcpy(&r, rng.data, sizeof(r));
+      size_t j = r % (i + 1);
+      std::swap(rewards[i], rewards[j]);
+      Crypto::cn_fast_hash(rng.data, sizeof(rng.data), (char*)rng.data);
     }
   }
 

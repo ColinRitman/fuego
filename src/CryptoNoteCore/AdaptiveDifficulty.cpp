@@ -35,38 +35,40 @@ struct DmwdaEpoch {
 // ---------------------------------------------------------------------------
 static const DmwdaEpoch TESTNET_DMWDA_EPOCHS[] = {
     {
-        // Epoch 1 — height 900+.
-        // Fixes wild single-block swings observed in epoch 0 data (3-5x spikes/crashes
-        // with constant hashrate). Key changes: maxAdj 5→2, smooth 0.7→0.5,
-        // larger windows so single outlier blocks can't dominate the LWMA.
-        // With maxAdj=2 + smooth=0.5: max per-block change = ±50% up / ±12.5% down.
+        // Epoch 0 — from v10 start.
+        // Symmetric clamps: maxAdj=1.20, minAdj=0.80 → with smooth=0.50 the
+        // effective per-block range is ±10%, symmetric in both directions.
+        // Combined with T/3 LWMA floor (symmetric with T*3 ceiling), this
+        // eliminates the upward bias from Poisson-distributed fast blocks.
+        // Anomaly detection threshold raised to 20 (effectively disabled for
+        // normal mining — only fires on extreme 20x hashrate changes).
         /* activationHeight */ 0,
         {
             /* targetTime                */ 480,
-            /* shortWindow               */ 15,    // was 8  — single outlier = 1/15 weight not 1/8
-            /* mediumWindow              */ 35,    // was 20
-            /* longWindow                */ 60,    // was 45
-            /* emergencyWindow           */ 8,     // was 5  — more data = calmer emergency
-            /* minAdjustment             */ 0.75,  // max 25% drop per block (was 0.70)
-            /* maxAdjustment             */ 2.00,  // max 2x rise per block (was 5.0!)
-            /* emergencyThreshold        */ 0.50,  // clamp [0.5x, 2.0x] (was 0.40 = [0.4, 2.5])
-            /* smoothingFactor           */ 0.50,  // 50/50 new/prev (was 0.70 — too reactive)
-            /* weightShort               */ 0.60,
-            /* weightMedium              */ 0.30,
-            /* weightLong                */ 0.10,
-            /* confidenceMin             */ 0.10,
-            /* confidenceMax             */ 1.00,
-            /* defaultConfidence         */ 0.50,
-            /* recentWindowSize          */ 5,
-            /* historicalWindowSize      */ 20,
-            /* blockStealingCheckBlocks  */ 5,
-            /* blockStealingTimeThreshold*/ 0.10,
-            /* blockStealingThreshold    */ 4,
-            /* hashRateChangeThreshold   */ 5.0,
+            /* shortWindow               */ 20,    // (was 15)  wider = less single-block influence
+            /* mediumWindow              */ 45,    // (was 35)  wider stability anchor
+            /* longWindow                */ 80,    // (was 60)  longer trend dampening
+            /* emergencyWindow           */ 10,    // (was 8)   more data for calmer emergency
+            /* minAdjustment             */ 0.80,  // (was 0.75)  max 20% drop, symmetric with maxAdj after smooth
+            /* maxAdjustment             */ 1.20,  // (was 2.00)  max 20% rise — was 2x, way too aggressive
+            /* emergencyThreshold        */ 0.80,  // (was 0.50)  tighter emergency clamp [0.80, 1.25]
+            /* smoothingFactor           */ 0.50,  // (was 0.50)  eff ±10% per block
+            /* weightShort               */ 0.50,  // (was 0.60)  less short-window emphasis
+            /* weightMedium              */ 0.35,  // (was 0.30)  more stability weight
+            /* weightLong                */ 0.15,  // (was 0.10)  more trend dampening
+            /* confidenceMin             */ 0.20,  // (was 0.10)
+            /* confidenceMax             */ 0.80,  // (was 1.00)  cap prevents full long-window dominance
+            /* defaultConfidence         */ 0.50,  // (was 0.50)
+            /* recentWindowSize          */ 8,     // (was 5)   need more blocks to detect real anomaly
+            /* historicalWindowSize      */ 30,    // (was 20)  wider comparison window
+            /* blockStealingCheckBlocks  */ 5,     // (was 5)
+            /* blockStealingTimeThreshold*/ 0.10,  // (was 0.10)
+            /* blockStealingThreshold    */ 5,     // (was 4)   all 5 must be fast (harder to trigger)
+            /* hashRateChangeThreshold   */ 20.0,  // (was 5.0)  effectively disabled for normal variance
         }
     },
     // Add future testnet epochs here, e.g.:
-    // { 5000, { 480, 10, 30, 60, 5, 0.75, 4.0, 0.40, 0.70, 0.55, 0.30, 0.15, 0.10, 1.0, 0.50, 5, 20, 5, 0.10, 4, 5.0 } },
+    // { 5000, { 480, ... } },
 };
 
 // ---------------------------------------------------------------------------
@@ -227,9 +229,10 @@ double AdaptiveDifficulty::calculateLWMA(
         size_t  idx       = startIdx + 1 + j;
         int64_t solveTime = static_cast<int64_t>(timestamps[idx]) - static_cast<int64_t>(timestamps[idx - 1]);
 
-        // Clamp: min=T/10, max=T*3.  T*3 limit prevents long offline gaps from
-        // poisoning the window (old code used T*10 = 80 min which was too much).
-        solveTime = std::max(static_cast<int64_t>(m_config.targetTime / 10),
+        // Clamp: min=T/3, max=T*3.  Symmetric 3x in both directions so fast
+        // blocks don't bias LWMA downward more than slow blocks bias it upward.
+        // (Old T/10 floor let 1-second blocks count as 48s — extreme asymmetry.)
+        solveTime = std::max(static_cast<int64_t>(m_config.targetTime / 3),
                              std::min(static_cast<int64_t>(m_config.targetTime * 3), solveTime));
 
         // LWMA-1 increasing weight: oldest=1, newest=effectiveWindow.

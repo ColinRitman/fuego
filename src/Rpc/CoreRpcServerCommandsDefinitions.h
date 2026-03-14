@@ -1074,13 +1074,15 @@ struct COMMAND_RPC_GET_ELDERFIER_SIGNATURES {
 
 	struct SignatureInfo {
 		uint8_t elderfier_id;
-		std::string signature;
+		std::string signing_pubkey;  // Ed25519 pubkey hex (64 chars) — for L2 contract verification
+		std::string signature;       // Ed25519 signature hex (128 chars) — for L2 contract verification
 		uint64_t block_height;
 		uint64_t timestamp;
 		bool is_valid;
 
 		void serialize(ISerializer& s) {
 			KV_MEMBER(elderfier_id)
+			KV_MEMBER(signing_pubkey)
 			KV_MEMBER(signature)
 			KV_MEMBER(block_height)
 			KV_MEMBER(timestamp)
@@ -1335,6 +1337,7 @@ struct COMMAND_RPC_GET_COMMITMENT {
     uint8_t type;               // 0=HEAT, 1=YIELD/COLD, 2=ELDERFIER_STAKING
     uint32_t target_chain_id;
     uint32_t leaf_index;
+    bool is_legacy;         // true only for 0xCE migrations (original tx had MultisignatureOutput)
     std::string status;
 
     void serialize(ISerializer& s) {
@@ -1347,6 +1350,7 @@ struct COMMAND_RPC_GET_COMMITMENT {
       KV_MEMBER(type)
       KV_MEMBER(target_chain_id)
       KV_MEMBER(leaf_index)
+      KV_MEMBER(is_legacy)
       KV_MEMBER(status)
     }
   };
