@@ -449,6 +449,11 @@ uint64_t Blockchain::getCommitmentConsensusPercentage() const {
   return m_commitmentIndex.getConsensusPercentageForCurrentRoot();
 }
 
+std::vector<CommitmentIndex::ElderfierSignatureBundle> Blockchain::getSignaturesForCurrentRoot() const {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+  return m_commitmentIndex.getSignaturesForCurrentRoot();
+}
+
 // Elderfier fee tracking accessor
 size_t Blockchain::getActiveElderfierCount() const {
   std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
@@ -1356,7 +1361,7 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
     uint64_t bankingFeesInBlock = computeBankingFeesFromTransactions(blockTransactions);
 
     // Compute expected EFier distribution (deterministic — same result on all nodes)
-    auto expectedEfierRewards = m_commitmentIndex.computePerBlockEfierRewards(bankingFeesInBlock);
+    auto expectedEfierRewards = m_commitmentIndex.computePerBlockEfierRewards(bankingFeesInBlock, b.previousBlockHash);
     uint64_t efierTotal = 0;
     for (const auto& r : expectedEfierRewards) {
       efierTotal += r.second;
@@ -2867,6 +2872,63 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
 
             logger(DEBUGGING) << "COLD commitment indexed: " << Common::podToHex(coldCommit.commitment)
                              << " amount=" << coldCommit.amount << " term=" << coldCommit.term;
+          }
+          // 0xCE: COLD migration — register v3 commitment for a pre-v3 legacy deposit
+          else if (field.type() == typeid(TransactionExtraColdMigration)) {
+            const auto& migration = boost::get<TransactionExtraColdMigration>(field);
+
+            // Validate: the referenced original tx must exist and contain a legacy
+            // deposit output (MultisignatureOutput) with matching amount.
+            // Migration is ONLY for pre-v3 legacy deposits which use multisig outputs.
+            std::list<Crypto::Hash> txIds = {migration.originalTxHash};
+            std::list<Transaction> txs;
+            std::list<Crypto::Hash> missed;
+            getTransactions(txIds, txs, missed, false);
+            if (!txs.empty()) {
+              const auto& origTx = txs.front();
+              bool depositFound = false;
+              for (const auto& out : origTx.outputs) {
+                if (out.target.type() == typeid(MultisignatureOutput) &&
+                    out.amount == migration.amount) {
+                  depositFound = true;
+                  break;
+                }
+              }
+
+              // Also ensure this commitment hasn't already been registered
+              if (depositFound && !m_commitmentIndex.hasCommitment(migration.commitment)) {
+                // Look up original deposit's block height for legacy rate detection.
+                // The L2 contract needs the original deposit date (not migration date)
+                // to determine if legacy (pre-2026) interest rates apply.
+                uint32_t originalBlockHeight = block.height;  // fallback: migration block
+                auto origIt = m_transactionMap.find(migration.originalTxHash);
+                if (origIt != m_transactionMap.end()) {
+                  originalBlockHeight = origIt->second.block;
+                }
+
+                CommitmentEntry entry;
+                entry.commitment = migration.commitment;
+                entry.txHash = migration.originalTxHash;  // Reference original deposit tx
+                entry.blockHeight = originalBlockHeight;  // Original deposit block, not migration block
+                entry.amount = migration.amount;
+                entry.term = migration.term;
+                entry.type = CommitmentEntry::Type::COLD;
+                entry.targetChainId = migration.claimChainCode;
+                entry.isLegacyMigration = true;  // Confirmed: original tx has MultisignatureOutput
+                m_commitmentIndex.addCommitment(entry);
+
+                logger(DEBUGGING) << "COLD migration indexed: original=" << Common::podToHex(migration.originalTxHash)
+                                  << " commitment=" << Common::podToHex(migration.commitment)
+                                  << " amount=" << migration.amount
+                                  << " originalBlock=" << originalBlockHeight;
+              } else if (!depositFound) {
+                logger(WARNING) << "COLD migration rejected: original tx " << Common::podToHex(migration.originalTxHash)
+                                << " has no legacy deposit (multisig) output matching amount=" << migration.amount;
+              }
+            } else {
+              logger(WARNING) << "COLD migration rejected: original tx " << Common::podToHex(migration.originalTxHash)
+                              << " not found in blockchain";
+            }
           }
           // Note: TX_EXTRA_ELDERFIER_DEPOSIT (0xEF) is NOT added to ethereal_xfg initially
           // because it represents slashable staking. However, if the deposit is later

@@ -1536,28 +1536,29 @@ bool RpcServer::on_prove_collateral(const COMMAND_RPC_PROVE_COLLATERAL::request&
 bool RpcServer::on_get_elderfier_signatures(const COMMAND_RPC_GET_ELDERFIER_SIGNATURES::request& req,
                                             COMMAND_RPC_GET_ELDERFIER_SIGNATURES::response& res) {
   try {
-    // Get signed elderfier IDs from commitment index
-    auto signed_ids = m_core.getCommitmentSignedElderfierIds();
+    // Get validated signatures with pubkeys for L2 relay batching
+    auto validated_sigs = m_core.getSignaturesForCurrentRoot();
     auto pending_ids = m_core.getCommitmentPendingElderfierIds();
-
-    // Get consensus percentage
     auto consensus_pct = m_core.getCommitmentConsensusPercentage();
 
-    // Build response with signature info
-    for (uint8_t efid : signed_ids) {
+    std::vector<uint8_t> signed_ids;
+
+    for (const auto& vsig : validated_sigs) {
       COMMAND_RPC_GET_ELDERFIER_SIGNATURES::SignatureInfo sig_info;
-      sig_info.elderfier_id = efid;
-      sig_info.signature = "";    // Signatures are verified by merkle root consensus, not exposed individually
-      sig_info.block_height = m_core.get_current_blockchain_height();
-      sig_info.timestamp = static_cast<uint64_t>(time(nullptr));
+      sig_info.elderfier_id = vsig.elderfier_id;
+      sig_info.signing_pubkey = Common::podToHex(vsig.signing_pubkey);
+      sig_info.signature = Common::podToHex(vsig.signature);
+      sig_info.block_height = vsig.block_height;
+      sig_info.timestamp = vsig.timestamp;
       sig_info.is_valid = true;
       res.signatures.push_back(sig_info);
+      signed_ids.push_back(vsig.elderfier_id);
     }
 
     res.current_merkle_root = Common::podToHex(m_core.getCommitmentMerkleRoot());
     res.current_block_height = m_core.get_current_blockchain_height();
-    res.total_registered_elderfiers = signed_ids.size() + pending_ids.size();
-    res.signatures_received = signed_ids.size();
+    res.total_registered_elderfiers = validated_sigs.size() + pending_ids.size();
+    res.signatures_received = validated_sigs.size();
     res.consensus_percentage = static_cast<uint8_t>(consensus_pct);
     res.threshold_met = consensus_pct >= 69;
     res.signed_by = signed_ids;
@@ -1808,6 +1809,7 @@ bool RpcServer::on_get_commitment(const COMMAND_RPC_GET_COMMITMENT::request& req
       res.type = static_cast<uint8_t>(entry->type);
       res.target_chain_id = entry->targetChainId;
       res.leaf_index = static_cast<uint32_t>(m_core.getCommitmentLeafIndex(commitHash));
+      res.is_legacy = entry->isLegacyMigration;
     } else {
       res.found = false;
     }

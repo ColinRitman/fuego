@@ -183,6 +183,7 @@ namespace CryptoNote {
     std::vector<uint8_t> getCommitmentSignedElderfierIds() const;
     std::vector<uint8_t> getCommitmentPendingElderfierIds() const;
     uint64_t getCommitmentConsensusPercentage() const;
+    std::vector<CommitmentIndex::ElderfierSignatureBundle> getSignaturesForCurrentRoot() const;
 
     // Elderfier fee tracking
     size_t getActiveElderfierCount() const;
