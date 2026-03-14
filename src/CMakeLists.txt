@@ -150,8 +150,10 @@ add_dependencies(CryptoNoteCore version)
 if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT ANDROID)
     if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES STREQUAL "arm64"))
         # Apple Silicon: skip AES/SSE flags, use software AES
-        target_compile_definitions(Crypto PRIVATE NO_AES)
-        message(STATUS "Apple Silicon detected, using software AES for Crypto library")
+        # FORCE_USE_HEAP: allocate cn_slow_hash scratchpad on heap instead of stack
+        # to avoid stack overflow (2MB buffer vs 512KB default thread stack size)
+        target_compile_definitions(Crypto PRIVATE NO_AES FORCE_USE_HEAP)
+        message(STATUS "Apple Silicon detected, using software AES with heap allocation for Crypto library")
     else()
         # Enable AES-NI and SSE instructions for cryptographic operations
         target_compile_options(Crypto PRIVATE -maes -msse2 -msse4.1 -msse4.2)
