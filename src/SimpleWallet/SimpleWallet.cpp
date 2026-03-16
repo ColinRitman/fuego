@@ -2234,8 +2234,8 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
       }
       if (pendingStakes > 0) {
         success_msg_writer() << "";
-        success_msg_writer() << "  Elderfier ceremony pending (" << pendingStakes << "/5 stakes tracked).";
-        success_msg_writer() << "  elder_council command will be available once all 5 confirm and your alias is registered.";
+        success_msg_writer() << "  Elderfier ceremony pending (" << pendingStakes << "/20 stakes tracked).";
+        success_msg_writer() << "  elder_council command will be available once all 20 confirm and your alias is registered.";
         success_msg_writer() << "  Check: list_cold  |  lookup_alias <your_alias>";
         success_msg_writer() << "";
       } else {

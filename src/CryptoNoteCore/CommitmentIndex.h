@@ -27,12 +27,11 @@
 #include <string>
 #include <optional>
 #include "../crypto/hash.h"
+#include "../Serialization/ISerializer.h"
 #include "AliasIndex.h"
 #include "Currency.h"
 
 namespace CryptoNote {
-
-class ISerializer;
 
 // Simple commitment entry
 struct CommitmentEntry {
@@ -162,6 +161,17 @@ struct ElderfierRegistration {
     if (status != ElderfierStatus::UNSTAKING) return false;
     uint32_t review_end = unstaking_start_block + unstaking_review_window;
     return currentBlock < review_end;
+  }
+
+  void serialize(ISerializer& s) {
+    s(address, "address");
+    s(elderfier_id, "elderfier_id");
+    s.binary(&signing_pubkey, sizeof(signing_pubkey), "signing_pubkey");
+    uint8_t statusVal = static_cast<uint8_t>(status);
+    s(statusVal, "status");
+    if (s.type() == ISerializer::INPUT) status = static_cast<ElderfierStatus>(statusVal);
+    s(unstaking_start_block, "unstaking_start_block");
+    s(unstaking_review_window, "unstaking_review_window");
   }
 
   bool canCompleteUnstaking(uint32_t currentBlock) const {
@@ -359,8 +369,9 @@ public:
   // Retrieve all FullReviewRequests for a specific target EFiD.
   std::vector<FullReviewRequest> getFullReviewRequests(uint8_t target_efid) const;
 
-  // Serialization support
-  void serialize(ISerializer& s) {}
+  // Serialization support — saves commitment entries, EFier registrations, and addresses.
+  // Derived indices (merkle leaves, height index, txHash index, counters) are rebuilt on load.
+  void serialize(ISerializer& s);
 
 private:
   mutable std::mutex m_mutex;

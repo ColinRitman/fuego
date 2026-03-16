@@ -21,6 +21,7 @@
 #include "CommitmentIndex.h"
 #include "TransactionExtra.h"
 #include "../Serialization/ISerializer.h"
+#include "../Serialization/SerializationOverloads.h"
 #include "../Common/StringTools.h"
 #include "../crypto/hash.h"
 #include "../CryptoNoteConfig.h"
@@ -28,7 +29,6 @@
 namespace CryptoNote {
 
 void CommitmentEntry::serialize(ISerializer& s) {
-  // Crypto::Hash is a fixed-size array, serialize as binary
   s.binary(&commitment, sizeof(commitment), "commitment");
   s.binary(&txHash, sizeof(txHash), "tx_hash");
   s(blockHeight, "block_height");
@@ -37,6 +37,13 @@ void CommitmentEntry::serialize(ISerializer& s) {
   s(targetChainId, "target_chain_id");
   s(isLegacyMigration, "is_legacy_migration");
   s(isSlashed, "is_slashed");
+  // type as underlying uint8_t
+  uint8_t typeVal = static_cast<uint8_t>(type);
+  s(typeVal, "type");
+  if (s.type() == ISerializer::INPUT) type = static_cast<Type>(typeVal);
+  s(senderAddress, "sender_address");
+  s(ceremonyAlias, "ceremony_alias");
+  s.binary(&signingPubKey, sizeof(signingPubKey), "signing_pub_key");
 }
 
 CommitmentIndex::CommitmentIndex(const CryptoNote::Currency& currency) : m_currency(currency) {
@@ -1174,6 +1181,59 @@ std::optional<EpochReport> CommitmentIndex::getLatestEpochReport() const {
 }
 
 // ── Unstaking review notice methods ──────────────────────────────────────────
+
+void CommitmentIndex::serialize(ISerializer& s) {
+  // No mutex here — called from Blockchain serializer which already holds the lock.
+
+  // Commitments map (keyed by commitHash hex string)
+  s(m_commitments, "commitments");
+
+  // EFier registrations map (keyed by wallet address)
+  s(m_elderfierRegistrations, "elderfier_registrations");
+
+  // EFiD -> wallet address mapping
+  s(m_elderfierAddresses, "elderfier_addresses");
+
+  // Slash proposals
+  // (stored as individual fields since SlashProposal contains a std::set)
+  // We skip m_slashProposals for now — slashes are rare and verifiable on-chain via commitments
+
+  // Double-sign events (last 10 epochs worth, non-critical to persist)
+  // Skipped — regenerated from epoch reports when signatures arrive
+
+  if (s.type() == ISerializer::INPUT) {
+    // Rebuild all derived data from m_commitments on load
+    m_merkle_leaves.clear();
+    m_heightIndex.clear();
+    m_txHashToCommitHash.clear();
+    m_heat_count = 0;
+    m_cold_count = 0;
+    m_elderfier_stake_count = 0;
+    m_current_block_height = 0;
+
+    for (const auto& kv : m_commitments) {
+      const CommitmentEntry& entry = kv.second;
+      m_merkle_leaves.push_back(entry.commitment);
+      m_heightIndex[entry.blockHeight].push_back(kv.first);
+      m_txHashToCommitHash[Common::podToHex(entry.txHash)] = kv.first;
+      switch (entry.type) {
+        case CommitmentEntry::Type::HEAT:           m_heat_count++; break;
+        case CommitmentEntry::Type::COLD:           m_cold_count++; break;
+        case CommitmentEntry::Type::ELDERFIER_STAKING: m_elderfier_stake_count++; break;
+      }
+      if (entry.blockHeight > m_current_block_height)
+        m_current_block_height = entry.blockHeight;
+    }
+
+    // Rebuild EFier ID list from registrations
+    m_elderfier_ids.clear();
+    for (const auto& kv : m_elderfierRegistrations) {
+      m_elderfier_ids.push_back(kv.second.elderfier_id);
+    }
+
+    m_current_merkle_root = computeMerkleRootInternal();
+  }
+}
 
 void CommitmentIndex::addUnstakingNotice(const UnstakingNotice& notice) {
   std::lock_guard<std::mutex> lock(m_mutex);
