@@ -17,6 +17,7 @@
 
 #include "SimpleWallet.h"
 #include "crypto/subaddress.h"
+#include "Common/ConsoleTools.h"
 
 #include <ctime>
 #include <fstream>
@@ -2269,20 +2270,38 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
 
   // ── Header ───────────────────────────────────────────────────────────────
   success_msg_writer() << "";
-  success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-  success_msg_writer() << "║   ΞLDERFIER PANEL  ·  @" << std::left << std::setw(36) << registeredAlias << "║";
-  success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
+  Common::Console::setTextColor(Common::Console::Color::BrightYellow);
+  std::cout << "╔════════════════════════════════════════════════════════════╗\n";
+  std::cout << "║   ";
+  Common::Console::setTextColor(Common::Console::Color::BrightWhite);
+  std::cout << "ΞLDERFIER PANEL  ·  KING " << std::left << std::setw(32) << registeredAlias;
+  Common::Console::setTextColor(Common::Console::Color::BrightYellow);
+  std::cout << "║\n";
+  std::cout << "╚════════════════════════════════════════════════════════════╝\n";
+  Common::Console::setTextColor(Common::Console::Color::Default);
   success_msg_writer() << "";
-  success_msg_writer() << "  Alias:          @" << registeredAlias;
+  success_msg_writer() << "  EFID:           " << registeredAlias;
   success_msg_writer() << "  Registered:     Block " << registeredBlock;
-  success_msg_writer() << "  Signing key:    " << Common::podToHex(signingSecKey);
-  success_msg_writer() << "  Signing pubkey: " << Common::podToHex(signingPubKey);
+  std::cout << "  Signing key:    ";
+  Common::Console::setTextColor(Common::Console::Color::BrightCyan);
+  std::cout << Common::podToHex(signingSecKey) << "\n";
+  Common::Console::setTextColor(Common::Console::Color::Default);
+  std::cout << "  Signing pubkey: ";
+  Common::Console::setTextColor(Common::Console::Color::BrightCyan);
+  std::cout << Common::podToHex(signingPubKey) << "\n";
+  Common::Console::setTextColor(Common::Console::Color::Default);
   success_msg_writer() << "";
   success_msg_writer() << "  Run daemon:     fuegod --elderfier-key " << Common::podToHex(signingSecKey);
   success_msg_writer() << "";
 
   // ── Stakes ───────────────────────────────────────────────────────────────
-  success_msg_writer() << "  ── ΞLDERFIRE STAKES (5 × 800 XFG) ──────────────────────";
+  Common::Console::setTextColor(Common::Console::Color::BrightYellow);
+  if (m_currency.isTestnet()) {
+    std::cout << "  ── ΞLDERFIRE STAKES (444.4 TEST) ────────────────────────────\n";
+  } else {
+    std::cout << "  ── ΞLDERFIRE STAKES (4444 XFG) ──────────────────────────────\n";
+  }
+  Common::Console::setTextColor(Common::Console::Color::Default);
   success_msg_writer() << "";
 
   size_t depositCount = m_wallet->getDepositCount();
@@ -2304,18 +2323,21 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
         ? "Unlocked" : "Withdrawn");
     std::string heightStr = (deposit.unlockHeight == 0) ? "Pending" : std::to_string(deposit.unlockHeight);
 
-    success_msg_writer() << "  Stake #" << stakeCount << ":  "
+    Common::Console::setTextColor(Common::Console::Color::BrightYellow);
+    std::cout << "  Stake #" << stakeCount;
+    Common::Console::setTextColor(Common::Console::Color::Default);
+    std::cout << ":  "
       << m_currency.formatAmount(deposit.amount) << " XFG"
       << "  |  " << statusStr
       << "  |  Block: " << (deposit.height > 0 ? std::to_string(deposit.height) : "Pending")
-      << "  |  " << Common::podToHex(deposit.transactionHash).substr(0, 16) << "...";
+      << "  |  " << Common::podToHex(deposit.transactionHash).substr(0, 16) << "...\n";
   }
 
   if (stakeCount == 0) {
     fail_msg_writer() << "  No ΞLDERFIER stakes found in this wallet.";
   } else {
     success_msg_writer() << "";
-    success_msg_writer() << "  Stakes:         " << stakeCount << " / 5";
+    success_msg_writer() << "  Stakes:         " << stakeCount << " / 20";
     success_msg_writer() << "  Total staked:   " << m_currency.formatAmount(totalStaked) << " XFG";
   }
   success_msg_writer() << "";
@@ -2328,7 +2350,9 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
     COMMAND_RPC_GET_ELDERFIER_CONSENSUS_STATUS::response consRes;
     invokeJsonCommand(httpClient, "/elderfier_consensus_status", consReq, consRes);
 
-    success_msg_writer() << "  ── CURRENT CONSENSUS ROUND ─────────────────────────────";
+    Common::Console::setTextColor(Common::Console::Color::BrightYellow);
+    std::cout << "  ── CURRENT CONSENSUS ROUND ─────────────────────────────\n";
+    Common::Console::setTextColor(Common::Console::Color::Default);
     success_msg_writer() << "";
     success_msg_writer() << "  Merkle root:    " << consRes.current_merkle_root.substr(0, 32) << "...";
     success_msg_writer() << "  Block height:   " << consRes.current_block_height;
@@ -2349,7 +2373,9 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
     COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::response netRes;
     invokeJsonCommand(httpClient, "/elderfier_network_stats", netReq, netRes);
 
-    success_msg_writer() << "  ── NETWORK ─────────────────────────────────────────────";
+    Common::Console::setTextColor(Common::Console::Color::BrightYellow);
+    std::cout << "  ── NETWORK ─────────────────────────────────────────────\n";
+    Common::Console::setTextColor(Common::Console::Color::Default);
     success_msg_writer() << "";
     success_msg_writer() << "  Active Ξlderfiers:  " << netRes.total_registered_elderfiers;
     success_msg_writer() << "  Fees in escrow: " << m_currency.formatAmount(netRes.total_fees_pending_in_escrow) << " XFG";
@@ -2365,16 +2391,24 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
   }
 
   // ── Council actions ──────────────────────────────────────────────────────
-  success_msg_writer() << "  ── COUNCIL ACTIONS ─────────────────────────────────────";
+  Common::Console::setTextColor(Common::Console::Color::BrightYellow);
+  std::cout << "  ── COUNCIL ACTIONS ─────────────────────────────────────\n";
+  Common::Console::setTextColor(Common::Console::Color::Default);
   success_msg_writer() << "";
-  success_msg_writer() << "  propose_slash <deposit_txhash> <reason>";
+  Common::Console::setTextColor(Common::Console::Color::BrightCyan);
+  std::cout << "  propose_slash <deposit_txhash> <reason>\n";
+  Common::Console::setTextColor(Common::Console::Color::Default);
   success_msg_writer() << "      Submit a slash proposal for elder_council review.";
   success_msg_writer() << "      Reasons: double_sign | inactive_<N>_epochs";
   success_msg_writer() << "      Requires explicit confirmation before broadcasting.";
   success_msg_writer() << "      Advisory notices appear in: /get_epoch_report";
   success_msg_writer() << "";
-  success_msg_writer() << "  unstake";
+  Common::Console::setTextColor(Common::Console::Color::BrightCyan);
+  std::cout << "  unstake\n";
+  Common::Console::setTextColor(Common::Console::Color::Default);
   success_msg_writer() << "      Batch-withdraw all (20) Elderfier staking deposits (1000-block review).";
+  success_msg_writer() << "";
+  success_msg_writer() << "  ────────────────────────────────────────────────────────";
   success_msg_writer() << "";
   success_msg_writer() << "  Guard the Realm well, King " << registeredAlias << ".";
   success_msg_writer() << "";

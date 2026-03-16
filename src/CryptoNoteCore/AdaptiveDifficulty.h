@@ -48,6 +48,7 @@ namespace CryptoNote {
             double   blockStealingTimeThreshold; // Fraction of targetTime below which a block is "fast"
             uint32_t blockStealingThreshold;     // Minimum fast-block count to trigger stealing detection
             double   hashRateChangeThreshold;    // Ratio of recent/historical solve time for anomaly
+            uint64_t minDifficultyFloor;         // Hard floor on returned difficulty (replaces hardcoded 10000)
         };
 
         AdaptiveDifficulty(const DifficultyConfig& config);

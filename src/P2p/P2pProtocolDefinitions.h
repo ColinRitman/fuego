@@ -1,18 +1,28 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2011-2017 The Cryptonote developers
-// Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
 // Copyright (c) 2018-2019 The TurtleCoin developers
 // Copyright (c) 2016-2020 The Karbo developers
 // Copyright (c) 2018-2021 Conceal Network & Conceal Devs
-// Distributed under the MIT/X11 software license, see the accompanying
-// file COPYING or http://www.opensource.org/licenses/mit-license.php.
+//
+// This file is part of Fuego.
+//
+// Fuego is free software distributed in the hope that it
+// will be useful, but WITHOUT ANY WARRANTY; without even the
+// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
+// PURPOSE. You can redistribute it and/or modify it under the terms
+// of the GNU General Public License v3 or later versions as published
+// by the Free Software Foundation. Fuego includes elements written
+// by third parties. See file labeled LICENSE for more details.
+// You should have received a copy of the GNU General Public License
+// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #pragma once
 
 #include "P2pProtocolTypes.h"
 
-#include "crypto/crypto.h"
-#include "CryptoNoteConfig.h"
-#include "CryptoNoteCore/CryptoNoteStatInfo.h"
+#include "../crypto/crypto.h"
+#include "../CryptoNoteConfig.h"
+#include "../CryptoNoteCore/CryptoNoteStatInfo.h"
 
 // new serialization
 #include "Serialization/ISerializer.h"
@@ -69,7 +79,7 @@ namespace CryptoNote
       KV_MEMBER(my_port)
     }
   };
-  
+
   struct CORE_SYNC_DATA
   {
     uint32_t current_height;
@@ -106,7 +116,7 @@ namespace CryptoNote
     {
       basic_node_data node_data;
       CORE_SYNC_DATA payload_data;
-      std::list<PeerlistEntry> local_peerlist; 
+      std::list<PeerlistEntry> local_peerlist;
 
       void serialize(ISerializer& s) {
         KV_MEMBER(node_data)
@@ -155,7 +165,7 @@ namespace CryptoNote
   struct COMMAND_PING
   {
     /*
-      Used to make "callback" connection, to be sure that opponent node 
+      Used to make "callback" connection, to be sure that opponent node
       have accessible connection point. Only other nodes can add peer to peerlist,
       and ONLY in case when peer has accepted connection and answered to ping.
     */
@@ -181,9 +191,9 @@ namespace CryptoNote
     };
   };
 
-  
+
 #ifdef ALLOW_DEBUG_COMMANDS
-  //These commands are considered as insecure, and made in debug purposes for a limited lifetime. 
+  //These commands are considered as insecure, and made in debug purposes for a limited lifetime.
   //Anyone who feel unsafe with this commands can disable the ALLOW_GET_STAT_COMMAND macro.
 
   struct proof_of_trust
@@ -218,7 +228,7 @@ namespace CryptoNote
         KV_MEMBER(tr)
       }
     };
-    
+
     struct response
     {
       std::string version;
@@ -331,6 +341,94 @@ namespace CryptoNote
     };
 
     // NOTIFY pattern - no response needed (async broadcast)
+    typedef EMPTY_STRUCT response;
+  };
+
+  /************************************************************************/
+  /* ELDERFIER UNSTAKING REVIEW - P2P Gossip for Unstaking Notifications  */
+  /************************************************************************/
+
+  // Sent automatically when an EFier initiates unstaking.
+  // Contains brief stats so active EFs can decide if full review is warranted.
+  // No action required = unstake proceeds after review window.
+  struct NOTIFY_ELDERFIER_UNSTAKING_REVIEW
+  {
+    enum { ID = P2P_COMMANDS_POOL_BASE + 11 };
+
+    struct request
+    {
+      uint8_t elderfier_id;           // EFiD initiating unstaking
+      std::string ceremony_alias;     // @ALIAS for human-readable display
+      uint32_t unstaking_start_block;
+      uint32_t review_window_blocks;  // How long peers have to respond
+
+      // Brief activity stats (populated from epoch reports)
+      uint64_t total_epochs_active;   // Total epochs this EFier has been registered
+      uint64_t epochs_participated;   // Epochs where they actually signed
+      uint64_t epochs_missed;         // Epochs where they did not sign
+      uint32_t consecutive_missed;    // Current consecutive miss streak
+      uint32_t double_sign_count;     // Total double-sign events ever recorded
+      uint64_t total_fees_earned;     // Lifetime fees earned (atomic units)
+
+      uint64_t broadcast_height;      // Block height when this was broadcast
+      uint32_t version = 1;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(elderfier_id)
+        KV_MEMBER(ceremony_alias)
+        KV_MEMBER(unstaking_start_block)
+        KV_MEMBER(review_window_blocks)
+        KV_MEMBER(total_epochs_active)
+        KV_MEMBER(epochs_participated)
+        KV_MEMBER(epochs_missed)
+        KV_MEMBER(consecutive_missed)
+        KV_MEMBER(double_sign_count)
+        KV_MEMBER(total_fees_earned)
+        KV_MEMBER(broadcast_height)
+        KV_MEMBER(version)
+      }
+    };
+    typedef EMPTY_STRUCT response;
+  };
+
+  // Sent by an active EF requesting a full review of an unstaking EFier.
+  // Requires a documented reason from the permitted list — cannot be sent without evidence.
+  // Same, no action = no problem, unstake continues.
+  struct NOTIFY_ELDERFIER_FULL_REVIEW_REQUEST
+  {
+    enum { ID = P2P_COMMANDS_POOL_BASE + 12 };
+
+    // Permitted reason codes (enforced at wallet layer before broadcast)
+    // "double_sign"   — CommitmentIndex has recorded double-sign events for this EFiD
+    // "missed_epochs" — epoch report shows consecutive_missed >= REVIEW_MISS_THRESHOLD
+    // "invalid_sig"   — peer observed invalid signatures from this EFiD
+    // "duty_abuse"    — EFier signed despite being in UNSTAKING state
+    struct request
+    {
+      uint8_t target_efid;            // EFiD being reviewed
+      uint8_t requester_efid;         // EFiD requesting the review
+      std::string reason;             // One of permitted reason codes above
+      std::string evidence_summary;   // Human-readable summary (max 256 chars)
+
+      // Requesting EFier's signature (Ed25519) over: target_efid || reason || broadcast_height
+      // Prove request isnt forged & requester is EFier
+      Crypto::Signature requester_sig;
+      Crypto::PublicKey requester_pubkey;
+
+      uint64_t broadcast_height;
+      uint32_t version = 1;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(target_efid)
+        KV_MEMBER(requester_efid)
+        KV_MEMBER(reason)
+        KV_MEMBER(evidence_summary)
+        KV_MEMBER(requester_sig)
+        KV_MEMBER(requester_pubkey)
+        KV_MEMBER(broadcast_height)
+        KV_MEMBER(version)
+      }
+    };
     typedef EMPTY_STRUCT response;
   };
 

@@ -16,6 +16,7 @@
 #include <set>
 #include <algorithm>
 #include <cstring>
+#include <ctime>
 
 #include "CommitmentIndex.h"
 #include "TransactionExtra.h"
@@ -1170,6 +1171,147 @@ std::optional<EpochReport> CommitmentIndex::getLatestEpochReport() const {
   std::lock_guard<std::mutex> lock(m_mutex);
   if (m_epochReports.empty()) return std::nullopt;
   return m_epochReports.back();
+}
+
+// ── Unstaking review notice methods ──────────────────────────────────────────
+
+void CommitmentIndex::addUnstakingNotice(const UnstakingNotice& notice) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  m_unstakingNotices[notice.elderfier_id] = notice;
+}
+
+std::vector<UnstakingNotice> CommitmentIndex::getUnstakingNotices() const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  std::vector<UnstakingNotice> result;
+  result.reserve(m_unstakingNotices.size());
+  for (const auto& kv : m_unstakingNotices) {
+    result.push_back(kv.second);
+  }
+  return result;
+}
+
+bool CommitmentIndex::buildUnstakingNotice(uint8_t efid, uint32_t currentBlock, UnstakingNotice& out) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  // Find the registration
+  ElderfierRegistration* reg = nullptr;
+  for (auto& kv : m_elderfierRegistrations) {
+    if (kv.second.elderfier_id == efid) {
+      reg = &const_cast<ElderfierRegistration&>(kv.second);
+      break;
+    }
+  }
+  if (!reg) return false;
+
+  // Find the commitment entry for alias
+  std::string alias;
+  for (const auto& kv : m_commitments) {
+    if (kv.second.type == CommitmentEntry::Type::ELDERFIER_STAKING) {
+      // Match by signing pubkey
+      bool found = false;
+      for (const auto& r : m_elderfierRegistrations) {
+        if (r.second.elderfier_id == efid && r.second.signing_pubkey == kv.second.signingPubKey) {
+          alias = kv.second.ceremonyAlias;
+          found = true;
+          break;
+        }
+      }
+      if (found) break;
+    }
+  }
+
+  // Tally activity across epoch reports
+  uint64_t totalEpochs = 0, epochsParticipated = 0, epochsMissed = 0;
+  uint32_t consecutiveMissed = 0;
+  uint32_t doubleSignCount = 0;
+  uint64_t totalFees = 0;
+
+  for (const auto& report : m_epochReports) {
+    totalEpochs++;
+    bool participated = false;
+    for (const auto& activity : report.efierActivity) {
+      if (activity.elderfier_id == efid) {
+        participated = activity.signedThisEpoch;
+        totalFees += activity.feesEarned;
+        break;
+      }
+    }
+    if (participated) {
+      epochsParticipated++;
+      consecutiveMissed = 0;
+    } else {
+      epochsMissed++;
+      consecutiveMissed++;
+    }
+  }
+
+  // Count double-sign events for this EFiD
+  for (const auto& ds : m_doubleSignEvents) {
+    if (ds.elderfier_id == efid) doubleSignCount++;
+  }
+
+  // Populate consecutive missed from tracked counter
+  auto missIt = m_consecutiveMissedEpochs.find(efid);
+  if (missIt != m_consecutiveMissedEpochs.end()) {
+    consecutiveMissed = missIt->second;
+  }
+
+  uint32_t reviewWindow = reg->unstaking_review_window > 0
+    ? reg->unstaking_review_window
+    : (uint32_t)CryptoNote::parameters::ELDERFIER_STAKING_REVIEW_WINDOW;
+
+  out.elderfier_id = efid;
+  out.ceremony_alias = alias;
+  out.unstaking_start_block = currentBlock;
+  out.review_window_blocks = reviewWindow;
+  out.total_epochs_active = totalEpochs;
+  out.epochs_participated = epochsParticipated;
+  out.epochs_missed = epochsMissed;
+  out.consecutive_missed = consecutiveMissed;
+  out.double_sign_count = doubleSignCount;
+  out.total_fees_earned = totalFees;
+  out.broadcast_height = currentBlock;
+  out.received_at = static_cast<uint64_t>(std::time(nullptr));
+
+  return true;
+}
+
+void CommitmentIndex::addFullReviewRequest(const FullReviewRequest& req) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  // Validate reason code
+  static const std::set<std::string> validReasons = {
+    "double_sign", "missed_epochs", "invalid_sig", "duty_abuse"
+  };
+  if (validReasons.find(req.reason) == validReasons.end()) return;
+
+  // Requester must be an active EFier
+  bool requesterActive = false;
+  for (const auto& kv : m_elderfierRegistrations) {
+    if (kv.second.elderfier_id == req.requester_efid &&
+        kv.second.status == ElderfierStatus::ACTIVE) {
+      requesterActive = true;
+      break;
+    }
+  }
+  if (!requesterActive) return;
+
+  // Requester cannot request review of themselves
+  if (req.requester_efid == req.target_efid) return;
+
+  auto key = std::make_pair(req.target_efid, req.requester_efid);
+  m_fullReviewRequests[key] = req;
+}
+
+std::vector<FullReviewRequest> CommitmentIndex::getFullReviewRequests(uint8_t target_efid) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  std::vector<FullReviewRequest> result;
+  for (const auto& kv : m_fullReviewRequests) {
+    if (kv.first.first == target_efid) {
+      result.push_back(kv.second);
+    }
+  }
+  return result;
 }
 
 }  // namespace CryptoNote

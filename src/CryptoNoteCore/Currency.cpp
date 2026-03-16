@@ -1225,17 +1225,17 @@ double Currency::getBurnPercentage() const {
 	difficulty_type Currency::nextDifficultyV6(uint32_t height, uint8_t blockMajorVersion,
 		std::vector<std::uint64_t> timestamps, std::vector<difficulty_type> cumulativeDifficulties) const {
 
-		const uint64_t minDifficulty = isTestnet() ? 1000 : 1000000;
+		// DMWDA — epoch selected by height, so param changes never require a chain reset.
+		// minDifficultyFloor lives in the epoch config (per-epoch, not hardcoded here).
+		auto config = getDefaultFuegoConfig(isTestnet(), height);
 
 		if (timestamps.size() != cumulativeDifficulties.size() || timestamps.size() < 3) {
-			return minDifficulty;
+			return config.minDifficultyFloor;
 		}
 
-		// DMWDA — epoch selected by height, so param changes never require a chain reset
-		auto config = getDefaultFuegoConfig(isTestnet(), height);
 		AdaptiveDifficulty algo(config);
 		uint64_t next_D = algo.calculateNextDifficulty(height, timestamps, cumulativeDifficulties, isTestnet());
-		next_D = std::max(minDifficulty, next_D);
+		next_D = std::max(config.minDifficultyFloor, next_D);
 
 		// Round to clean numbers for readability
 		uint64_t i = 1000000000;

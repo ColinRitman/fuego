@@ -65,10 +65,44 @@ static const DmwdaEpoch TESTNET_DMWDA_EPOCHS[] = {
             /* blockStealingTimeThreshold*/ 0.10,  // (was 0.10)
             /* blockStealingThreshold    */ 5,     // (was 4)   all 5 must be fast (harder to trigger)
             /* hashRateChangeThreshold   */ 20.0,  // (was 5.0)  effectively disabled for normal variance
+            /* minDifficultyFloor        */ 10000, // hard floor during bootstrap
         }
     },
-    // Add future testnet epochs here, e.g.:
-    // { 5000, { 480, ... } },
+    {
+        // Epoch 2 — height 420.
+        // Raises the hard difficulty floor from 10000 to 80000.
+        // By height 420 the LWMA windows are full of sub-target fast blocks
+        // (because 10000 is ~17x below equilibrium for this hashrate), so
+        // DMWDA would return a floor value anyway. Jumping to 80000 skips
+        // the painfully slow 10k→170k ramp: only a 2x climb remains, which
+        // takes ~8 blocks (~30 min) instead of 300+ blocks (~18 hours).
+        /* activationHeight */ 420,
+        {
+            /* targetTime                */ 480,
+            /* shortWindow               */ 20,
+            /* mediumWindow              */ 45,
+            /* longWindow                */ 80,
+            /* emergencyWindow           */ 10,
+            /* minAdjustment             */ 0.80,
+            /* maxAdjustment             */ 1.35,  // slightly looser for faster post-420 ramp to equilibrium
+            /* emergencyThreshold        */ 0.80,
+            /* smoothingFactor           */ 0.50,
+            /* weightShort               */ 0.50,
+            /* weightMedium              */ 0.35,
+            /* weightLong                */ 0.15,
+            /* confidenceMin             */ 0.20,
+            /* confidenceMax             */ 0.80,
+            /* defaultConfidence         */ 0.50,
+            /* recentWindowSize          */ 8,
+            /* historicalWindowSize      */ 30,
+            /* blockStealingCheckBlocks  */ 5,
+            /* blockStealingTimeThreshold*/ 0.10,
+            /* blockStealingThreshold    */ 5,
+            /* hashRateChangeThreshold   */ 20.0,
+            /* minDifficultyFloor        */ 80000, // skip slow ramp; ~2x to equilibrium (~170k)
+        }
+    },
+    // Add future testnet epochs here.
 };
 
 // ---------------------------------------------------------------------------
@@ -101,6 +135,7 @@ static const DmwdaEpoch MAINNET_DMWDA_EPOCHS[] = {
             /* blockStealingTimeThreshold*/ parameters::DMWDA_BLOCK_STEALING_TIME_THRESHOLD,
             /* blockStealingThreshold    */ parameters::DMWDA_BLOCK_STEALING_THRESHOLD,
             /* hashRateChangeThreshold   */ parameters::DMWDA_HASH_RATE_CHANGE_THRESHOLD,
+            /* minDifficultyFloor        */ 1000000,
         }
     },
     // Add future mainnet epochs here.
@@ -139,7 +174,7 @@ uint64_t AdaptiveDifficulty::calculateNextDifficulty(
     bool testnet) {
 
     if (timestamps.size() < 3) {
-        return 10000;
+        return m_config.minDifficultyFloor;
     }
 
     if (detectHashRateAnomaly(timestamps, cumulativeDifficulties, testnet)) {
@@ -180,11 +215,11 @@ uint64_t AdaptiveDifficulty::calculateMultiWindowDifficulty(
 
     // avgDifficulty: most recent mediumWindow blocks (end of array = newest).
     uint32_t effectiveWindow = std::min(static_cast<uint32_t>(n - 1), m_config.mediumWindow);
-    if (effectiveWindow == 0) return 10000;
+    if (effectiveWindow == 0) return m_config.minDifficultyFloor;
 
     uint64_t avgDifficulty = (cumulativeDifficulties[n - 1] - cumulativeDifficulties[n - 1 - effectiveWindow])
                              / effectiveWindow;
-    if (avgDifficulty < 10000) avgDifficulty = 10000;
+    if (avgDifficulty < m_config.minDifficultyFloor) avgDifficulty = m_config.minDifficultyFloor;
 
     if (weightedSolveTime < m_config.targetTime / 1000.0) {
         weightedSolveTime = m_config.targetTime / 1000.0;
@@ -206,7 +241,7 @@ uint64_t AdaptiveDifficulty::calculateMultiWindowDifficulty(
         newDifficulty = applySmoothing(newDifficulty, prevDifficulty, testnet);
     }
 
-    return std::max(static_cast<uint64_t>(10000), newDifficulty);
+    return std::max(m_config.minDifficultyFloor, newDifficulty);
 }
 
 double AdaptiveDifficulty::calculateLWMA(
@@ -277,16 +312,16 @@ uint64_t AdaptiveDifficulty::calculateEmergencyDifficulty(
 
     size_t   n               = timestamps.size();
     uint32_t emergencyWindow = std::min(static_cast<uint32_t>(n - 1), m_config.emergencyWindow);
-    if (emergencyWindow == 0) return 10000;
+    if (emergencyWindow == 0) return m_config.minDifficultyFloor;
 
     // Most recent emergencyWindow blocks.
     size_t startIdx = n - 1 - emergencyWindow;
 
     double recentSolveTime = static_cast<double>(timestamps[n - 1] - timestamps[startIdx]) / emergencyWindow;
-    if (recentSolveTime <= 0.0) return 10000;
+    if (recentSolveTime <= 0.0) return m_config.minDifficultyFloor;
 
     uint64_t currentDifficulty = (cumulativeDifficulties[n - 1] - cumulativeDifficulties[startIdx]) / emergencyWindow;
-    if (currentDifficulty < 10000) currentDifficulty = 10000;
+    if (currentDifficulty < m_config.minDifficultyFloor) currentDifficulty = m_config.minDifficultyFloor;
 
     double emergencyRatio = static_cast<double>(m_config.targetTime) / recentSolveTime;
     emergencyRatio = std::max(m_config.emergencyThreshold,
@@ -305,7 +340,7 @@ uint64_t AdaptiveDifficulty::calculateEmergencyDifficulty(
         emergencyDiff = applySmoothing(emergencyDiff, prevDiff, testnet);
     }
 
-    return std::max(static_cast<uint64_t>(10000), emergencyDiff);
+    return std::max(m_config.minDifficultyFloor, emergencyDiff);
 }
 
 bool AdaptiveDifficulty::detectHashRateAnomaly(

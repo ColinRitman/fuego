@@ -53,6 +53,14 @@ public:
   // Stop broadcaster and signing thread
   void stop();
 
+  // Broadcast an unstaking review notice to all connected peers.
+  // Called from Blockchain.cpp (or RpcServer) when an EFier initiates unstaking.
+  void broadcastUnstakingReview(const UnstakingNotice& notice);
+
+  // Broadcast a full review request to all connected peers.
+  // Called from RpcServer when an active EFier triggers /broadcast_review_request.
+  void broadcastFullReviewRequest(const FullReviewRequest& req);
+
 private:
   core& m_core;
   NodeServer& m_p2p;

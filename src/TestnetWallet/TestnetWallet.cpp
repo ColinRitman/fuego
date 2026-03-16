@@ -71,7 +71,7 @@ namespace CryptoNote
     // Add testnet-specific deposit commands (in addition to inherited ones)
     m_consoleHandler.setHandler("burn", boost::bind(&testnet_wallet::burn, this, boost::arg<1>()), "burn <amount> - Create a HEAT burn (0.8, 8, 80, 800 TEST)");
     m_consoleHandler.setHandler("cold", boost::bind(&testnet_wallet::cold, this, boost::arg<1>()), "cold <amount> <term_code> - Create a Certificate of Ledger Deposit (0.8, 8, 80, 800 TEST with terms 3 (3months) or 12 (1yr)");
-    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begin the Testifier Staking Ceremony to become an Elderfier (interactive, 20 deposits across all tiers, 444.4 TEST req'd).");
+    m_consoleHandler.setHandler("elderking_ceremony", boost::bind(&testnet_wallet::elderking_ceremony, this, boost::arg<1>()), "elderking_ceremony - Begin the Staking Ceremony to become a Testifier (interactive, 444.4 TEST req'd).");
     m_consoleHandler.setHandler("unstake", boost::bind(&testnet_wallet::unstake, this, boost::arg<1>()), "unstake - Batch-withdraw all Testifier staking deposits (single tx)");
     m_consoleHandler.setHandler("list_burns", boost::bind(&testnet_wallet::list_burns, this, boost::arg<1>()), "list_burns - List all burn transactions.");
 
@@ -852,14 +852,14 @@ namespace CryptoNote
       // ── Completion ─────────────────────────────────────────────────────
       success_msg_writer() << "";
       success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
-      success_msg_writer() << "║          TESTNET CEREMONY COMPLETE — TESTIFIER IGNITED         ║";
+      success_msg_writer() << "║          TESTNET CEREMONY COMPLETE — TESTIFIER IGNITED     ║";
       success_msg_writer() << "╚════════════════════════════════════════════════════════════╝";
       success_msg_writer() << "";
       success_msg_writer() << "  Ælder King " << alias << " — all 20 Testifier stakes have been";
       success_msg_writer() << "  broadcast to the testnet. Your name is embedded in each.";
       success_msg_writer() << "";
-      success_msg_writer() << "  When all 20 deposits confirm on-chain, the testnet will";
-      success_msg_writer() << "  register you as Elder King @" << alias;
+      success_msg_writer() << "  Once your stake (all 20 deposits) confirms on-chain, the testnet will";
+      success_msg_writer() << "  register you as Ælder King " << alias;
       success_msg_writer() << "  and add you to the active Testifiers registry.";
       success_msg_writer() << "";
       success_msg_writer() << "  ── YOUR TESTIFIER SIGNING KEY ───────────────────────────";

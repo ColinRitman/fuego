@@ -173,6 +173,40 @@ struct ElderfierRegistration {
 
 
 
+// Unstaking review notice — sent by P2P gossip when an EFier initiates unstaking.
+// Contains brief activity stats so active EFiers can decide if a full review is warranted.
+// No action taken by peers = unstake silently approved after the review window.
+struct UnstakingNotice {
+  uint8_t elderfier_id = 0;
+  std::string ceremony_alias;
+  uint32_t unstaking_start_block = 0;
+  uint32_t review_window_blocks = 0;  // Peers have this many blocks to call for full review
+
+  // Brief activity stats (populated from CommitmentIndex epoch records)
+  uint64_t total_epochs_active = 0;
+  uint64_t epochs_participated = 0;
+  uint64_t epochs_missed = 0;
+  uint32_t consecutive_missed = 0;
+  uint32_t double_sign_count = 0;
+  uint64_t total_fees_earned = 0;
+
+  uint64_t broadcast_height = 0;
+  uint64_t received_at = 0;  // local timestamp (seconds since epoch) when this node received it
+};
+
+// Full review request — sent by an active EFier who believes the unstaking EFier misbehaved.
+// Requires a documented reason from the permitted list (enforced at wallet layer).
+struct FullReviewRequest {
+  uint8_t target_efid = 0;
+  uint8_t requester_efid = 0;
+  std::string reason;           // "double_sign" | "missed_epochs" | "invalid_sig" | "duty_abuse"
+  std::string evidence_summary; // Human-readable summary (max 256 chars)
+  Crypto::Signature requester_sig = {};
+  Crypto::PublicKey requester_pubkey = {};
+  uint64_t broadcast_height = 0;
+  uint64_t received_at = 0;
+};
+
 // Main CommitmentIndex class
 class CommitmentIndex {
 public:
@@ -306,6 +340,25 @@ public:
   // Get the most recent stored epoch report
   std::optional<EpochReport> getLatestEpochReport() const;
 
+  // ── Unstaking review notice storage ──────────────────────────────────────────
+  // Record an incoming UnstakingNotice (from P2P gossip or wallet-triggered broadcast).
+  // Overwrites any prior notice for the same EFiD.
+  void addUnstakingNotice(const UnstakingNotice& notice);
+
+  // Retrieve all pending UnstakingNotices (for elder_council display / RPC).
+  std::vector<UnstakingNotice> getUnstakingNotices() const;
+
+  // Build an UnstakingNotice for a locally-registered EFier (populates activity stats
+  // from epoch records). Returns false if EFiD has no registration.
+  bool buildUnstakingNotice(uint8_t efid, uint32_t currentBlock, UnstakingNotice& out) const;
+
+  // Record an incoming FullReviewRequest.
+  // Only stores if requester_efid is an active EFier and reason is valid.
+  void addFullReviewRequest(const FullReviewRequest& req);
+
+  // Retrieve all FullReviewRequests for a specific target EFiD.
+  std::vector<FullReviewRequest> getFullReviewRequests(uint8_t target_efid) const;
+
   // Serialization support
   void serialize(ISerializer& s) {}
 
@@ -364,6 +417,12 @@ private:
 
   // txHash hex -> commitment hash hex index (for fast slash lookup)
   std::map<std::string, std::string> m_txHashToCommitHash;
+
+  // Unstaking review notices — keyed by elderfier_id (last notice per EFiD)
+  std::map<uint8_t, UnstakingNotice> m_unstakingNotices;
+
+  // Full review requests — keyed by (target_efid, requester_efid)
+  std::map<std::pair<uint8_t,uint8_t>, FullReviewRequest> m_fullReviewRequests;
 
   // Slash proposal accumulation — keyed by depositTxHash hex
   struct SlashProposal {
