@@ -119,6 +119,7 @@ std::unordered_map<std::string, RpcServer::RpcHandler<RpcServer::HandlerFunction
   { "/elderfier_fee_balance", { jsonMethod<COMMAND_RPC_GET_ELDERFIER_FEE_BALANCE>(&RpcServer::on_get_elderfier_fee_balance), true } },
   { "/elderfier_network_stats", { jsonMethod<COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS>(&RpcServer::on_get_elderfier_network_stats), true } },
   { "/check_elderfier_eligibility", { jsonMethod<COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY>(&RpcServer::on_check_elderfier_eligibility), true } },
+  { "/get_elderfier_by_pubkey", { jsonMethod<COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY>(&RpcServer::on_get_elderfier_by_pubkey), true } },
   { "/get_alias", { jsonMethod<COMMAND_RPC_GET_ALIAS>(&RpcServer::on_get_alias), true } },
   { "/get_alias_by_address", { jsonMethod<COMMAND_RPC_GET_ALIAS_BY_ADDRESS>(&RpcServer::on_get_alias_by_address), true } },
   { "/get_all_aliases", { jsonMethod<COMMAND_RPC_GET_ALL_ALIASES>(&RpcServer::on_get_all_aliases), true } },
@@ -1694,6 +1695,29 @@ bool RpcServer::on_check_elderfier_eligibility(const COMMAND_RPC_CHECK_ELDERFIER
     res.status = CORE_RPC_STATUS_OK;
     return true;
   }
+}
+
+bool RpcServer::on_get_elderfier_by_pubkey(const COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY::request& req,
+                                             COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY::response& res) {
+  res.found = false;
+  if (req.signing_pubkey_hex.size() != 64) return true;
+
+  Crypto::PublicKey pubkey;
+  if (!Common::fromHex(req.signing_pubkey_hex, &pubkey, sizeof(pubkey))) return true;
+
+  ElderfierRegistration reg;
+  if (!m_core.get_blockchain_storage().getElderfierBySigningPubkey(pubkey, reg)) return true;
+
+  res.found = true;
+  res.elderfier_id = reg.elderfier_id;
+  res.ceremony_alias = reg.ceremony_alias;
+
+  switch (reg.status) {
+    case ElderfierStatus::ACTIVE:    res.status = "active"; break;
+    case ElderfierStatus::UNSTAKING: res.status = "unstaking"; break;
+    case ElderfierStatus::VOID:      res.status = "void"; break;
+  }
+  return true;
 }
 
 bool RpcServer::on_get_alias(const COMMAND_RPC_GET_ALIAS::request& req,

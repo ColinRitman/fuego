@@ -391,6 +391,7 @@ bool CommitmentIndex::tryRegisterElderfier(const std::string& wallet, const Cryp
   // Register the Elderfier
   ElderfierRegistration reg;
   reg.address = wallet;
+  reg.ceremony_alias = alias;
   reg.elderfier_id = efid;
   reg.signing_pubkey = pubkey;
   reg.status = ElderfierStatus::ACTIVE;
@@ -423,6 +424,17 @@ bool CommitmentIndex::getElderfierSigningPubkey(uint8_t efid, Crypto::PublicKey&
     if (pair.second.elderfier_id == efid && pair.second.status == ElderfierStatus::ACTIVE) {
       pubkey_out = pair.second.signing_pubkey;
       return pubkey_out != Crypto::PublicKey();  // Only valid if non-zero
+    }
+  }
+  return false;
+}
+
+bool CommitmentIndex::getElderfierBySigningPubkey(const Crypto::PublicKey& pubkey, ElderfierRegistration& out) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  for (const auto& kv : m_elderfierRegistrations) {
+    if (kv.second.signing_pubkey == pubkey) {
+      out = kv.second;
+      return true;
     }
   }
   return false;

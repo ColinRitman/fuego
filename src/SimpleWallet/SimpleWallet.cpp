@@ -2209,51 +2209,7 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
 //----------------------------------------------------------------------------------------------------
 bool simple_wallet::elder_council(const std::vector<std::string> &)
 {
-  // ── Gate: must be a registered Elderfier ────────────────────────────────
-  std::string myAddress = m_wallet->getAddress();
-  std::string registeredAlias;
-  uint32_t registeredBlock = 0;
-
-  try {
-    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
-    COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request addrReq;
-    COMMAND_RPC_GET_ALIAS_BY_ADDRESS::response addrRes;
-    addrReq.address = myAddress;
-    invokeJsonCommand(httpClient, "/get_alias_by_address", addrReq, addrRes);
-
-    if (!addrRes.found || addrRes.alias_type != 0) {
-      // Not yet a confirmed EFier — check if ceremony is pending
-      uint32_t efTerm = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING
-                                                : CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING;
-      size_t pendingStakes = 0;
-      size_t depositCount = m_wallet->getDepositCount();
-      for (CryptoNote::DepositId i = 0; i < depositCount; ++i) {
-        CryptoNote::Deposit d;
-        if (!m_wallet->getDeposit(i, d)) continue;
-        if (d.term == efTerm) ++pendingStakes;
-      }
-      if (pendingStakes > 0) {
-        success_msg_writer() << "";
-        success_msg_writer() << "  Elderfier ceremony pending (" << pendingStakes << "/20 stakes tracked).";
-        success_msg_writer() << "  elder_council command will be available once all 20 confirm and your alias is registered.";
-        success_msg_writer() << "  Check: list_cold  |  lookup_alias <your_alias>";
-        success_msg_writer() << "";
-      } else {
-        fail_msg_writer() << "Command not found.";
-      }
-      return true;
-    }
-    registeredAlias = addrRes.alias;
-    registeredBlock = addrRes.registered_block;
-  } catch (const ConnectException&) {
-    printConnectionError();
-    return true;
-  } catch (const std::exception& e) {
-    fail_msg_writer() << "Error: " << e.what();
-    return true;
-  }
-
-  // ── Derive signing keypair from wallet spend key ─────────────────────────
+  // ── Derive signing keypair from wallet spend key (needed for both gate and panel) ─
   CryptoNote::AccountKeys walletKeys;
   m_wallet->getAccountKeys(walletKeys);
   Crypto::PublicKey signingPubKey;
@@ -2266,6 +2222,50 @@ bool simple_wallet::elder_council(const std::vector<std::string> &)
     Crypto::hash_to_scalar(preimage, sizeof(preimage),
       reinterpret_cast<Crypto::EllipticCurveScalar&>(signingSecKey));
     Crypto::secret_key_to_public_key(signingSecKey, signingPubKey);
+  }
+
+  // ── Gate: must be a registered Elderfier — identified by signing pubkey ──
+  std::string registeredAlias;
+  uint32_t registeredBlock = 0;
+
+  try {
+    HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+    COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY::request efReq;
+    COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY::response efRes;
+    efReq.signing_pubkey_hex = Common::toHex(signingPubKey.data, sizeof(signingPubKey.data));
+    invokeJsonCommand(httpClient, "/get_elderfier_by_pubkey", efReq, efRes);
+
+    if (!efRes.found || efRes.status == "void") {
+      // Not yet registered — check if ceremony is pending
+      uint32_t efTerm = m_currency.isTestnet() ? CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING
+                                                : CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING;
+      size_t pendingStakes = 0;
+      size_t depositCount = m_wallet->getDepositCount();
+      for (CryptoNote::DepositId i = 0; i < depositCount; ++i) {
+        CryptoNote::Deposit d;
+        if (!m_wallet->getDeposit(i, d)) continue;
+        if (d.term == efTerm) ++pendingStakes;
+      }
+      if (pendingStakes > 0) {
+        const uint32_t TOTAL = CryptoNote::parameters::ELDERKING_TOTAL_DEPOSITS;
+        success_msg_writer() << "";
+        success_msg_writer() << "  Elderfier ceremony pending (" << pendingStakes << "/" << TOTAL << " stakes tracked).";
+        success_msg_writer() << "  elder_council command will be available once all " << TOTAL << " confirm and your alias is registered.";
+        success_msg_writer() << "  Check: list_cold  |  lookup_alias <your_alias>";
+        success_msg_writer() << "";
+      } else {
+        fail_msg_writer() << "Command not found.";
+      }
+      return true;
+    }
+    registeredAlias = efRes.ceremony_alias;
+    registeredBlock = 0;  // Not tracked in this endpoint
+  } catch (const ConnectException&) {
+    printConnectionError();
+    return true;
+  } catch (const std::exception& e) {
+    fail_msg_writer() << "Error: " << e.what();
+    return true;
   }
 
   // ── Header ───────────────────────────────────────────────────────────────

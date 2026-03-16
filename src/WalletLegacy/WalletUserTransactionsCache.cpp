@@ -635,7 +635,14 @@ DepositId WalletUserTransactionsCache::insertNewDeposit(const TransactionOutputI
   assert(depositOutput.type == TransactionTypes::OutputType::Multisignature ||
          depositOutput.type == TransactionTypes::OutputType::Commitment);
   assert(depositOutput.term != 0);
-  assert(m_transactionOutputToBankingIndex.find(std::tie(depositOutput.transactionHash, depositOutput.outputInTransaction)) == m_transactionOutputToBankingIndex.end());
+  // Guard against duplicate insertion (can happen when wallet re-syncs after daemon restart).
+  // Return the existing deposit id rather than crashing.
+  {
+    auto existing = m_transactionOutputToBankingIndex.find(std::tie(depositOutput.transactionHash, depositOutput.outputInTransaction));
+    if (existing != m_transactionOutputToBankingIndex.end()) {
+      return existing->second;
+    }
+  }
 
   Deposit deposit;
   deposit.amount = depositOutput.amount;

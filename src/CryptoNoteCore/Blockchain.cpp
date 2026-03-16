@@ -795,6 +795,70 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
       pushToBankingIndex(block, interest);
     }
 
+    // Re-populate CommitmentIndex from block transaction extras.
+    // rebuildCache() only rebuilds basic output indices; CommitmentIndex needs extra parsing.
+    logger(INFO, BRIGHT_WHITE) << "Rebuilding commitment index from block history...";
+    for (uint32_t b = 0; b < m_blocks.size(); ++b) {
+      const BlockEntry& block = m_blocks[b];
+      for (uint16_t t = 0; t < block.transactions.size(); ++t) {
+        const Transaction& tx = block.transactions[t].tx;
+        std::vector<TransactionExtraField> extraFields;
+        if (!parseTransactionExtra(tx.extra, extraFields)) continue;
+        for (const auto& field : extraFields) {
+          if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
+            const auto& dep = boost::get<TransactionExtraElderfierDeposit>(field);
+            Crypto::Hash txHash = getObjectHash(tx);
+            CommitmentEntry entry;
+            entry.commitment    = dep.depositHash;
+            entry.txHash        = txHash;
+            entry.blockHeight   = b;
+            entry.amount        = dep.depositAmount;
+            entry.term          = 0xFFFFFFFF;
+            entry.type          = CommitmentEntry::Type::ELDERFIER_STAKING;
+            entry.targetChainId = 0;
+            entry.senderAddress = Common::podToHex(dep.elderfierCommitment);
+            std::string alias;
+            Crypto::PublicKey signingPubKey = {};
+            if (dep.metadata.size() >= 41 && dep.metadata[0] == 0xEA) {
+              alias = std::string(dep.metadata.begin() + 1, dep.metadata.begin() + 9);
+              std::memcpy(signingPubKey.data, &dep.metadata[9], 32);
+            } else if (dep.metadata.size() >= 2 && dep.metadata[0] == 0xEA) {
+              alias = std::string(dep.metadata.begin() + 1, dep.metadata.end());
+            }
+            if (!alias.empty()) entry.senderAddress = "CEREMONY:" + alias;
+            entry.ceremonyAlias = alias;
+            entry.signingPubKey = signingPubKey;
+            m_commitmentIndex.addCommitment(entry);
+          } else if (field.type() == typeid(TransactionExtraHeatCommitment)) {
+            const auto& h = boost::get<TransactionExtraHeatCommitment>(field);
+            CommitmentEntry entry;
+            entry.commitment    = h.commitment;
+            entry.txHash        = getObjectHash(tx);
+            entry.blockHeight   = b;
+            entry.amount        = h.amount;
+            entry.term          = parameters::DEPOSIT_TERM_FOREVER;
+            entry.type          = CommitmentEntry::Type::HEAT;
+            entry.targetChainId = h.metadata.size() > 0 ? h.metadata[0] : 1;
+            m_commitmentIndex.addCommitment(entry);
+          } else if (field.type() == typeid(TransactionExtraColdCommitment)) {
+            const auto& c = boost::get<TransactionExtraColdCommitment>(field);
+            CommitmentEntry entry;
+            entry.commitment    = c.commitment;
+            entry.txHash        = getObjectHash(tx);
+            entry.blockHeight   = b;
+            entry.amount        = c.amount;
+            entry.term          = c.term;
+            entry.type          = CommitmentEntry::Type::COLD;
+            entry.targetChainId = c.claimChainCode;
+            m_commitmentIndex.addCommitment(entry);
+          }
+        }
+      }
+    }
+    logger(INFO, BRIGHT_WHITE) << "Commitment index rebuilt: "
+      << m_commitmentIndex.size() << " commitments, "
+      << m_commitmentIndex.getActiveElderfierCount() << " active EFiers.";
+
     std::chrono::duration<double> duration = std::chrono::steady_clock::now() - timePoint;
     logger(INFO, BRIGHT_WHITE) << "Rebuilding internal structures took: " << duration.count();
   }
@@ -2778,6 +2842,11 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
   bool Blockchain::getElderfierSigningPubkey(uint8_t efid, Crypto::PublicKey& pubkey_out) const {
     std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
     return m_commitmentIndex.getElderfierSigningPubkey(efid, pubkey_out);
+  }
+
+  bool Blockchain::getElderfierBySigningPubkey(const Crypto::PublicKey& pubkey, ElderfierRegistration& out) const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_commitmentIndex.getElderfierBySigningPubkey(pubkey, out);
   }
 
   std::vector<Crypto::Hash> Blockchain::getCommitmentMerkleProof(const Crypto::Hash& commitment) const {

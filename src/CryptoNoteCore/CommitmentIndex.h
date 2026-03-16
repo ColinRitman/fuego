@@ -150,12 +150,13 @@ enum class ElderfierStatus : uint8_t {
 };
 
 struct ElderfierRegistration {
-  std::string address;
-  uint8_t elderfier_id;
+  std::string address;          // "CEREMONY:<alias>" identifier (CommitmentIndex key)
+  std::string ceremony_alias;   // The 8-char alias — used for display and pubkey lookup
+  uint8_t elderfier_id = 0;
   Crypto::PublicKey signing_pubkey = {};  // Ed25519 pubkey for verifying EFier signatures
   ElderfierStatus status = ElderfierStatus::ACTIVE;
-  uint32_t unstaking_start_block = 0;  // Block where unstaking was initiated
-  uint32_t unstaking_review_window = 0; // Review window duration in blocks (1000 mainnet, 10 testnet)
+  uint32_t unstaking_start_block = 0;
+  uint32_t unstaking_review_window = 0;
 
   bool isInReviewWindow(uint32_t currentBlock) const {
     if (status != ElderfierStatus::UNSTAKING) return false;
@@ -165,6 +166,7 @@ struct ElderfierRegistration {
 
   void serialize(ISerializer& s) {
     s(address, "address");
+    s(ceremony_alias, "ceremony_alias");
     s(elderfier_id, "elderfier_id");
     s.binary(&signing_pubkey, sizeof(signing_pubkey), "signing_pubkey");
     uint8_t statusVal = static_cast<uint8_t>(status);
@@ -280,6 +282,10 @@ public:
 
   // Lookup signing pubkey by EFiD (for signature verification)
   bool getElderfierSigningPubkey(uint8_t efid, Crypto::PublicKey& pubkey_out) const;
+
+  // Lookup EFier registration by signing pubkey (for elder_council wallet check).
+  // Returns false if no active registration has this pubkey.
+  bool getElderfierBySigningPubkey(const Crypto::PublicKey& pubkey, ElderfierRegistration& out) const;
 
   // Get count of active registered EFiers
   size_t getActiveElderfierCount() const;

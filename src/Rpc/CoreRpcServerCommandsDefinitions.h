@@ -1221,6 +1221,32 @@ struct COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY {
 	};
 };
 
+// Look up an EFier registration by signing pubkey (hex).
+// Used by elder_council wallet command to identify a registered EFier.
+struct COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY {
+  struct request {
+    std::string signing_pubkey_hex;  // 64-hex Ed25519 public key
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(signing_pubkey_hex)
+    }
+  };
+
+  struct response {
+    bool found = false;
+    uint8_t elderfier_id = 0;
+    std::string ceremony_alias;
+    std::string status;  // "active" | "unstaking" | "void"
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(found)
+      KV_MEMBER(elderfier_id)
+      KV_MEMBER(ceremony_alias)
+      KV_MEMBER(status)
+    }
+  };
+};
+
 // ============================================================================
 // @ ALIAS SYSTEM RPC ENDPOINTS
 // ============================================================================

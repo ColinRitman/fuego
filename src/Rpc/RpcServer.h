@@ -103,6 +103,8 @@ private:
                                        COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::response& res);
   bool on_check_elderfier_eligibility(const COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::request& req,
                                        COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::response& res);
+  bool on_get_elderfier_by_pubkey(const COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY::request& req,
+                                   COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY::response& res);
   bool on_get_alias(const COMMAND_RPC_GET_ALIAS::request& req,
                      COMMAND_RPC_GET_ALIAS::response& res);
   bool on_get_alias_by_address(const COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request& req,
