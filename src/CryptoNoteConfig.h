@@ -299,7 +299,7 @@ namespace CryptoNote
 	// Seed Nodes
 	const std::initializer_list<const char *> SEED_NODES = {
 	  "207.244.247.64:10808",
-	    "103.101.201.136:10808",
+	    "195.88.57.158:10808",
  		   "80.89.228.157:10808",
 	         "216.145.84.248:10808"
 	};
@@ -308,7 +308,7 @@ namespace CryptoNote
 
 	// TESTNET Seed Nodes
 	const std::initializer_list<const char *> SEED_NODES_TESTNET = {
-	   "103.101.201.136:20808",
+	   "195.88.57.158:20808",
 		"216.145.84.248:20808",
  		 "80.89.228.157:20808",
  		   "207.244.247.64:20808"
@@ -318,7 +318,7 @@ namespace CryptoNote
                                      	// TESTNET parameters
 //--------------------------------------------------------------------------------------------------------------------------
 
- 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd08807121015858446addee6c8ba4bef2db5fbd84618bfab4a749f65badeefb9b8f04f9e5ac";
+ 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101df831d86532febc7d2a1a7ce4632a2c9bdbc9c1c58d2aa4fe42cc4e70242d33f";
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */

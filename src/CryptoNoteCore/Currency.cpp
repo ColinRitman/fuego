@@ -1225,28 +1225,59 @@ double Currency::getBurnPercentage() const {
 	difficulty_type Currency::nextDifficultyV6(uint32_t height, uint8_t blockMajorVersion,
 		std::vector<std::uint64_t> timestamps, std::vector<difficulty_type> cumulativeDifficulties) const {
 
-		// DMWDA — epoch selected by height, so param changes never require a chain reset.
-		// minDifficultyFloor lives in the epoch config (per-epoch, not hardcoded here).
-		auto config = getDefaultFuegoConfig(isTestnet(), height);
+		// LWMA-1 for v10+ — same proven Zawy algorithm as v5, with N=39.
+		// Copyright (c) 2017-2018 Zawy, MIT License
+		// https://github.com/zawy12/difficulty-algorithms/issues/3
 
-		if (timestamps.size() != cumulativeDifficulties.size() || timestamps.size() < 3) {
-			return config.minDifficultyFloor;
+		const uint64_t T = CryptoNote::parameters::DIFFICULTY_TARGET;
+		const uint64_t N = 39;
+		const uint64_t minDifficulty = isTestnet() ? 10000 : 1000000;
+
+		if (timestamps.size() != cumulativeDifficulties.size() || timestamps.size() <= N) {
+			return minDifficulty;
 		}
 
-		AdaptiveDifficulty algo(config);
-		uint64_t next_D = algo.calculateNextDifficulty(height, timestamps, cumulativeDifficulties, isTestnet());
-		next_D = std::max(config.minDifficultyFloor, next_D);
+		uint64_t L(0), next_D, i, this_timestamp(0), previous_timestamp(0), avg_D;
+
+		previous_timestamp = timestamps[0];
+		for (i = 1; i <= N; i++) {
+			// Safely prevent out-of-sequence timestamps
+			if (timestamps[i] > previous_timestamp) { this_timestamp = timestamps[i]; }
+			else { this_timestamp = previous_timestamp; }
+			// Symmetric solve time clamp: T/3 floor, 6*T ceiling.
+			// T/3 prevents fast blocks from biasing LWMA downward (Poisson fast-block bias).
+			uint64_t solveTime = this_timestamp - previous_timestamp;
+			solveTime = std::max(T / 3, std::min(6 * T, solveTime));
+			L += i * solveTime;
+			previous_timestamp = this_timestamp;
+		}
+		if (L < N * N * T / 20) { L = N * N * T / 20; }
+
+		avg_D = (cumulativeDifficulties[N] - cumulativeDifficulties[0]) / N;
+		if (avg_D < minDifficulty) { avg_D = minDifficulty; }
+
+		// Zawy LWMA-1 formula: next_D = avg_D * N * (N+1) * T * 97 / (200 * L)
+		// The 97/200 factor adjusts for the LWMA weighting bias.
+		if (avg_D > 2000000 * N * N * T) {
+			next_D = (avg_D / (200 * L)) * (N * (N + 1) * T * 97);
+		} else {
+			next_D = (avg_D * N * (N + 1) * T * 97) / (200 * L);
+		}
+
+		// Overflow protection for extreme hash rate changes
+		if (L < N * T / 100) {
+			uint64_t maxDifficulty = avg_D * 1000;
+			if (next_D > maxDifficulty) { next_D = maxDifficulty; }
+		}
 
 		// Round to clean numbers for readability
-		uint64_t i = 1000000000;
+		i = 1000000000;
 		while (i > 1) {
-			if (next_D > i * 100) {
-				next_D = ((next_D + i / 2) / i) * i;
-				break;
-			}
-			i /= 10;
+			if (next_D > i * 100) { next_D = ((next_D + i / 2) / i) * i; break; }
+			else { i /= 10; }
 		}
-		return next_D;
+
+		return std::max(minDifficulty, next_D);
 	}
 
 
