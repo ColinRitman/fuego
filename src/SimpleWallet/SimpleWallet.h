@@ -218,8 +218,6 @@ namespace CryptoNote
     bool m_wallet_file_arg_provided;
     bool m_generate_new_provided;
 
-    std::string m_wallet_file;
-
     // Sub-address list: (major, minor, addressString)
     // Generated deterministically from master keys; persisted in <wallet>.subaddresses
     std::vector<std::tuple<uint32_t, uint32_t, std::string>> m_subAddresses;
@@ -230,6 +228,7 @@ namespace CryptoNote
 
   protected:
     // Protected for testnet_wallet subclass access
+    std::string m_wallet_file;
     std::string m_daemon_host;
     uint16_t m_daemon_port;
     Common::ConsoleHandler m_consoleHandler;
