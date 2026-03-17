@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -20,9 +20,9 @@
 #include <map>
 #include <unordered_map>
 
-#include "ITransfersContainer.h"
-#include "IWallet.h"
-#include "IWalletLegacy.h" //TODO: make common types for all of our APIs (such as PublicKey, KeyPair, etc)
+#include "../../include/ITransfersContainer.h"
+#include "../../include/IWallet.h"
+#include "../../include/IWalletLegacy.h" //TODO: make common types for all of our APIs (such as PublicKey, KeyPair, etc)
 
 #include <boost/multi_index_container.hpp>
 #include <boost/multi_index/ordered_index.hpp>
@@ -31,8 +31,8 @@
 #include <boost/multi_index/composite_key.hpp>
 #include <boost/multi_index/member.hpp>
 
-#include "Common/FileMappedVector.h"
-#include "crypto/chacha8.h"
+#include "../Common/FileMappedVector.h"
+#include "../crypto/chacha8.h"
 
 namespace CryptoNote
 {

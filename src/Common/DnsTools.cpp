@@ -1,5 +1,5 @@
 // Copyright (c) 2016-2019 The Karbowanec developers
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 //
 // This file is part of Fuego.
 //
@@ -18,7 +18,6 @@
 #include <mutex>
 #include <sstream>
 #include <functional>
-#include <iostream>
 #include <cstring>
 #include <string>
 #include <map>

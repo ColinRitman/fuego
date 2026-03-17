@@ -1759,6 +1759,70 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
   // Interactive Elderfire StayKing Ceremony.
   // Alias is chosen interactively — no command-line arg needed.
 
+  // ── PRE-CHECK: detect existing ceremony deposits for resume ────────────
+  uint32_t efTerm = CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING;
+  const uint32_t totalDeposits = CryptoNote::parameters::ELDERKING_TOTAL_DEPOSITS;
+  size_t existingStakes = 0;
+  {
+    size_t depCount = m_wallet->getDepositCount();
+    for (CryptoNote::DepositId di = 0; di < depCount; ++di) {
+      CryptoNote::Deposit d;
+      if (!m_wallet->getDeposit(di, d)) continue;
+      if (d.term == efTerm) ++existingStakes;
+    }
+  }
+
+  if (existingStakes >= totalDeposits) {
+    success_msg_writer() << "";
+    success_msg_writer() << "  You already have " << totalDeposits << " Elderfier stakes. Use elder_council.";
+    success_msg_writer() << "";
+    return true;
+  }
+
+  std::string alias;
+  bool resuming = (existingStakes > 0);
+
+  if (resuming) {
+    // ── RESUME FLOW ──────────────────────────────────────────────────────
+    success_msg_writer() << "";
+    success_msg_writer() << "  ── CEREMONY RESUME ──────────────────────────────────────";
+    success_msg_writer() << "";
+    success_msg_writer() << "  " << existingStakes << "/" << totalDeposits << " Elderfier stakes detected.";
+    success_msg_writer() << "  " << (totalDeposits - existingStakes) << " remaining stake(s) to complete the ceremony.";
+    success_msg_writer() << "";
+
+    bool aliasFound = false;
+    try {
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request addrReq;
+      COMMAND_RPC_GET_ALIAS_BY_ADDRESS::response addrRes;
+      addrReq.address = m_wallet->getAddress();
+      invokeJsonCommand(httpClient, "/get_alias_by_address", addrReq, addrRes);
+      if (addrRes.found && addrRes.alias_type == 0) {
+        alias = addrRes.alias;
+        aliasFound = true;
+        success_msg_writer() << "  Registered alias: @" << alias;
+      }
+    } catch (...) {}
+
+    if (!aliasFound) {
+      success_msg_writer() << "  Alias not yet confirmed on-chain.";
+      success_msg_writer() << "  Enter your Ælder King name to resume: ";
+      m_consoleHandler.readLine(alias);
+      while (!alias.empty() && std::isspace((unsigned char)alias.front())) alias.erase(alias.begin());
+      while (!alias.empty() && std::isspace((unsigned char)alias.back()))  alias.pop_back();
+      if (alias.empty() || !CryptoNote::AliasIndex::isValidElderfierAlias(alias)) {
+        fail_msg_writer() << "  Invalid or empty alias. Resume aborted.";
+        return true;
+      }
+    }
+
+    success_msg_writer() << "";
+    success_msg_writer() << "  Resuming ceremony for Ælder King " << alias << "...";
+    success_msg_writer() << "";
+
+  } else {
+
   // ── PART I: THE CALLING ──────────────────────────────────────────────────
   success_msg_writer() << "";
   success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
@@ -1952,6 +2016,13 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     return true;
   }
 
+  } // end of new-ceremony interactive prompts (else block)
+
+  // ══════════════════════════════════════════════════════════════════════
+  // COMMON PATH: balance check, dry run, ceremony loop
+  // Both new-ceremony and resume paths reach here with 'alias' set.
+  // ══════════════════════════════════════════════════════════════════════
+
   try
   {
     // ── Balance check ────────────────────────────────────────────────────
@@ -1963,30 +2034,50 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       CryptoNote::parameters::AMOUNT_TIER_3   // 800 XFG
     };
     const uint32_t depositsPerTier = CryptoNote::parameters::ELDERKING_DEPOSITS_PER_TIER;
-    const uint32_t totalDeposits = CryptoNote::parameters::ELDERKING_TOTAL_DEPOSITS;
-    uint64_t required = CryptoNote::parameters::ELDERKING_CEREMONY_AMOUNT;
     uint64_t fee = m_currency.minimumFee();
+
+    // Calculate remaining deposits and amount needed
+    uint64_t remainingRequired = 0;
+    uint32_t remainingCount = 0;
+    {
+      uint32_t cnt = 0;
+      for (uint32_t tier = 0; tier < 4; ++tier) {
+        for (uint32_t d = 0; d < depositsPerTier; ++d) {
+          if (cnt >= existingStakes) {
+            remainingRequired += tierAmounts[tier];
+            remainingCount++;
+          }
+          cnt++;
+        }
+      }
+    }
 
     success_msg_writer() << "  ── PREPARING THE RITUAL ─────────────────────────────────";
     success_msg_writer() << "";
     success_msg_writer() << "  Wallet balance:      " << m_currency.formatAmount(balance) << " XFG";
-    success_msg_writer() << "  20 stakes (5/tier):  " << m_currency.formatAmount(required) << " XFG";
-    success_msg_writer() << "    5x 0.8 + 5x 8 + 5x 80 + 5x 800 XFG";
-    success_msg_writer() << "  Network fees (x" << totalDeposits << "): " << m_currency.formatAmount(totalDeposits * fee) << " XFG";
-    success_msg_writer() << "  Total required:      " << m_currency.formatAmount(required + (totalDeposits * fee)) << " XFG";
+    if (resuming) {
+      success_msg_writer() << "  Remaining stakes:    " << remainingCount << " deposits ("
+                           << m_currency.formatAmount(remainingRequired) << " XFG)";
+    } else {
+      success_msg_writer() << "  20 stakes (5/tier):  " << m_currency.formatAmount(remainingRequired) << " XFG";
+      success_msg_writer() << "    5x 0.8 + 5x 8 + 5x 80 + 5x 800 XFG";
+    }
+    success_msg_writer() << "  Network fees (x" << remainingCount << "): " << m_currency.formatAmount(remainingCount * fee) << " XFG";
+    success_msg_writer() << "  Total required:      " << m_currency.formatAmount(remainingRequired + (remainingCount * fee)) << " XFG";
     success_msg_writer() << "";
 
-    if (balance < required + (totalDeposits * fee)) {
+    if (balance < remainingRequired + (remainingCount * fee)) {
       fail_msg_writer() << "  The flame requires more ħeat.";
-      fail_msg_writer() << "  You need " << m_currency.formatAmount(required + (totalDeposits * fee) - balance) << " more XFG.";
+      fail_msg_writer() << "  You need " << m_currency.formatAmount(remainingRequired + (remainingCount * fee) - balance) << " more XFG.";
       fail_msg_writer() << "  Ceremony aborted. Return when your coffers are ready.";
       return true;
     }
 
-    // ── DRY RUN: simulate output allocation across all 20 deposits ──────
-    // Verify spendable outputs can cover each tier's deposits sequentially.
-    // The wallet creates change outputs, so we simulate greedy allocation:
-    // sort outputs descending, allocate to each deposit, track change.
+    // ── DRY RUN: verify wallet has enough separate outputs ──────────────
+    // After each deposit TX, change outputs are locked (unconfirmed) and
+    // cannot be spent by subsequent deposits. So we need enough separate
+    // outputs to cover all remaining deposits independently — change is
+    // NOT added back to the available pool.
     {
       auto unspent = m_wallet->getUnspentOutputs();
       std::vector<uint64_t> available;
@@ -1995,62 +2086,113 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
       }
       std::sort(available.begin(), available.end(), std::greater<uint64_t>());
 
-      // Simulate: for each deposit (largest tier first to use big outputs early),
-      // find an output >= deposit+fee, consume it, add change back.
+      // Build deposit requirements in ceremony order (tier 0→3), skipping done deposits
       struct DepositReq { uint64_t amount; uint32_t count; };
-      DepositReq reqs[] = {
-        {tierAmounts[3], depositsPerTier},  // 800 XFG first (biggest)
-        {tierAmounts[2], depositsPerTier},  // 80 XFG
-        {tierAmounts[1], depositsPerTier},  // 8 XFG
-        {tierAmounts[0], depositsPerTier},  // 0.8 XFG last (smallest)
-      };
+      std::vector<DepositReq> reqs;
+      {
+        uint32_t cnt = 0;
+        for (uint32_t tier = 0; tier < 4; ++tier) {
+          uint32_t tierRemaining = 0;
+          for (uint32_t d = 0; d < depositsPerTier; ++d) {
+            if (cnt >= existingStakes) tierRemaining++;
+            cnt++;
+          }
+          if (tierRemaining > 0)
+            reqs.push_back({tierAmounts[tier], tierRemaining});
+        }
+      }
 
       bool dryRunOk = true;
       for (const auto& req : reqs) {
         for (uint32_t d = 0; d < req.count; ++d) {
           uint64_t needed = req.amount + fee;
-          // Find first output >= needed
           auto it = std::lower_bound(available.begin(), available.end(), needed, std::greater<uint64_t>());
           if (it == available.end()) {
-            // Try combining: just check if sum of remaining >= needed
             uint64_t sum = 0;
             for (auto v : available) sum += v;
             if (sum < needed) {
               dryRunOk = false;
-              fail_msg_writer() << "  Dry run failed: cannot cover "
-                                << m_currency.formatAmount(req.amount) << " XFG deposit #" << (d+1)
-                                << " — outputs too fragmented.";
-              fail_msg_writer() << "  Send funds to yourself first to consolidate outputs.";
               break;
             }
-            // Wallet can combine multiple inputs — assume it works and consume from top
             uint64_t consumed = 0;
             while (consumed < needed && !available.empty()) {
               consumed += available.back();
               available.pop_back();
             }
-            if (consumed > needed) {
-              // Change goes back
-              available.push_back(consumed - needed);
-              std::sort(available.begin(), available.end(), std::greater<uint64_t>());
-            }
+            // Change is NOT available — locked in pending TX
           } else {
-            uint64_t change = *it - needed;
+            // Consume the best-fit output; change is NOT available
             available.erase(it);
-            if (change > 0) {
-              available.push_back(change);
-              std::sort(available.begin(), available.end(), std::greater<uint64_t>());
-            }
           }
         }
         if (!dryRunOk) break;
       }
 
       if (!dryRunOk) {
+        fail_msg_writer() << "";
+        fail_msg_writer() << "  Dry run failed: not enough separate outputs for " << remainingCount << " deposits.";
+        fail_msg_writer() << "  Each deposit consumes wallet outputs, and change from pending";
+        fail_msg_writer() << "  transactions is not immediately spendable.";
+        fail_msg_writer() << "";
+        fail_msg_writer() << "  Type 'prepare' to auto-split your funds for the ceremony,";
+        fail_msg_writer() << "  or press Enter to abort: ";
+        std::string choice;
+        m_consoleHandler.readLine(choice);
+        while (!choice.empty() && std::isspace((unsigned char)choice.front())) choice.erase(choice.begin());
+        while (!choice.empty() && std::isspace((unsigned char)choice.back()))  choice.pop_back();
+
+        if (choice == "prepare" || choice == "PREPARE" || choice == "Prepare") {
+          success_msg_writer() << "";
+          success_msg_writer() << "  Preparing " << remainingCount << " outputs for the ceremony...";
+
+          std::string selfAddr = m_wallet->getAddress();
+          std::vector<CryptoNote::WalletLegacyTransfer> prepTransfers;
+          uint32_t cnt = 0;
+          for (uint32_t tier = 0; tier < 4; ++tier) {
+            for (uint32_t d = 0; d < depositsPerTier; ++d) {
+              if (cnt >= existingStakes) {
+                CryptoNote::WalletLegacyTransfer t;
+                t.address = selfAddr;
+                t.amount = tierAmounts[tier] + fee;
+                prepTransfers.push_back(t);
+              }
+              cnt++;
+            }
+          }
+
+          Crypto::SecretKey prepTxSK;
+          CryptoNote::WalletHelper::SendCompleteResultObserver prepSent;
+          WalletHelper::IWalletRemoveObserverGuard prepGuard(*m_wallet, prepSent);
+
+          CryptoNote::TransactionId prepTxId = m_wallet->sendTransaction(
+            prepTxSK, prepTransfers, fee, std::string(), 0, 0, {}, 0);
+
+          if (CryptoNote::WALLET_LEGACY_INVALID_TRANSACTION_ID == prepTxId) {
+            prepGuard.removeObserver();
+            fail_msg_writer() << "  Failed to create preparation transaction.";
+            return true;
+          }
+
+          std::error_code prepErr = prepSent.wait(prepTxId);
+          prepGuard.removeObserver();
+          if (prepErr) {
+            fail_msg_writer() << "  Preparation failed: " << prepErr.message();
+            return true;
+          }
+
+          try { CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file); }
+          catch (...) {}
+
+          success_msg_writer() << "  Preparation TX broadcast (TX: " << prepTxId << ").";
+          success_msg_writer() << "  Wait for 1 block confirmation, then run elderking_ceremony again.";
+          success_msg_writer() << "";
+          return true;
+        }
+
         fail_msg_writer() << "  Ceremony aborted. Consolidate your outputs and try again.";
         return true;
       }
-      success_msg_writer() << "  Dry run passed: outputs can cover all 20 deposits.";
+      success_msg_writer() << "  Dry run passed: outputs can cover all " << remainingCount << " deposits.";
     }
 
     success_msg_writer() << "  The balance holds. The Ritual of Five Flames begins.";
@@ -2067,8 +2209,6 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     m_wallet->getAccountKeys(walletKeys);
 
     // Derive a deterministic signing keypair from the wallet's spend secret key.
-    // hash_to_scalar("fuego_ef_sign" || spendSecretKey) -> always the same for this wallet.
-    // Recoverable any time the wallet is open (shown in elder_council).
     Crypto::PublicKey signingPubKey;
     Crypto::SecretKey signingSecKey;
     {
@@ -2082,13 +2222,22 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
     }
 
     uint32_t flameCount = 0;
-    bool firstDeposit = true;
+    bool firstDeposit = (existingStakes == 0);  // alias already registered if resuming
     for (uint32_t tier = 0; tier < 4; ++tier) {
+      // Skip entire tier if all its deposits are already done
+      uint32_t tierEnd = (tier + 1) * depositsPerTier;
+      if (tierEnd <= existingStakes) {
+        flameCount += depositsPerTier;
+        continue;
+      }
+
       success_msg_writer() << "";
       success_msg_writer() << "  ── Tier " << tier << ": " << tierNames[tier] << " ──";
 
       for (uint32_t d = 0; d < depositsPerTier; ++d) {
         ++flameCount;
+        if (flameCount <= (uint32_t)existingStakes) continue;  // skip already-done deposits
+
         uint64_t depositAmount = tierAmounts[tier];
         success_msg_writer() << "    Flame " << flameCount << "/" << totalDeposits
                              << " — " << m_currency.formatAmount(depositAmount) << " XFG...";
@@ -2118,7 +2267,6 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
         elderfierDeposit.signature.clear();
         elderfierDeposit.isSlashable        = true;
 
-        // First deposit carries the 0xEA alias registration
         if (firstDeposit) {
           CryptoNote::TransactionExtraAliasRegistration aliasReg;
           aliasReg.alias = alias;
@@ -2151,6 +2299,8 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
           fail_msg_writer() << "  The ritual faltered at flame " << flameCount << " of " << totalDeposits << ".";
           fail_msg_writer() << "  " << (flameCount - 1) << " stake(s) were forged before it broke.";
           fail_msg_writer() << "  Check your balance and connection, then try again.";
+          try { CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file); }
+          catch (...) {}
           return true;
         }
 
@@ -2160,14 +2310,23 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
           fail_msg_writer() << "";
           fail_msg_writer() << "  Flame " << flameCount << " failed: " << sendError.message();
           fail_msg_writer() << "  " << (flameCount - 1) << " stake(s) were forged before this flame broke.";
+          try { CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file); }
+          catch (...) {}
           return true;
         }
 
         success_msg_writer() << "      Sealed.  TX: " << txId;
       }
+
+      // Auto-save after each completed tier
+      try { CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file); }
+      catch (...) {}
     }
 
     // ── Completion ───────────────────────────────────────────────────────
+    try { CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file); }
+    catch (...) {}
+
     success_msg_writer() << "";
     success_msg_writer() << "╔════════════════════════════════════════════════════════════╗";
     success_msg_writer() << "║           CEREMONY COMPLETE — ΞLDERFIER CREATED            ║";
@@ -2201,6 +2360,8 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
   }
   catch (const std::exception& e)
   {
+    try { CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file); }
+    catch (...) {}
     fail_msg_writer() << "Error during Elderfire ceremony: " << e.what();
     return true;
   }

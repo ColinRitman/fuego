@@ -30,15 +30,15 @@ SubAddressKeys deriveSubAddressKeys(
   SubAddressKeys out{};
   out.hasSpendSecretKey = (b != nullptr);
 
-  // m = H_s("SubAddr" || a || major_LE32 || minor_LE32)
+  // m = H_s("Sublime" || a || major_LE32 || minor_LE32)
   struct __attribute__((packed)) PreImage {
-    char     domain[7];   // "SubAddr" — no null terminator intentional
+    char     domain[7];   // "Sublime" — no null terminator intentional
     SecretKey a;
     uint32_t i;
     uint32_t j;
   } pre;
 
-  memcpy(pre.domain, "SubAddr", 7);
+  memcpy(pre.domain, "Sublime", 7);
   pre.a = a;
   pre.i = major;
   pre.j = minor;
@@ -67,12 +67,20 @@ SubAddressKeys deriveSubAddressKeys(
   ge_p1p1_to_p3(&D_p3, &D_p1p1);
   ge_p3_tobytes(reinterpret_cast<unsigned char*>(&out.spendPublicKey), &D_p3);
 
-  // C = a * D  (scalar * point: compute ECDH-style)
-  // generate_key_derivation already does: result = key2 * key1 * 8
-  // We need plain a*D without the cofactor multiply, so we use ge_scalarmult directly.
-  ge_p2 C_p2;
-  ge_scalarmult(&C_p2, reinterpret_cast<const unsigned char*>(&a), &D_p3);
-  ge_tobytes(reinterpret_cast<unsigned char*>(&out.viewPublicKey), &C_p2);
+  // C_ij = A = a*G  (master view public key)
+  //
+  // Using the master view key ensures the standard ECDH scan works:
+  //   Sender:   derivation = r * A  (via addr.viewPublicKey)
+  //   Tx key:   R = r * G
+  //   Receiver: a * R = a*r*G = r*(a*G) = r*A   ← matches sender
+  //
+  // The original Monero formula C_ij = a*D_ij requires R = r*D_ij and
+  // per-output additional keys, which in turn requires a distinct subaddress
+  // prefix so the sender can detect subaddresses.  Fuego uses the same
+  // prefix for privacy, so we use C_ij = A instead.
+  if (!secret_key_to_public_key(a, out.viewPublicKey)) {
+    return out;  // degenerate view secret key
+  }
 
   // b_ij = b + m  (mod l)
   if (b != nullptr) {
