@@ -660,7 +660,13 @@ namespace CryptoNote
       std::unique_ptr<ITransaction> transaction = createTransaction();
 
       uint64_t totalAmount = std::abs(transactionInfo.totalAmount);
-      std::vector<TransactionTypes::InputKeyInfo> inputs = prepareKeyInputs(context->selectedTransfers, context->outs, context->mixIn);
+
+      // Keep TransactionSourceEntry sources so we can read hasCustomKeys/customKeys
+      // for sub-address outputs. convertSources() drops that info into InputKeyInfo.
+      std::vector<TransactionSourceEntry> sources;
+      prepareKeyInputs(context->selectedTransfers, context->outs, sources, context->mixIn);
+      std::vector<TransactionTypes::InputKeyInfo> inputs = convertSources(std::vector<TransactionSourceEntry>(sources));
+
       std::vector<uint64_t> decomposedChange = splitAmount(context->foundMoney - totalAmount, context->dustPolicy.dustThreshold);
 
       // --- Fuego Ring-Signature Commitment Output ---
@@ -727,10 +733,13 @@ namespace CryptoNote
       std::vector<KeyPair> ephKeys;
       ephKeys.reserve(inputs.size());
 
-      for (const auto &input : inputs)
+      for (size_t i = 0; i < inputs.size(); ++i)
       {
         KeyPair ephKey;
-        transaction->addInput(m_keys, input, ephKey);
+        const AccountKeys &keys = (i < sources.size() && sources[i].hasCustomKeys)
+                                      ? sources[i].customKeys
+                                      : m_keys;
+        transaction->addInput(keys, inputs[i], ephKey);
         ephKeys.push_back(std::move(ephKey));
       }
 

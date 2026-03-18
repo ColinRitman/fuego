@@ -982,14 +982,19 @@ void WalletLegacy::synchronizationCompleted(std::error_code result) {
 void WalletLegacy::onTransactionUpdated(ITransfersSubscription* object, const Hash& transactionHash) {
   std::deque<std::unique_ptr<WalletLegacyEvent>> events;
 
+  // Use container from subscription that fired the event.
+  // For sub-address outputs the transaction lives in the sub-address container,
+  // not in primary wallet container (m_transferDetails).
+  ITransfersContainer& container = object->getContainer();
+
   TransactionInformation txInfo;
   uint64_t amountIn;
   uint64_t amountOut;
-  if (m_transferDetails->getTransactionInformation(transactionHash, txInfo, &amountIn, &amountOut)) {
+  if (container.getTransactionInformation(transactionHash, txInfo, &amountIn, &amountOut)) {
     std::unique_lock<std::mutex> lock(m_cacheMutex);
 
-    auto newDepositOuts = m_transferDetails->getTransactionOutputs(transactionHash, ITransfersContainer::IncludeTypeDeposit | ITransfersContainer::IncludeStateAll);
-    auto spentDeposits = m_transferDetails->getTransactionInputs(transactionHash, ITransfersContainer::IncludeTypeDeposit);
+    auto newDepositOuts = container.getTransactionOutputs(transactionHash, ITransfersContainer::IncludeTypeDeposit | ITransfersContainer::IncludeStateAll);
+    auto spentDeposits = container.getTransactionInputs(transactionHash, ITransfersContainer::IncludeTypeDeposit);
 
     events = m_transactionsCache.onTransactionUpdated(txInfo, static_cast<int64_t>(amountOut)-static_cast<int64_t>(amountIn), newDepositOuts, spentDeposits, m_currency);
 
