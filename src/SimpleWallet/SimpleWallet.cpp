@@ -2075,16 +2075,17 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
 
     // ── DRY RUN: verify wallet has enough separate outputs ──────────────
     // After each deposit TX, change outputs are locked (unconfirmed) and
-    // cannot be spent by subsequent deposits. So we need enough separate
-    // outputs to cover all remaining deposits independently — change is
-    // NOT added back to the available pool.
+    // cannot be spent by subsequent deposits. We simulate the same bucket-
+    // based selection that selectTransfersToSend uses: group outputs into
+    // power-of-10 buckets, take one from each bucket per round (smallest
+    // bucket first) until neededMoney is covered. Change is NOT added back.
     {
       auto unspent = m_wallet->getUnspentOutputs();
       std::vector<uint64_t> available;
       for (const auto& out : unspent) {
-        available.push_back(out.amount);
+        if (out.amount > m_currency.defaultDustThreshold())
+          available.push_back(out.amount);
       }
-      std::sort(available.begin(), available.end(), std::greater<uint64_t>());
 
       // Build deposit requirements in ceremony order (tier 0→3), skipping done deposits
       struct DepositReq { uint64_t amount; uint32_t count; };
@@ -2102,31 +2103,55 @@ bool simple_wallet::elderking_ceremony(const std::vector<std::string> &args)
         }
       }
 
+      // Simulate selectTransfersToSend bucket algorithm for each deposit
       bool dryRunOk = true;
       for (const auto& req : reqs) {
         for (uint32_t d = 0; d < req.count; ++d) {
           uint64_t needed = req.amount + fee;
-          auto it = std::lower_bound(available.begin(), available.end(), needed, std::greater<uint64_t>());
-          if (it == available.end()) {
-            uint64_t sum = 0;
-            for (auto v : available) sum += v;
-            if (sum < needed) {
-              dryRunOk = false;
-              break;
+
+          // Group remaining outputs into base-10 digit buckets
+          std::map<int, std::vector<size_t>> buckets;
+          for (size_t i = 0; i < available.size(); ++i) {
+            if (available[i] > 0) {
+              int digits = static_cast<int>(std::floor(std::log10(static_cast<double>(available[i])))) + 1;
+              buckets[digits].push_back(i);
             }
-            uint64_t consumed = 0;
-            while (consumed < needed && !available.empty()) {
-              consumed += available.back();
-              available.pop_back();
+          }
+
+          // Take one output from each bucket per round (smallest bucket first)
+          uint64_t found = 0;
+          std::vector<size_t> consumed;
+          while (found < needed && !buckets.empty()) {
+            for (auto it = buckets.begin(); it != buckets.end(); ) {
+              if (it->second.empty()) {
+                it = buckets.erase(it);
+              } else {
+                if (found < needed) {
+                  size_t idx = it->second.back();
+                  it->second.pop_back();
+                  found += available[idx];
+                  consumed.push_back(idx);
+                }
+                ++it;
+              }
             }
-            // Change is NOT available — locked in pending TX
-          } else {
-            // Consume the best-fit output; change is NOT available
-            available.erase(it);
+          }
+
+          if (found < needed) {
+            dryRunOk = false;
+            break;
+          }
+
+          // Remove consumed outputs (mark as 0 so indices stay stable)
+          for (size_t idx : consumed) {
+            available[idx] = 0;
           }
         }
         if (!dryRunOk) break;
       }
+
+      // Clean up zeroed entries
+      available.erase(std::remove(available.begin(), available.end(), uint64_t(0)), available.end());
 
       if (!dryRunOk) {
         fail_msg_writer() << "";
