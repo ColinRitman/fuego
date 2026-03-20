@@ -51,6 +51,8 @@ void serialize(KeyInput& key, ISerializer& serializer);
 void serialize(MultisignatureInput& multisignature, ISerializer& serializer);
 void serialize(TransactionInputCommitmentSpend& in, ISerializer& serializer);
 void serialize(TransactionInputUnified& in, ISerializer& serializer);
+void serialize(TransactionInputHashLockClaim& in, ISerializer& serializer);
+void serialize(TransactionInputHashLockRefund& in, ISerializer& serializer);
 
 void serialize(TransactionOutput& output, ISerializer& serializer);
 void serialize(TransactionOutputTarget& output, ISerializer& serializer);
@@ -58,6 +60,7 @@ void serialize(KeyOutput& key, ISerializer& serializer);
 void serialize(MultisignatureOutput& multisignature, ISerializer& serializer);
 void serialize(TransactionOutputCommitment& out, ISerializer& serializer);
 void serialize(TransactionOutputUnified& out, ISerializer& serializer);
+void serialize(TransactionOutputHashLock& out, ISerializer& serializer);
 
 void serialize(BlockHeader& header, ISerializer& serializer);
 void serialize(Block& block, ISerializer& serializer);

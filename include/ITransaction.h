@@ -25,8 +25,8 @@ namespace CryptoNote {
 
 namespace TransactionTypes {
   
-  enum class InputType : uint8_t { Invalid, Key, Multisignature, Generating, CommitmentSpend };
-  enum class OutputType : uint8_t { Invalid, Key, Multisignature, Commitment };
+  enum class InputType : uint8_t { Invalid, Key, Multisignature, Generating, CommitmentSpend, HashLockClaim, HashLockRefund };
+  enum class OutputType : uint8_t { Invalid, Key, Multisignature, Commitment, HashLock };
 
   struct GlobalOutput {
     Crypto::PublicKey targetKey;

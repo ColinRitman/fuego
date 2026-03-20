@@ -279,6 +279,10 @@ bool get_inputs_money_amount(const Transaction& tx, uint64_t& money) {
       amount = boost::get<MultisignatureInput>(in).amount;
     } else if (in.type() == typeid(TransactionInputCommitmentSpend)) {
       amount = boost::get<TransactionInputCommitmentSpend>(in).amount;
+    } else if (in.type() == typeid(TransactionInputHashLockClaim)) {
+      amount = boost::get<TransactionInputHashLockClaim>(in).amount;
+    } else if (in.type() == typeid(TransactionInputHashLockRefund)) {
+      amount = boost::get<TransactionInputHashLockRefund>(in).amount;
     }
 
     money += amount;
@@ -301,6 +305,10 @@ bool check_inputs_types_supported(const TransactionPrefix& tx) {
   for (const auto& in : tx.inputs) {
     const auto& inputType = in.type();
     if (inputType == typeid(MultisignatureInput) || inputType == typeid(TransactionInputCommitmentSpend)) {
+      if (tx.version < TRANSACTION_VERSION_2) {
+        return false;
+      }
+    } else if (inputType == typeid(TransactionInputHashLockClaim) || inputType == typeid(TransactionInputHashLockRefund)) {
       if (tx.version < TRANSACTION_VERSION_2) {
         return false;
       }
@@ -363,6 +371,32 @@ bool check_outs_valid(const TransactionPrefix& tx, std::string* error) {
         }
         return false;
       }
+    } else if (out.target.type() == typeid(TransactionOutputHashLock)) {
+      if (tx.version < TRANSACTION_VERSION_2) {
+        if (error) {
+          *error = "Transaction contains HTLC output but its version is less than 2";
+        }
+        return false;
+      }
+      const TransactionOutputHashLock& htlc = ::boost::get<TransactionOutputHashLock>(out.target);
+      if (!check_key(htlc.recipientKey)) {
+        if (error) {
+          *error = "HTLC output with invalid recipient key";
+        }
+        return false;
+      }
+      if (!check_key(htlc.refundKey)) {
+        if (error) {
+          *error = "HTLC output with invalid refund key";
+        }
+        return false;
+      }
+      if (out.amount == 0) {
+        if (error) {
+          *error = "HTLC output with zero amount";
+        }
+        return false;
+      }
     } else {
       if (error) {
         *error = "Output with invalid type";
@@ -403,6 +437,10 @@ bool check_inputs_overflow(const TransactionPrefix &tx) {
       amount = boost::get<MultisignatureInput>(in).amount;
     } else if (in.type() == typeid(TransactionInputCommitmentSpend)) {
       amount = boost::get<TransactionInputCommitmentSpend>(in).amount;
+    } else if (in.type() == typeid(TransactionInputHashLockClaim)) {
+      amount = boost::get<TransactionInputHashLockClaim>(in).amount;
+    } else if (in.type() == typeid(TransactionInputHashLockRefund)) {
+      amount = boost::get<TransactionInputHashLockRefund>(in).amount;
     }
 
     if (money > amount + money)

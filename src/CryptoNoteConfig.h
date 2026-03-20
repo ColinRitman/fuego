@@ -254,7 +254,13 @@ namespace CryptoNote
 	const uint8_t  BLOCK_MAJOR_VERSION_8                         =  8;
 	const uint8_t  BLOCK_MAJOR_VERSION_9                         =  9;
 	const uint8_t  BLOCK_MAJOR_VERSION_10                        = 10; //upgradekit
+	const uint8_t  BLOCK_MAJOR_VERSION_11                        = 11; //HTLC atomic swaps
 
+	// HTLC (Hash Time-Lock Contract) constants for atomic swaps
+	const uint32_t HTLC_MIN_TIMEOUT       = 45;     // ~6 hours minimum lock (griefing protection)
+	const uint32_t HTLC_MAX_TIMEOUT       = 2160;   // ~12 days maximum lock
+	const uint32_t TESTNET_HTLC_MIN_TIMEOUT = 4;    // ~32 min minimum lock (fast for testing)
+	const uint32_t TESTNET_HTLC_MAX_TIMEOUT = 180;  // ~24h max lock (testing)
 
 	const uint8_t  BLOCK_MINOR_VERSION_0 			             =  0;
 	const uint8_t  BLOCK_MINOR_VERSION_1 			             =  1;

@@ -52,6 +52,8 @@ size_t getSignaturesCount(const TransactionInput& input) {
     size_t operator()(const MultisignatureInput& txin) const { return txin.signatureCount; }
     size_t operator()(const TransactionInputCommitmentSpend& txin) const { return txin.outputIndexes.size(); }
     size_t operator()(const TransactionInputUnified& txin) const { return txin.outputIndexes.size(); }
+    size_t operator()(const TransactionInputHashLockClaim& txin) const { return 1; }   // 1 sig with recipientKey
+    size_t operator()(const TransactionInputHashLockRefund& txin) const { return 1; }  // 1 sig with refundKey
   };
 
   return boost::apply_visitor(txin_signature_size_visitor(), input);
@@ -63,10 +65,13 @@ struct BinaryVariantTagGetter: boost::static_visitor<uint8_t> {
   uint8_t operator()(const CryptoNote::MultisignatureInput) { return  0x3; }
   uint8_t operator()(const CryptoNote::TransactionInputCommitmentSpend) { return  0x4; }
   uint8_t operator()(const CryptoNote::TransactionInputUnified) { return  0x5; }
+  uint8_t operator()(const CryptoNote::TransactionInputHashLockClaim) { return  0x6; }
+  uint8_t operator()(const CryptoNote::TransactionInputHashLockRefund) { return  0x7; }
   uint8_t operator()(const CryptoNote::KeyOutput) { return  0x2; }
   uint8_t operator()(const CryptoNote::MultisignatureOutput) { return  0x3; }
   uint8_t operator()(const CryptoNote::TransactionOutputCommitment) { return  0x4; }
   uint8_t operator()(const CryptoNote::TransactionOutputUnified) { return  0x5; }
+  uint8_t operator()(const CryptoNote::TransactionOutputHashLock) { return  0x6; }
   uint8_t operator()(const CryptoNote::Transaction) { return  0xcc; }
   uint8_t operator()(const CryptoNote::Block) { return  0xbb; }
 };
@@ -113,6 +118,18 @@ void getVariantValue(CryptoNote::ISerializer& serializer, uint8_t tag, CryptoNot
     in = v;
     break;
   }
+  case 0x6: {
+    CryptoNote::TransactionInputHashLockClaim v;
+    serializer(v, "value");
+    in = v;
+    break;
+  }
+  case 0x7: {
+    CryptoNote::TransactionInputHashLockRefund v;
+    serializer(v, "value");
+    in = v;
+    break;
+  }
   default:
     throw std::runtime_error("Unknown variant tag");
   }
@@ -140,6 +157,12 @@ void getVariantValue(CryptoNote::ISerializer& serializer, uint8_t tag, CryptoNot
   }
   case 0x5: {
     CryptoNote::TransactionOutputUnified v;
+    serializer(v, "data");
+    out = v;
+    break;
+  }
+  case 0x6: {
+    CryptoNote::TransactionOutputHashLock v;
     serializer(v, "data");
     out = v;
     break;
@@ -372,6 +395,24 @@ void serialize(TransactionInputUnified& in, ISerializer& serializer) {
   serializer(in.keyImage, "k_image");
   serializePod(in.pseudoCommitment, "pseudo_commitment", serializer);
   serializer(in.sigC0, "sig_c0");
+}
+
+void serialize(TransactionOutputHashLock& out, ISerializer& serializer) {
+  serializer(out.recipientKey, "recipient_key");
+  serializer(out.refundKey, "refund_key");
+  serializer(out.hashLock, "hash_lock");
+  serializer(out.timeoutHeight, "timeout_height");
+}
+
+void serialize(TransactionInputHashLockClaim& in, ISerializer& serializer) {
+  serializer(in.amount, "amount");
+  serializer(in.outputIndex, "outputIndex");
+  serializer(in.preimage, "preimage");
+}
+
+void serialize(TransactionInputHashLockRefund& in, ISerializer& serializer) {
+  serializer(in.amount, "amount");
+  serializer(in.outputIndex, "outputIndex");
 }
 
 void serialize(ParentBlockSerializer& pbs, ISerializer& serializer) {

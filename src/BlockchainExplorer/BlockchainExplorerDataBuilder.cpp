@@ -307,6 +307,10 @@ bool BlockchainExplorerDataBuilder::fillTransactionDetails(const Transaction& tr
       csDetails.keyImage = csIn.keyImage;
       csDetails.ringSize = csIn.outputIndexes.size();
       txInDetails.input = csDetails;
+    } else if (txIn.type() == typeid(TransactionInputHashLockClaim)) {
+      txInDetails.amount = boost::get<TransactionInputHashLockClaim>(txIn).amount;
+    } else if (txIn.type() == typeid(TransactionInputHashLockRefund)) {
+      txInDetails.amount = boost::get<TransactionInputHashLockRefund>(txIn).amount;
     } else {
       return false;
     }
@@ -348,6 +352,8 @@ bool BlockchainExplorerDataBuilder::fillTransactionDetails(const Transaction& tr
       txOutCommitDetails.commitKey = commitment.commitKey;
       txOutCommitDetails.term = commitment.term;
       txOutDetails.output = txOutCommitDetails;
+    } else if (txOutput.get<0>().target.type() == typeid(TransactionOutputHashLock)) {
+      // HTLC outputs: store amount + global index, detail struct deferred
     } else {
       return false;
     }

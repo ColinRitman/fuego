@@ -322,6 +322,31 @@ namespace CryptoNote {
     };
     typedef parallel_flat_hash_map<uint64_t, std::vector<CommitmentOutputRef>> CommitmentOutputsContainer;
 
+    // HTLC (Hash Time-Lock Contract) output tracking for atomic swaps.
+    // Indexed by global output index. Tracks whether each HTLC has been spent.
+    struct HashLockOutputUsage {
+      TransactionIndex transactionIndex;
+      uint16_t outputInTransaction;
+      uint64_t amount;
+      Crypto::PublicKey recipientKey;
+      Crypto::PublicKey refundKey;
+      Crypto::Hash hashLock;
+      uint32_t timeoutHeight;
+      bool isSpent = false;
+
+      void serialize(ISerializer& s) {
+        s(transactionIndex, "txindex");
+        s(outputInTransaction, "outindex");
+        s(amount, "amount");
+        s(recipientKey, "recipient_key");
+        s(refundKey, "refund_key");
+        s(hashLock, "hash_lock");
+        s(timeoutHeight, "timeout_height");
+        s(isSpent, "spent");
+      }
+    };
+    typedef std::vector<HashLockOutputUsage> HashLockOutputsContainer;
+
     const Currency& m_currency;
     tx_memory_pool& m_tx_pool;
     mutable std::recursive_mutex m_blockchain_lock; // TODO: add here reader/writer lock
@@ -353,6 +378,7 @@ namespace CryptoNote {
     TransactionMap m_transactionMap;
     MultisignatureOutputsContainer m_multisignatureOutputs;
     CommitmentOutputsContainer     m_commitmentOutputs;
+    HashLockOutputsContainer       m_htlcOutputs;
     UpgradeDetector m_upgradeDetectorV2;
     UpgradeDetector m_upgradeDetectorV3;
     UpgradeDetector m_upgradeDetectorV4;
