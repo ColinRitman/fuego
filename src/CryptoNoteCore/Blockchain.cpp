@@ -815,6 +815,14 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
             htlcUsage.timeoutHeight       = htlcOut.timeoutHeight;
             htlcUsage.isSpent             = false;
             m_htlcOutputs.push_back(htlcUsage);
+            // Unified ring pool: HTLC outputs share the per-amount commitment pool
+            // so they serve as decoys for deposit ring sigs and vice versa.
+            CommitmentOutputRef htlcRef;
+            htlcRef.transactionIndex    = transactionIndex;
+            htlcRef.outputInTransaction = o;
+            htlcRef.commitKey           = htlcOut.recipientKey; // claim key used for ring membership
+            htlcRef.term                = 0;  // no deposit term
+            m_commitmentOutputs[out.amount].push_back(htlcRef);
           }
         }
         interest += m_currency.calculateTotalTransactionInterest(transaction.tx, b);
@@ -3615,6 +3623,13 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
       htlcUsage.timeoutHeight       = htlcOut.timeoutHeight;
       htlcUsage.isSpent             = false;
       m_htlcOutputs.push_back(htlcUsage);
+      // Unified ring pool: also add to commitment outputs for decoy selection
+      CommitmentOutputRef htlcRef;
+      htlcRef.transactionIndex    = transactionIndex;
+      htlcRef.outputInTransaction = output;
+      htlcRef.commitKey           = htlcOut.recipientKey;
+      htlcRef.term                = 0;
+      m_commitmentOutputs[transaction.tx.outputs[output].amount].push_back(htlcRef);
     }
   }
 
@@ -3718,6 +3733,14 @@ void Blockchain::popTransaction(const Transaction& transaction, const Crypto::Ha
         continue;
       }
       m_htlcOutputs.pop_back();
+      // Pop from unified commitment ring pool
+      auto amountOutputs = m_commitmentOutputs.find(output.amount);
+      if (amountOutputs != m_commitmentOutputs.end() && !amountOutputs->second.empty()) {
+        amountOutputs->second.pop_back();
+        if (amountOutputs->second.empty()) {
+          m_commitmentOutputs.erase(amountOutputs);
+        }
+      }
     }
   }
 
