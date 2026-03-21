@@ -585,8 +585,9 @@ bool core::get_block_template(Block& b, const AccountPublicAddress& adr, difficu
     }
   }
 
-  //make blocks coin-base tx looks close to real coinbase tx to get truthful blob size
-  bool r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, txs_size, fee, adr, b.baseTransaction, ex_nonce, 11, burnedCoins, bankingFeesInBlock, efierRewards);
+  //make block's coinbase tx look more like real coinbase txs to get truthful blob size
+  size_t maxCoinbaseOuts = (b.majorVersion >= BLOCK_MAJOR_VERSION_11) ? 33 : 11;
+  bool r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, txs_size, fee, adr, b.baseTransaction, ex_nonce, maxCoinbaseOuts, burnedCoins, bankingFeesInBlock, efierRewards);
   if (!r) {
     logger(ERROR, BRIGHT_RED) << "Failed to construct miner tx, first chance";
     return false;
@@ -598,7 +599,7 @@ bool core::get_block_template(Block& b, const AccountPublicAddress& adr, difficu
     logger(TRACE) << "constructMinerTx attempt " << try_count << ": height=" << height << ", majorVersion=" << (int)b.majorVersion
       << ", median_size=" << median_size << ", cumulative_size=" << cumulative_size
       << ", already_generated_coins=" << already_generated_coins << ", fee=" << fee;
-    r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, cumulative_size, fee, adr, b.baseTransaction, ex_nonce, 11, burnedCoins, bankingFeesInBlock, efierRewards);
+    r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, cumulative_size, fee, adr, b.baseTransaction, ex_nonce, maxCoinbaseOuts, burnedCoins, bankingFeesInBlock, efierRewards);
 
     if (!(r)) {
       logger(ERROR, BRIGHT_RED) << "Failed to construct miner tx, second chance. height=" << height
@@ -1328,6 +1329,16 @@ bool core::removeMessageQueue(MessageQueue<BlockchainMessage>& messageQueue) {
 
 uint64_t core::getBurnedXfgAtHeight(size_t height) const {
   return m_blockchain.getBurnedXfgAtHeight(height);
+}
+
+// --- HTLC Output Accessors ---
+
+size_t core::getHtlcOutputCount() const {
+  return m_blockchain.getHtlcOutputCount();
+}
+
+bool core::getHtlcOutput(uint32_t index, Blockchain::HashLockOutputUsage& out) const {
+  return m_blockchain.getHtlcOutput(index, out);
 }
 
 // --- Commitment Index Accessors ---

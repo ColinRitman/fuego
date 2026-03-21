@@ -498,10 +498,17 @@ double Currency::getBurnPercentage() const {
 
     // Decompose miner reward into outputs
     std::vector<uint64_t> outAmounts;
-    decompose_amount_into_digits(
-        minerReward, m_defaultDustThreshold,
-        [&outAmounts](uint64_t a_chunk) { outAmounts.push_back(a_chunk); },
-        [&outAmounts](uint64_t a_dust) { outAmounts.push_back(a_dust); });
+    if (blockMajorVersion >= BLOCK_MAJOR_VERSION_11) {
+      // V11+: Uniform denomination decomposition for coinbase privacy.
+      // Produces multiple outputs at standard power-of-10 tiers so all coinbase
+      // outputs are indistinguishable across blocks regardless of reward amount.
+      decompose_amount_uniform(minerReward, m_defaultDustThreshold, outAmounts);
+    } else {
+      decompose_amount_into_digits(
+          minerReward, m_defaultDustThreshold,
+          [&outAmounts](uint64_t a_chunk) { outAmounts.push_back(a_chunk); },
+          [&outAmounts](uint64_t a_dust) { outAmounts.push_back(a_dust); });
+    }
 
     if (!(1 <= maxOuts))
     {

@@ -142,6 +142,42 @@ void decompose_amount_into_digits(uint64_t amount, uint64_t dust_threshold, cons
   }
 }
 
+// Uniform denomination decomposition for coinbase privacy.
+// Breaks amount into multiple outputs at power-of-10 tiers (>= dust_threshold).
+// Unlike decompose_amount_into_digits which produces one output per decimal digit,
+// this produces N outputs at each tier, making all coinbase outputs indistinguishable
+// across blocks regardless of varying reward amounts.
+inline void decompose_amount_uniform(uint64_t amount, uint64_t dust_threshold, std::vector<uint64_t>& out) {
+  if (amount == 0) return;
+
+  // Find the largest power-of-10 tier <= amount >= dust_threshold
+  // 1 COIN = 10,000,000 ℏeat so max tier is 10Mℏ (1 XFG), ((really moreso ~1M (0.1 XFG) in this case, unless burns push blkrewards > COIN))
+  static const uint64_t tiers[] = {
+    10000000, // 1.0 XFG
+    1000000,  // 0.1 XFG
+    100000,   // 0.01 XFG
+    10000,    // 0.001 XFG
+    1000,     // 0.0001 XFG (dust threshold)
+  };
+
+  for (uint64_t tier : tiers) {
+    if (tier < dust_threshold) break;
+    while (amount >= tier) {
+      out.push_back(tier);
+      amount -= tier;
+    }
+  }
+
+  // Sub-dust remainder: merge into last output (shouldn't happen with 1000 dust)
+  if (amount > 0) {
+    if (!out.empty()) {
+      out.back() += amount;
+    } else {
+      out.push_back(amount);
+    }
+  }
+}
+
 void get_tx_tree_hash(const std::vector<Crypto::Hash>& tx_hashes, Crypto::Hash& h);
 Crypto::Hash get_tx_tree_hash(const std::vector<Crypto::Hash>& tx_hashes);
 Crypto::Hash get_tx_tree_hash(const Block& b);
