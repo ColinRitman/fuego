@@ -137,6 +137,9 @@ namespace CryptoNote
     bool claim_htlc(const std::vector<std::string> &args);
     bool refund_htlc(const std::vector<std::string> &args);
 
+    // Swap terminal (ncurses TUI)
+    bool swap_terminal(const std::vector<std::string> &args);
+
      bool create_cold_secret(const std::vector<std::string> &args);
 
     // USER-FACING: Proof generation from deposits

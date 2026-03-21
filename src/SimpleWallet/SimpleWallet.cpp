@@ -16,6 +16,7 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "SimpleWallet.h"
+#include "SwapTerminal.h"
 #include "crypto/subaddress.h"
 #include "Common/ConsoleTools.h"
 
@@ -554,6 +555,7 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("create_htlc", boost::bind(&simple_wallet::create_htlc, this, boost::arg<1>()), "create_htlc <amount> <recipient_pubkey> <preimage_hex> <timeout_blocks> - Lock funds in a hash time-lock contract for atomic swaps");
   m_consoleHandler.setHandler("claim_htlc", boost::bind(&simple_wallet::claim_htlc, this, boost::arg<1>()), "claim_htlc <htlc_index> <amount> <preimage_hex> - Claim funds from an HTLC using the secret preimage");
   m_consoleHandler.setHandler("refund_htlc", boost::bind(&simple_wallet::refund_htlc, this, boost::arg<1>()), "refund_htlc <htlc_index> <amount> - Refund expired HTLC funds back to sender");
+  m_consoleHandler.setHandler("swap", boost::bind(&simple_wallet::swap_terminal, this, boost::arg<1>()), "swap [ETH|BCH|XMR] - Open swap trading terminal (ncurses TUI with order book, charts, trade history)");
   // Hidden — only surfaced inside the elder_council panel. Direct use requires knowing it exists.
   m_consoleHandler.setHandler("propose_slash", boost::bind(&simple_wallet::propose_slash, this, boost::arg<1>()), "");
 
@@ -3853,6 +3855,228 @@ bool simple_wallet::refund_htlc(const std::vector<std::string> &args) {
   } catch (const std::exception& e) {
     fail_msg_writer() << e.what();
   }
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
+  // Usage: swap [ETH|BCH|XMR]
+
+  // Determine starting pair
+  std::string startPair = "ETH";
+  if (!args.empty()) {
+    startPair = args[0];
+    std::transform(startPair.begin(), startPair.end(), startPair.begin(), ::toupper);
+    if (startPair != "ETH" && startPair != "BCH" && startPair != "XMR") {
+      fail_msg_writer() << "Invalid pair: " << startPair << ". Use ETH, BCH, or XMR.";
+      return true;
+    }
+  }
+
+  success_msg_writer() << "Launching swap terminal for XFG/" << startPair << "...";
+  success_msg_writer() << "Press 'q' or ESC to return to wallet.";
+
+  CryptoNote::SwapTerminal terminal;
+
+  // Wire up callbacks to RPC
+  CryptoNote::SwapTerminalCallbacks cb;
+
+  // Helper: pair string to uint8_t (0=XMR, 1=ETH, 2=BCH)
+  auto pairToNum = [](const std::string& p) -> uint8_t {
+    if (p == "ETH") return 1;
+    if (p == "BCH") return 2;
+    if (p == "XMR") return 0;
+    return 1; // default ETH
+  };
+
+  // Helper: pair uint8_t to string
+  auto numToPair = [](uint8_t n) -> std::string {
+    switch (n) {
+      case 0: return "XMR";
+      case 1: return "ETH";
+      case 2: return "BCH";
+      default: return "ETH";
+    }
+  };
+
+  // Fetch offers from daemon /getswapoffers
+  cb.fetchOffers = [this, pairToNum, numToPair](const std::string& pair) -> std::vector<CryptoNote::SwapOffer> {
+    try {
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      COMMAND_RPC_GET_SWAP_OFFERS::request req;
+      COMMAND_RPC_GET_SWAP_OFFERS::response res;
+      req.pair = pairToNum(pair);
+      invokeJsonCommand(httpClient, "/getswapoffers", req, res);
+
+      // Detect own offers by comparing maker pubkey to our spend pubkey
+      CryptoNote::AccountKeys walletKeys;
+      m_wallet->getAccountKeys(walletKeys);
+      std::string myPubHex = Common::toHex(walletKeys.address.spendPublicKey.data, 32);
+
+      std::vector<CryptoNote::SwapOffer> offers;
+      for (const auto& e : res.offers) {
+        CryptoNote::SwapOffer o;
+        o.offerId   = e.offerId;
+        o.isSell    = true; // all offers are selling XFG for CTR in this model
+        o.xfgAmount = e.xfgAmount;
+        o.rate      = static_cast<double>(e.rateNum) / 1e7;
+        o.pair      = numToPair(e.pair);
+        o.makerAlias = e.makerPubKey.substr(0, 8);
+        o.timestamp  = static_cast<time_t>(e.timestamp);
+        o.isMine     = (e.makerPubKey == myPubHex);
+        offers.push_back(std::move(o));
+      }
+      return offers;
+    } catch (const std::exception&) {
+      return {};
+    }
+  };
+
+  // Fetch trades from daemon /getswaptrades
+  cb.fetchTrades = [this, pairToNum](const std::string& pair, size_t limit) -> std::vector<CryptoNote::SwapTrade> {
+    try {
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      COMMAND_RPC_GET_SWAP_TRADES::request req;
+      COMMAND_RPC_GET_SWAP_TRADES::response res;
+      req.pair  = pairToNum(pair);
+      req.limit = static_cast<uint32_t>(limit);
+      invokeJsonCommand(httpClient, "/getswaptrades", req, res);
+
+      std::vector<CryptoNote::SwapTrade> trades;
+      for (const auto& e : res.trades) {
+        CryptoNote::SwapTrade t;
+        t.rate      = std::stod(e.rate);
+        t.volume    = static_cast<double>(e.xfgAmount) / 1e7;
+        t.isBuy     = true; // taker bought XFG
+        t.timestamp = static_cast<time_t>(e.timestamp);
+        trades.push_back(std::move(t));
+      }
+      return trades;
+    } catch (const std::exception&) {
+      return {};
+    }
+  };
+
+  // Fetch price from daemon /getswapprice — prefers composite rate (weighted across all sources)
+  cb.fetchTwap = [this, pairToNum](const std::string& pair) -> double {
+    try {
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      COMMAND_RPC_GET_SWAP_PRICE::request req;
+      COMMAND_RPC_GET_SWAP_PRICE::response res;
+      req.pair = pairToNum(pair);
+      invokeJsonCommand(httpClient, "/getswapprice", req, res);
+
+      // Prefer composite rate (weighted across swap TWAP + external sources)
+      double price = 0.0;
+      if (!res.compositeRate.empty()) {
+        price = std::stod(res.compositeRate);
+      }
+      // Fall back to raw TWAP
+      if (price <= 0.0 && !res.twap.empty()) {
+        price = std::stod(res.twap);
+      }
+      // Fall back to seed rate
+      if (price <= 0.0 && !res.seedRate.empty()) {
+        price = std::stod(res.seedRate);
+      }
+      return price;
+    } catch (const std::exception&) {
+      // Fallback seed rates if daemon unreachable
+      if (pair == "ETH") return 214000.0;
+      if (pair == "BCH") return 46900.0;
+      if (pair == "XMR") return 34300.0;
+      return 0.0;
+    }
+  };
+
+  // Submit swap offer (XFG → CTR)
+  cb.submitOffer = [this, pairToNum](uint64_t xfgAmount, double rate, const std::string& pair) -> bool {
+    try {
+      // Get wallet keys for signing
+      CryptoNote::AccountKeys walletKeys;
+      m_wallet->getAccountKeys(walletKeys);
+
+      uint8_t pairNum = pairToNum(pair);
+      uint64_t rateNum = static_cast<uint64_t>(rate * 1e7);
+      uint64_t ts = static_cast<uint64_t>(std::time(nullptr));
+
+      // Build offerId = hash(pubkey || pair || amount || rateNum || timestamp)
+      std::string preimage;
+      preimage.append(reinterpret_cast<const char*>(walletKeys.address.spendPublicKey.data), 32);
+      preimage.push_back(static_cast<char>(pairNum));
+      preimage.append(reinterpret_cast<const char*>(&xfgAmount), sizeof(xfgAmount));
+      preimage.append(reinterpret_cast<const char*>(&rateNum), sizeof(rateNum));
+      preimage.append(reinterpret_cast<const char*>(&ts), sizeof(ts));
+      Crypto::Hash idHash;
+      Crypto::cn_fast_hash(preimage.data(), preimage.size(), idHash);
+      std::string offerId = Common::toHex(idHash.data, sizeof(idHash.data));
+
+      // Sign the offerId hash
+      Crypto::Signature sig;
+      Crypto::generate_signature(idHash, walletKeys.address.spendPublicKey,
+                                 walletKeys.spendSecretKey, sig);
+
+      COMMAND_RPC_SUBMIT_SWAP_OFFER::request req;
+      COMMAND_RPC_SUBMIT_SWAP_OFFER::response res;
+      req.offerId     = offerId;
+      req.xfgAmount   = xfgAmount;
+      req.rateNum     = rateNum;
+      req.pair        = pairNum;
+      req.makerPubKey = Common::toHex(walletKeys.address.spendPublicKey.data, 32);
+      req.signature   = Common::toHex(sig.data, sizeof(sig.data));
+      req.ttlBlocks   = 180; // ~1 day at 8-min blocks
+
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      invokeJsonCommand(httpClient, "/submitswap", req, res);
+      return res.status == CORE_RPC_STATUS_OK || res.status == "OK";
+    } catch (const std::exception&) {
+      return false;
+    }
+  };
+
+  // Accept offer — complex HTLC flow, stays as TODO
+  cb.acceptOffer = [this](const std::string& offerId) -> bool {
+    // TODO: HTLC accept flow (lock XFG, exchange preimages)
+    return false;
+  };
+
+  // Cancel offer
+  cb.cancelOffer = [this](const std::string& offerId) -> bool {
+    try {
+      CryptoNote::AccountKeys walletKeys;
+      m_wallet->getAccountKeys(walletKeys);
+
+      // Sign the offerId hash for cancel authentication
+      Crypto::Hash idHash;
+      Crypto::cn_fast_hash(offerId.data(), offerId.size(), idHash);
+      Crypto::Signature sig;
+      Crypto::generate_signature(idHash, walletKeys.address.spendPublicKey,
+                                 walletKeys.spendSecretKey, sig);
+
+      COMMAND_RPC_CANCEL_SWAP_OFFER::request req;
+      COMMAND_RPC_CANCEL_SWAP_OFFER::response res;
+      req.offerId     = offerId;
+      req.makerPubKey = Common::toHex(walletKeys.address.spendPublicKey.data, 32);
+      req.signature   = Common::toHex(sig.data, sizeof(sig.data));
+
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      invokeJsonCommand(httpClient, "/cancelswap", req, res);
+      return res.status == CORE_RPC_STATUS_OK || res.status == "OK";
+    } catch (const std::exception&) {
+      return false;
+    }
+  };
+
+  // Get wallet balance
+  cb.getBalance = [this]() -> uint64_t {
+    return m_wallet->actualBalance();
+  };
+
+  terminal.setCallbacks(cb);
+  terminal.run();  // blocks until user exits (ncurses takes over terminal)
+
+  success_msg_writer() << "Swap terminal closed.";
 
   return true;
 }

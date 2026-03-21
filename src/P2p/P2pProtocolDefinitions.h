@@ -432,4 +432,88 @@ namespace CryptoNote
     typedef EMPTY_STRUCT response;
   };
 
+  /************************************************************************/
+  /* SWAP OFFER GOSSIP - P2P relay for atomic swap offers                */
+  /************************************************************************/
+  struct COMMAND_SWAP_OFFER
+  {
+    enum { ID = P2P_COMMANDS_POOL_BASE + 13 };
+
+    struct request
+    {
+      std::string offerId;                // Unique offer identifier (hex)
+      uint64_t    xfgAmount;              // XFG atomic units to swap
+      uint64_t    rateNum;                // Rate: XFG per 1 CTR, scaled by 1e7
+      uint8_t     pair;                   // 0=XMR, 1=ETH, 2=BCH
+      Crypto::PublicKey makerPubKey;      // Maker's wallet pubkey
+      Crypto::Signature signature;        // Signs offerId with maker's key
+      uint64_t    timestamp;
+      uint32_t    ttlBlocks;              // Offer expires after this many blocks
+      uint32_t    postedHeight;           // Block height when posted
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(offerId)
+        KV_MEMBER(xfgAmount)
+        KV_MEMBER(rateNum)
+        KV_MEMBER(pair)
+        KV_MEMBER(makerPubKey)
+        KV_MEMBER(signature)
+        KV_MEMBER(timestamp)
+        KV_MEMBER(ttlBlocks)
+        KV_MEMBER(postedHeight)
+      }
+    };
+    typedef EMPTY_STRUCT response;
+  };
+
+  /************************************************************************/
+  /* SWAP CANCEL - P2P relay for cancelling a swap offer                  */
+  /************************************************************************/
+  struct COMMAND_SWAP_CANCEL
+  {
+    enum { ID = P2P_COMMANDS_POOL_BASE + 14 };
+
+    struct request
+    {
+      std::string offerId;
+      Crypto::PublicKey makerPubKey;
+      Crypto::Signature signature;        // Signs "cancel:<offerId>" with maker's key
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(offerId)
+        KV_MEMBER(makerPubKey)
+        KV_MEMBER(signature)
+      }
+    };
+    typedef EMPTY_STRUCT response;
+  };
+
+  /************************************************************************/
+  /* SWAP TRADE COMPLETED - broadcast completed swap for TWAP             */
+  /************************************************************************/
+  struct COMMAND_SWAP_TRADE
+  {
+    enum { ID = P2P_COMMANDS_POOL_BASE + 15 };
+
+    struct request
+    {
+      uint8_t     pair;
+      uint64_t    xfgAmount;
+      uint64_t    ctrAmount;
+      uint64_t    rateScaled;             // Rate * 1e7 (integer representation)
+      uint32_t    blockHeight;
+      uint64_t    timestamp;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(pair)
+        KV_MEMBER(xfgAmount)
+        KV_MEMBER(ctrAmount)
+        KV_MEMBER(rateScaled)
+        KV_MEMBER(blockHeight)
+        KV_MEMBER(timestamp)
+      }
+    };
+    typedef EMPTY_STRUCT response;
+  };
+
 }

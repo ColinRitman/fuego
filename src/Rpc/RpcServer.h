@@ -31,6 +31,7 @@ namespace CryptoNote {
 class core;
 class NodeServer;
 class ICryptoNoteProtocolQuery;
+class SwapOfferRelay;
 
 class RpcServer : public HttpServer {
 public:
@@ -45,6 +46,7 @@ public:
   bool k_on_check_reserve_proof(const K_COMMAND_RPC_CHECK_RESERVE_PROOF::request& req, K_COMMAND_RPC_CHECK_RESERVE_PROOF::response& res);
   bool enableCors(const std::string domain);
   bool remotenode_check_incoming_tx(const BinaryArray& tx_blob);
+  void setSwapRelay(SwapOfferRelay* relay);
 
   // Start the HTTP server
   void start(const std::string& address, uint16_t port);
@@ -85,6 +87,13 @@ private:
   // HTLC (atomic swap) RPC endpoints
   bool on_get_htlc_output(const COMMAND_RPC_GET_HTLC_OUTPUT::request& req, COMMAND_RPC_GET_HTLC_OUTPUT::response& res);
   bool on_get_htlc_count(const COMMAND_RPC_GET_HTLC_COUNT::request& req, COMMAND_RPC_GET_HTLC_COUNT::response& res);
+
+  // Swap orderbook RPC endpoints
+  bool on_get_swap_offers(const COMMAND_RPC_GET_SWAP_OFFERS::request& req, COMMAND_RPC_GET_SWAP_OFFERS::response& res);
+  bool on_get_swap_price(const COMMAND_RPC_GET_SWAP_PRICE::request& req, COMMAND_RPC_GET_SWAP_PRICE::response& res);
+  bool on_get_swap_trades(const COMMAND_RPC_GET_SWAP_TRADES::request& req, COMMAND_RPC_GET_SWAP_TRADES::response& res);
+  bool on_submit_swap_offer(const COMMAND_RPC_SUBMIT_SWAP_OFFER::request& req, COMMAND_RPC_SUBMIT_SWAP_OFFER::response& res);
+  bool on_cancel_swap_offer(const COMMAND_RPC_CANCEL_SWAP_OFFER::request& req, COMMAND_RPC_CANCEL_SWAP_OFFER::response& res);
 
   bool on_get_deposits(const COMMAND_RPC_GET_DEPOSITS::request& req, COMMAND_RPC_GET_DEPOSITS::response& res);
   bool on_get_transactions(const COMMAND_RPC_GET_TRANSACTIONS::request& req, COMMAND_RPC_GET_TRANSACTIONS::response& res);
@@ -153,7 +162,7 @@ private:
   std::string m_fee_address;
   Crypto::SecretKey m_view_key = NULL_SECRET_KEY;
   AccountPublicAddress m_fee_acc;
-
+  SwapOfferRelay* m_swapRelay = nullptr;
 
 };
 

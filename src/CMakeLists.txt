@@ -263,6 +263,22 @@ add_executable(SimpleWallet ${SimpleWallet} SimpleWallet/main.cpp)
 add_executable(PaymentGateService ${PaymentGateService})
 add_executable(Optimizer ${Optimizer})
 
+# Swap Daemon executable (xfg-swap)
+add_executable(SwapDaemon
+    SwapDaemon/main.cpp
+    SwapDaemon/SwapTypes.cpp
+    SwapDaemon/SwapStateMachine.cpp
+    SwapDaemon/FuegoRpcClient.cpp
+    SwapDaemon/PriceOracle.cpp
+    SwapDaemon/SwapDatabase.cpp
+    SwapDaemon/SwapDaemon.cpp
+    SwapDaemon/Monero/MoneroRpcClient.cpp
+    SwapDaemon/Monero/AdaptorSignature.cpp
+    SwapDaemon/Ethereum/EthRpcClient.cpp
+    SwapDaemon/Ethereum/ContractAbi.cpp
+    SwapDaemon/BitcoinCash/BchRpcClient.cpp
+    SwapDaemon/BitcoinCash/HtlcScript.cpp
+)
 
 # Add TestnetWallet executable (extends simple_wallet with testnet-specific commands)
 add_executable(testnet-wallet-cli
@@ -284,6 +300,7 @@ target_link_directories(SimpleWallet PRIVATE ${FUEGOTOR_LIB_PATH})
 target_link_directories(Daemon PRIVATE ${FUEGOTOR_LIB_PATH})
 target_link_directories(TestnetDaemon PRIVATE ${FUEGOTOR_LIB_PATH})
 target_link_directories(testnet-wallet-cli PRIVATE ${FUEGOTOR_LIB_PATH})
+target_link_directories(SwapDaemon PRIVATE ${FUEGOTOR_LIB_PATH})
 
 target_link_libraries(testnet-wallet-cli PRIVATE
     Wallet
@@ -303,6 +320,7 @@ target_link_libraries(testnet-wallet-cli PRIVATE
     ${Boost_LIBRARIES}
     Serialization
     ${JSONCPP_LIBRARIES}
+    ncurses
 )
 
 set_target_properties(testnet-wallet-cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/src")
@@ -315,10 +333,12 @@ target_link_libraries(Daemon PRIVATE
     CryptoNoteCore
     P2P
     Rpc
+    CryptoNoteCore
+    Crypto
+    Common
+    Logging
     System
     Http
-    Logging
-    Common
     InProcessNode
     upnpc-static
     BlockchainExplorer
@@ -331,11 +351,12 @@ target_link_libraries(TestnetDaemon PRIVATE
     CryptoNoteCore
     P2P
     Rpc
+    CryptoNoteCore
+    Crypto
+    Common
+    Logging
     System
     Http
-    Logging
-    Common
-    Crypto
     upnpc-static
     BlockchainExplorer
     ${Boost_LIBRARIES}
@@ -357,6 +378,7 @@ target_link_libraries(SimpleWallet PRIVATE
     ${Boost_LIBRARIES}
     Serialization
     ${JSONCPP_LIBRARIES}
+    ncurses
 )
 
 target_link_libraries(PaymentGateService PRIVATE
@@ -369,10 +391,11 @@ target_link_libraries(PaymentGateService PRIVATE
     Crypto
     P2P
     Rpc
+    CryptoNoteCore
+    Common
+    Logging
     Http
     System
-    Logging
-    Common
     InProcessNode
     upnpc-static
     BlockchainExplorer
@@ -392,6 +415,24 @@ target_link_libraries(Optimizer PRIVATE
     ${Boost_LIBRARIES}
     Serialization
     ${JSONCPP_LIBRARIES}
+)
+
+target_link_libraries(SwapDaemon PRIVATE
+    ${Boost_LIBRARIES}
+    ssl
+    crypto
+)
+target_link_options(SwapDaemon PRIVATE
+    "LINKER:--start-group"
+    "${CMAKE_CURRENT_BINARY_DIR}/libCrypto.a"
+    "${CMAKE_CURRENT_BINARY_DIR}/libCommon.a"
+    "${CMAKE_CURRENT_BINARY_DIR}/libLogging.a"
+    "LINKER:--end-group"
+)
+add_dependencies(SwapDaemon Common Logging Crypto)
+target_include_directories(SwapDaemon PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include
 )
 
 target_link_libraries(SimpleWallet PRIVATE
@@ -430,6 +471,7 @@ if(APPLE)
   target_link_libraries(PaymentGate PRIVATE -stdlib=libc++)
   target_link_libraries(JsonRpcServer PRIVATE -stdlib=libc++)
   target_link_libraries(SimpleWalletLib PRIVATE -stdlib=libc++)
+  target_link_libraries(SwapDaemon PRIVATE -stdlib=libc++)
 endif()
 
 # --------------------------
@@ -446,6 +488,7 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR APPLE AND NOT ANDROID)
   target_link_libraries(TestnetDaemon PRIVATE -lresolv)
   target_link_libraries(PaymentGateService PRIVATE -lresolv)
   target_link_libraries(Optimizer PRIVATE -lresolv)
+  target_link_libraries(SwapDaemon PRIVATE -lresolv)
 endif ()
 
 # --------------------------
@@ -469,3 +512,4 @@ set_property(TARGET PaymentGateService PROPERTY OUTPUT_NAME "walletd")
 set_property(TARGET Daemon PROPERTY OUTPUT_NAME "fuegod")
 set_property(TARGET TestnetDaemon PROPERTY OUTPUT_NAME "testnetd")
 set_property(TARGET Optimizer PROPERTY OUTPUT_NAME "optimizer")
+set_property(TARGET SwapDaemon PROPERTY OUTPUT_NAME "xfg-swap")

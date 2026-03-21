@@ -50,6 +50,7 @@
 #include "Rpc/RpcServer.h"
 #include "Rpc/RpcServerConfig.h"
 #include "CryptoNoteCore/ElderfierSignatureBroadcaster.h"
+#include "CryptoNoteCore/SwapOfferRelay.h"
 #include "Common/StringTools.h"
 #include "version.h"
 
@@ -347,6 +348,12 @@ int main(int argc, char* argv[])
     // Initialize elderfier signature broadcaster (if --elderfier-key provided)
     auto elderfierBroadcaster = initializeElderfierBroadcaster(ccore, p2psrv, vm, logger);
 
+    // Initialize swap offer relay (always runs — EFier nodes relay offers for the network)
+    auto swapRelay = std::make_unique<CryptoNote::SwapOfferRelay>(ccore, p2psrv, &p2psrv);
+    swapRelay->start();
+    rpcServer.setSwapRelay(swapRelay.get());
+    logger(INFO) << "Swap offer relay started";
+
     // start components
     if (!command_line::has_arg(vm, arg_console)) {
       dch.start_handling();
@@ -394,6 +401,13 @@ int main(int argc, char* argv[])
     logger(INFO) << "p2p net loop stopped";
 
     dch.stop_handling();
+
+    // Stop swap relay before tearing down core/p2p
+    if (swapRelay) {
+      logger(INFO) << "Stopping swap offer relay...";
+      swapRelay->stop();
+      swapRelay.reset();
+    }
 
     // Stop elderfier signing before tearing down core/p2p
     if (elderfierBroadcaster) {

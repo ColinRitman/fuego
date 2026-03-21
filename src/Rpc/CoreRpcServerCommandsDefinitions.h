@@ -1615,6 +1615,213 @@ struct COMMAND_RPC_GET_HTLC_COUNT {
   };
 };
 
+// ============================================================================
+// SWAP ORDERBOOK RPC ENDPOINTS
+// ============================================================================
+
+struct swap_offer_rpc_entry {
+  std::string offerId;
+  uint64_t xfgAmount;
+  uint64_t rateNum;
+  uint8_t pair;
+  std::string makerPubKey;    // hex
+  uint64_t timestamp;
+  uint32_t ttlBlocks;
+  uint32_t postedHeight;
+
+  void serialize(ISerializer& s) {
+    KV_MEMBER(offerId)
+    KV_MEMBER(xfgAmount)
+    KV_MEMBER(rateNum)
+    KV_MEMBER(pair)
+    KV_MEMBER(makerPubKey)
+    KV_MEMBER(timestamp)
+    KV_MEMBER(ttlBlocks)
+    KV_MEMBER(postedHeight)
+  }
+};
+
+struct COMMAND_RPC_GET_SWAP_OFFERS {
+  struct request {
+    uint8_t pair;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(pair)
+    }
+  };
+
+  struct response {
+    std::vector<swap_offer_rpc_entry> offers;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(offers)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+// Individual price source in composite breakdown
+struct price_source_rpc_entry {
+  std::string name;
+  uint8_t     pair;
+  std::string weight;
+  std::string rate;
+  uint64_t    updatedAt;
+  bool        stale;
+
+  void serialize(ISerializer& s) {
+    KV_MEMBER(name)
+    KV_MEMBER(pair)
+    KV_MEMBER(weight)
+    KV_MEMBER(rate)
+    KV_MEMBER(updatedAt)
+    KV_MEMBER(stale)
+  }
+};
+
+// Per-pair implied USD price
+struct pair_implied_rpc_entry {
+  uint8_t     pair;
+  std::string impliedUsd;
+
+  void serialize(ISerializer& s) {
+    KV_MEMBER(pair)
+    KV_MEMBER(impliedUsd)
+  }
+};
+
+struct COMMAND_RPC_GET_SWAP_PRICE {
+  struct request {
+    uint8_t pair;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(pair)
+    }
+  };
+
+  struct response {
+    std::string twap;             // atomic swap TWAP (double as string)
+    std::string seedRate;         // bootstrap seed rate
+    std::string compositeRate;    // weighted avg across all sources
+    uint32_t    sourceCount;      // how many sources contributed
+    std::vector<price_source_rpc_entry> sources;  // source breakdown
+
+    // Cross-pair native XFG price range (USD)
+    std::string xfgUsdLow;
+    std::string xfgUsdHigh;
+    std::string xfgUsdMid;
+    std::vector<pair_implied_rpc_entry> pairImplied;
+
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(twap)
+      KV_MEMBER(seedRate)
+      KV_MEMBER(compositeRate)
+      KV_MEMBER(sourceCount)
+      KV_MEMBER(sources)
+      KV_MEMBER(xfgUsdLow)
+      KV_MEMBER(xfgUsdHigh)
+      KV_MEMBER(xfgUsdMid)
+      KV_MEMBER(pairImplied)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct swap_trade_rpc_entry {
+  uint8_t pair;
+  uint64_t xfgAmount;
+  uint64_t ctrAmount;
+  std::string rate;       // double as string
+  uint32_t blockHeight;
+  uint64_t timestamp;
+
+  void serialize(ISerializer& s) {
+    KV_MEMBER(pair)
+    KV_MEMBER(xfgAmount)
+    KV_MEMBER(ctrAmount)
+    KV_MEMBER(rate)
+    KV_MEMBER(blockHeight)
+    KV_MEMBER(timestamp)
+  }
+};
+
+struct COMMAND_RPC_GET_SWAP_TRADES {
+  struct request {
+    uint8_t pair;
+    uint32_t limit;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(pair)
+      KV_MEMBER(limit)
+    }
+  };
+
+  struct response {
+    std::vector<swap_trade_rpc_entry> trades;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(trades)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_SUBMIT_SWAP_OFFER {
+  struct request {
+    std::string offerId;
+    uint64_t xfgAmount;
+    uint64_t rateNum;
+    uint8_t pair;
+    std::string makerPubKey;  // hex
+    std::string signature;    // hex
+    uint32_t ttlBlocks;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(offerId)
+      KV_MEMBER(xfgAmount)
+      KV_MEMBER(rateNum)
+      KV_MEMBER(pair)
+      KV_MEMBER(makerPubKey)
+      KV_MEMBER(signature)
+      KV_MEMBER(ttlBlocks)
+    }
+  };
+
+  struct response {
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_CANCEL_SWAP_OFFER {
+  struct request {
+    std::string offerId;
+    std::string makerPubKey;  // hex
+    std::string signature;    // hex
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(offerId)
+      KV_MEMBER(makerPubKey)
+      KV_MEMBER(signature)
+    }
+  };
+
+  struct response {
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(status)
+    }
+  };
+};
+
 /** @brief Get total burned XFG amount (eternal flame)
   */
  struct COMMAND_RPC_GET_ETHERNAL_FLAME {

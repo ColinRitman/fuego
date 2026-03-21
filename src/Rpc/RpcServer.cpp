@@ -34,6 +34,7 @@
 #include "CryptoNoteProtocol/ICryptoNoteProtocolQuery.h"
 
 #include "P2p/NetNode.h"
+#include "CryptoNoteCore/SwapOfferRelay.h"
 
 #include "CoreRpcServerErrorCodes.h"
 #include "JsonRpc.h"
@@ -109,6 +110,13 @@ std::unordered_map<std::string, RpcServer::RpcHandler<RpcServer::HandlerFunction
   { "/gethtlc", { jsonMethod<COMMAND_RPC_GET_HTLC_OUTPUT>(&RpcServer::on_get_htlc_output), true } },
   { "/gethtlccount", { jsonMethod<COMMAND_RPC_GET_HTLC_COUNT>(&RpcServer::on_get_htlc_count), true } },
   { "/paymentid", { jsonMethod<COMMAND_RPC_GEN_PAYMENT_ID>(&RpcServer::on_get_payment_id), true } },
+
+  // swap orderbook endpoints
+  { "/getswapoffers", { jsonMethod<COMMAND_RPC_GET_SWAP_OFFERS>(&RpcServer::on_get_swap_offers), true } },
+  { "/getswapprice", { jsonMethod<COMMAND_RPC_GET_SWAP_PRICE>(&RpcServer::on_get_swap_price), true } },
+  { "/getswaptrades", { jsonMethod<COMMAND_RPC_GET_SWAP_TRADES>(&RpcServer::on_get_swap_trades), true } },
+  { "/submitswap", { jsonMethod<COMMAND_RPC_SUBMIT_SWAP_OFFER>(&RpcServer::on_submit_swap_offer), false } },
+  { "/cancelswap", { jsonMethod<COMMAND_RPC_CANCEL_SWAP_OFFER>(&RpcServer::on_cancel_swap_offer), false } },
 
   // disabled in restricted rpc mode
   { "/start_mining", { jsonMethod<COMMAND_RPC_START_MINING>(&RpcServer::on_start_mining), false } },
@@ -754,6 +762,178 @@ bool RpcServer::on_get_htlc_output(const COMMAND_RPC_GET_HTLC_OUTPUT::request& r
 
 bool RpcServer::on_get_htlc_count(const COMMAND_RPC_GET_HTLC_COUNT::request& req, COMMAND_RPC_GET_HTLC_COUNT::response& res) {
   res.count = static_cast<uint32_t>(m_core.getHtlcOutputCount());
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+//-----------------------------------------------
+// Swap orderbook RPC handlers
+//-----------------------------------------------
+
+void RpcServer::setSwapRelay(SwapOfferRelay* relay) {
+  m_swapRelay = relay;
+}
+
+bool RpcServer::on_get_swap_offers(const COMMAND_RPC_GET_SWAP_OFFERS::request& req, COMMAND_RPC_GET_SWAP_OFFERS::response& res) {
+  if (!m_swapRelay) {
+    res.status = "Swap relay not running";
+    return true;
+  }
+
+  auto offers = m_swapRelay->getOffers(req.pair);
+  res.offers.reserve(offers.size());
+  for (const auto& o : offers) {
+    swap_offer_rpc_entry entry;
+    entry.offerId     = o.offerId;
+    entry.xfgAmount   = o.xfgAmount;
+    entry.rateNum     = o.rateNum;
+    entry.pair        = o.pair;
+    entry.makerPubKey = Common::podToHex(o.makerPubKey);
+    entry.timestamp   = o.timestamp;
+    entry.ttlBlocks   = o.ttlBlocks;
+    entry.postedHeight = o.postedHeight;
+    res.offers.push_back(std::move(entry));
+  }
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_swap_price(const COMMAND_RPC_GET_SWAP_PRICE::request& req, COMMAND_RPC_GET_SWAP_PRICE::response& res) {
+  if (!m_swapRelay) {
+    res.status = "Swap relay not running";
+    return true;
+  }
+
+  // Per-pair TWAP + seed
+  double twap = m_swapRelay->getTwap(req.pair);
+  double seed = SwapOfferRelay::getSeedRate(req.pair);
+  res.twap = std::to_string(twap);
+  res.seedRate = std::to_string(seed);
+
+  // Composite price with source breakdown
+  CompositePrice cp = m_swapRelay->getCompositePrice(req.pair);
+  res.compositeRate = std::to_string(cp.rate);
+  res.sourceCount   = static_cast<uint32_t>(cp.sourceCount);
+
+  for (const auto& src : cp.sources) {
+    price_source_rpc_entry e;
+    e.name      = src.name;
+    e.pair      = src.pair;
+    e.weight    = std::to_string(src.weight);
+    e.rate      = std::to_string(src.rate);
+    e.updatedAt = src.updatedAt;
+    e.stale     = src.stale;
+    res.sources.push_back(std::move(e));
+  }
+
+  // Cross-pair native XFG price range
+  NativeXfgPriceRange range = m_swapRelay->getNativeXfgPrice();
+  res.xfgUsdLow  = std::to_string(range.lowUsd);
+  res.xfgUsdHigh = std::to_string(range.highUsd);
+  res.xfgUsdMid  = std::to_string(range.midUsd);
+
+  for (const auto& kv : range.pairImplied) {
+    pair_implied_rpc_entry e;
+    e.pair       = kv.first;
+    e.impliedUsd = std::to_string(kv.second);
+    res.pairImplied.push_back(std::move(e));
+  }
+
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_swap_trades(const COMMAND_RPC_GET_SWAP_TRADES::request& req, COMMAND_RPC_GET_SWAP_TRADES::response& res) {
+  if (!m_swapRelay) {
+    res.status = "Swap relay not running";
+    return true;
+  }
+
+  uint32_t limit = req.limit;
+  if (limit == 0 || limit > 200) limit = 50;
+
+  auto trades = m_swapRelay->getRecentTrades(req.pair, limit);
+  res.trades.reserve(trades.size());
+  for (const auto& t : trades) {
+    swap_trade_rpc_entry entry;
+    entry.pair        = t.pair;
+    entry.xfgAmount   = t.xfgAmount;
+    entry.ctrAmount   = t.ctrAmount;
+    entry.rate        = std::to_string(t.rate);
+    entry.blockHeight = t.blockHeight;
+    entry.timestamp   = t.timestamp;
+    res.trades.push_back(std::move(entry));
+  }
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_submit_swap_offer(const COMMAND_RPC_SUBMIT_SWAP_OFFER::request& req, COMMAND_RPC_SUBMIT_SWAP_OFFER::response& res) {
+  if (!m_swapRelay) {
+    res.status = "Swap relay not running";
+    return true;
+  }
+
+  // Parse hex pubkey
+  Crypto::PublicKey pubkey;
+  if (!Common::podFromHex(req.makerPubKey, pubkey)) {
+    res.status = "Invalid makerPubKey hex";
+    return true;
+  }
+
+  // Parse hex signature
+  Crypto::Signature sig;
+  if (!Common::podFromHex(req.signature, sig)) {
+    res.status = "Invalid signature hex";
+    return true;
+  }
+
+  // Build offer message
+  SwapOfferMsg offer;
+  offer.offerId     = req.offerId;
+  offer.isSell      = true;
+  offer.xfgAmount   = req.xfgAmount;
+  offer.rateNum     = req.rateNum;
+  offer.pair        = req.pair;
+  offer.makerPubKey = pubkey;
+  offer.signature   = sig;
+  offer.timestamp   = static_cast<uint64_t>(std::time(nullptr));
+  offer.ttlBlocks   = req.ttlBlocks;
+
+  // Set postedHeight to current height
+  uint32_t height = 0;
+  Crypto::Hash topId;
+  m_core.get_blockchain_top(height, topId);
+  offer.postedHeight = height;
+
+  if (!m_swapRelay->submitOffer(offer)) {
+    res.status = "Offer rejected (invalid signature or duplicate)";
+    return true;
+  }
+
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_cancel_swap_offer(const COMMAND_RPC_CANCEL_SWAP_OFFER::request& req, COMMAND_RPC_CANCEL_SWAP_OFFER::response& res) {
+  if (!m_swapRelay) {
+    res.status = "Swap relay not running";
+    return true;
+  }
+
+  Crypto::PublicKey pubkey;
+  if (!Common::podFromHex(req.makerPubKey, pubkey)) {
+    res.status = "Invalid makerPubKey hex";
+    return true;
+  }
+
+  Crypto::Signature sig;
+  if (!Common::podFromHex(req.signature, sig)) {
+    res.status = "Invalid signature hex";
+    return true;
+  }
+
+  m_swapRelay->cancelOffer(req.offerId, pubkey, sig);
   res.status = CORE_RPC_STATUS_OK;
   return true;
 }
