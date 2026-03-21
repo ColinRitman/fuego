@@ -12,7 +12,7 @@ import (
 
 // ── BCH circle logo geometry (green circle + ₿) ────────────────
 const (
-	logoR  = 10
+	logoR  = 16
 	logoD  = logoR*2 + 1
 	logoCX = logoR
 	logoCY = logoR
@@ -141,96 +141,37 @@ func isEdge(x, y int) bool {
 	return r2 <= outer && r2 > inner
 }
 
-// isB checks the BCH-logo ₿ tilted ~14° clockwise.
-func isB(x, y int) bool {
-	cx := float64(logoCX)
-	cy := float64(logoCY)
-	vx := (float64(x) - cx) * 0.5 // aspect-correct for terminal chars
-	vy := float64(y) - cy
-	const rad = 14.0 * math.Pi / 180.0
-	c, s := math.Cos(rad), math.Sin(rad)
-	rx := vx*c + vy*s
-	ry := -vx*s + vy*c
-	return isBUpright(int(math.Round(rx/0.5+cx)), int(math.Round(ry+cy)))
+// Hand-crafted BCH ₿ bitmap with ~12° clockwise tilt baked in.
+// Each row is a set of horizontal spans [left, right] inclusive.
+// Tilt: top shifts +3 right, bottom shifts -3 left from center.
+// Designed for logoR=16 (33×33 grid, center at 16,16).
+type bSpan struct{ l, r int }
+
+var bchB = map[int][]bSpan{
+	10: {{14, 15}, {18, 19}},  // top serifs (+3)
+	11: {{12, 22}},            // top bar (+2)
+	12: {{12, 15}, {19, 23}},  // spine + upper bump (+2)
+	13: {{11, 14}, {18, 22}},  // spine + upper bump (+1)
+	14: {{11, 14}, {18, 22}},  // spine + upper bump (+1)
+	15: {{10, 22}},            // middle bar (0)
+	16: {{10, 13}, {17, 24}},  // spine + lower bump (0)
+	17: {{9, 12}, {16, 24}},   // spine + lower bump (-1)
+	18: {{9, 12}, {16, 23}},   // spine + lower bump (-1)
+	19: {{8, 11}, {15, 22}},   // spine + lower bump (-2)
+	20: {{8, 23}},             // bottom bar (-2)
+	21: {{8, 9}, {12, 13}},   // bottom serifs (-3)
 }
 
-// isBUpright defines the upright ₿ geometry.
-func isBUpright(x, y int) bool {
-	bTop := logoCY - logoR*5/10
-	bBot := logoCY + logoR*5/10
-	bLeft := logoCX - logoR*6/10
-	bRight := logoCX + logoR*8/10
-	bMid := (bTop + bBot) / 2
-
-	if y < bTop-1 || y > bBot+1 || x < bLeft || x > bRight {
+func isB(x, y int) bool {
+	spans, ok := bchB[y]
+	if !ok {
 		return false
 	}
-
-	bW := bRight - bLeft
-	lc := x - bLeft
-
-	// Vertical serif strokes extending above top and below bottom
-	if y == bTop-1 || y == bBot+1 {
-		return lc >= 2 && lc <= 4
-	}
-
-	// Vertical spine (left bar, 3 chars wide)
-	if lc <= 2 {
-		return true
-	}
-
-	// Top horizontal bar (2 rows)
-	if y >= bTop && y <= bTop+1 {
-		return lc <= bW-2
-	}
-
-	// Middle horizontal bar (2 rows)
-	if y >= bMid && y <= bMid+1 {
-		return lc <= bW-1
-	}
-
-	// Bottom horizontal bar (2 rows)
-	if y >= bBot-1 && y <= bBot {
-		return lc <= bW-2
-	}
-
-	// Top bump (right side curve, between top bar and middle bar)
-	if y > bTop+1 && y < bMid {
-		bumpRows := bMid - bTop - 2
-		bumpMid := bTop + 2 + bumpRows/2
-		dist := y - bumpMid
-		if dist < 0 {
-			dist = -dist
-		}
-		// Parabolic curve: widest at bumpMid
-		maxExt := bW
-		ext := maxExt - dist*2
-		if ext < bW-3 {
-			ext = bW - 3
-		}
-		if lc >= bW-4 && lc <= ext {
+	for _, s := range spans {
+		if x >= s.l && x <= s.r {
 			return true
 		}
 	}
-
-	// Bottom bump (right side curve, between middle and bottom bar)
-	if y > bMid+1 && y < bBot-1 {
-		bumpRows := bBot - 1 - bMid - 2
-		bumpMid := bMid + 2 + bumpRows/2
-		dist := y - bumpMid
-		if dist < 0 {
-			dist = -dist
-		}
-		maxExt := bW
-		ext := maxExt - dist*2
-		if ext < bW-3 {
-			ext = bW - 3
-		}
-		if lc >= bW-4 && lc <= ext {
-			return true
-		}
-	}
-
 	return false
 }
 
@@ -240,7 +181,7 @@ func logoPixel(row, col, frame int) (bool, lipgloss.Color) {
 	}
 
 	// Shimmer wave
-	if wp := frame % (logoD + 8); row == wp && !isEdge(col, row) {
+	if wp := frame % (logoD + 8); row == wp {
 		return true, bchGlow
 	}
 
@@ -249,12 +190,7 @@ func logoPixel(row, col, frame int) (bool, lipgloss.Color) {
 		return true, bchLetter
 	}
 
-	// Circle edge
-	if isEdge(col, row) {
-		return true, bchCirclD
-	}
-
-	// Circle interior
+	// Circle interior (solid, no edge ring)
 	return true, bchCircle
 }
 

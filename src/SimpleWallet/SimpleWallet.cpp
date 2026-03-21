@@ -51,6 +51,7 @@
 #include "NodeRpcProxy/NodeRpcProxy.h"
 #include "Rpc/CoreRpcServerCommandsDefinitions.h"
 #include "Rpc/HttpClient.h"
+#include "System/Timer.h"
 #include "CryptoNoteCore/CryptoNoteTools.h"
 #include "CryptoNoteCore/TransactionExtra.h"
 #include "CryptoNoteCore/DepositCommitment.h"
@@ -3900,10 +3901,18 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
     }
   };
 
+  // Capture host/port by value so callbacks don't need m_dispatcher.
+  // Each callback creates its own System::Dispatcher + HttpClient so it
+  // can pump I/O inline, avoiding the deadlock where the ncurses run()
+  // loop blocks the wallet's dispatcher from ever processing async I/O.
+  std::string daemonHost = m_daemon_host;
+  uint16_t    daemonPort = m_daemon_port;
+
   // Fetch offers from daemon /getswapoffers
-  cb.fetchOffers = [this, pairToNum, numToPair](const std::string& pair) -> std::vector<CryptoNote::SwapOffer> {
+  cb.fetchOffers = [this, daemonHost, daemonPort, pairToNum, numToPair](const std::string& pair) -> std::vector<CryptoNote::SwapOffer> {
     try {
-      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      System::Dispatcher localDispatcher;
+      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
       COMMAND_RPC_GET_SWAP_OFFERS::request req;
       COMMAND_RPC_GET_SWAP_OFFERS::response res;
       req.pair = pairToNum(pair);
@@ -3934,9 +3943,10 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
   };
 
   // Fetch trades from daemon /getswaptrades
-  cb.fetchTrades = [this, pairToNum](const std::string& pair, size_t limit) -> std::vector<CryptoNote::SwapTrade> {
+  cb.fetchTrades = [this, daemonHost, daemonPort, pairToNum](const std::string& pair, size_t limit) -> std::vector<CryptoNote::SwapTrade> {
     try {
-      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      System::Dispatcher localDispatcher;
+      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
       COMMAND_RPC_GET_SWAP_TRADES::request req;
       COMMAND_RPC_GET_SWAP_TRADES::response res;
       req.pair  = pairToNum(pair);
@@ -3959,9 +3969,10 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
   };
 
   // Fetch price from daemon /getswapprice — prefers composite rate (weighted across all sources)
-  cb.fetchTwap = [this, pairToNum](const std::string& pair) -> double {
+  cb.fetchTwap = [this, daemonHost, daemonPort, pairToNum](const std::string& pair) -> double {
     try {
-      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      System::Dispatcher localDispatcher;
+      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
       COMMAND_RPC_GET_SWAP_PRICE::request req;
       COMMAND_RPC_GET_SWAP_PRICE::response res;
       req.pair = pairToNum(pair);
@@ -3991,7 +4002,7 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
   };
 
   // Submit swap offer (XFG → CTR)
-  cb.submitOffer = [this, pairToNum](uint64_t xfgAmount, double rate, const std::string& pair) -> bool {
+  cb.submitOffer = [this, daemonHost, daemonPort, pairToNum](uint64_t xfgAmount, double rate, const std::string& pair) -> bool {
     try {
       // Get wallet keys for signing
       CryptoNote::AccountKeys walletKeys;
@@ -4027,7 +4038,8 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
       req.signature   = Common::toHex(sig.data, sizeof(sig.data));
       req.ttlBlocks   = 180; // ~1 day at 8-min blocks
 
-      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      System::Dispatcher localDispatcher;
+      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
       invokeJsonCommand(httpClient, "/submitswap", req, res);
       return res.status == CORE_RPC_STATUS_OK || res.status == "OK";
     } catch (const std::exception&) {
@@ -4039,10 +4051,11 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
   // Taker generates preimage, locks XFG → maker's pubkey with hashlock + timeout
   // Maker then locks CTR on counterparty chain using the same hashlock
   // Taker claims CTR (reveals preimage), maker uses revealed preimage to claim XFG
-  cb.acceptOffer = [this, pairToNum](const std::string& offerId) -> bool {
+  cb.acceptOffer = [this, daemonHost, daemonPort, pairToNum](const std::string& offerId) -> bool {
     try {
       // 1. Fetch the offer from daemon to get maker pubkey and amount
-      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      System::Dispatcher localDispatcher;
+      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
       COMMAND_RPC_GET_SWAP_OFFERS::request offerReq;
       COMMAND_RPC_GET_SWAP_OFFERS::response offerRes;
       // Fetch all pairs — we don't know which pair this offer is for
@@ -4125,7 +4138,7 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
   };
 
   // Cancel offer
-  cb.cancelOffer = [this](const std::string& offerId) -> bool {
+  cb.cancelOffer = [this, daemonHost, daemonPort](const std::string& offerId) -> bool {
     try {
       CryptoNote::AccountKeys walletKeys;
       m_wallet->getAccountKeys(walletKeys);
@@ -4143,7 +4156,8 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
       req.makerPubKey = Common::toHex(walletKeys.address.spendPublicKey.data, 32);
       req.signature   = Common::toHex(sig.data, sizeof(sig.data));
 
-      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      System::Dispatcher localDispatcher;
+      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
       invokeJsonCommand(httpClient, "/cancelswap", req, res);
       return res.status == CORE_RPC_STATUS_OK || res.status == "OK";
     } catch (const std::exception&) {
@@ -4157,8 +4171,29 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
   };
 
   terminal.setCallbacks(cb);
-  terminal.run();  // blocks until user exits (ncurses takes over terminal)
 
+  // Run the ncurses TUI on a background thread so the wallet's dispatcher
+  // stays alive on this thread.  The dispatcher must keep pumping because
+  // acceptOffer → createHtlc → NodeRpcProxy::relayTransaction posts work
+  // via remoteSpawn that only completes when the dispatcher processes it.
+  std::atomic<bool> termDone{false};
+  std::thread termThread([&terminal, &termDone]() {
+    terminal.run();
+    termDone = true;
+  });
+
+  // Cooperative sleep loop: yield to the dispatcher every 100 ms so it can
+  // process async I/O (transaction sends, node sync, etc.)
+  try {
+    while (!termDone) {
+      System::Timer timer(m_dispatcher);
+      timer.sleep(std::chrono::milliseconds(100));
+    }
+  } catch (const System::InterruptedException&) {
+    // Shutdown requested — terminal thread will notice and exit
+  }
+
+  termThread.join();
   success_msg_writer() << "Swap terminal closed.";
 
   return true;

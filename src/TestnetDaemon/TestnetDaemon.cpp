@@ -41,6 +41,7 @@
 #include "../Logging/ConsoleLogger.h"
 #include "../Logging/LoggerManager.h"
 #include "../CryptoNoteCore/ElderfierSignatureBroadcaster.h"
+#include "../CryptoNoteCore/SwapOfferRelay.h"
 #include "../Common/StringTools.h"
 
 #if defined(WIN32)
@@ -367,6 +368,12 @@ int main(int argc, char* argv[])
       }
     }
 
+    // Initialize swap offer relay
+    auto swapRelay = std::make_unique<CryptoNote::SwapOfferRelay>(ccore, p2psrv, &p2psrv);
+    swapRelay->start();
+    rpcServer.setSwapRelay(swapRelay.get());
+    logger(INFO) << "Swap offer relay started";
+
     // start components
     if (!command_line::has_arg(vm, arg_console)) {
       dch.start_handling();
@@ -414,6 +421,13 @@ int main(int argc, char* argv[])
     logger(INFO) << "p2p net loop stopped";
 
     dch.stop_handling();
+
+    // Stop swap relay before teardown
+    if (swapRelay) {
+      logger(INFO) << "Stopping swap offer relay...";
+      swapRelay->stop();
+      swapRelay.reset();
+    }
 
     // Stop elderfier signing before teardown
     if (elderfierBroadcaster) {

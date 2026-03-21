@@ -418,18 +418,11 @@ target_link_libraries(Optimizer PRIVATE
 )
 
 target_link_libraries(SwapDaemon PRIVATE
+    Crypto Common Logging Crypto Common
     ${Boost_LIBRARIES}
     ssl
     crypto
 )
-target_link_options(SwapDaemon PRIVATE
-    "LINKER:--start-group"
-    "${CMAKE_CURRENT_BINARY_DIR}/libCrypto.a"
-    "${CMAKE_CURRENT_BINARY_DIR}/libCommon.a"
-    "${CMAKE_CURRENT_BINARY_DIR}/libLogging.a"
-    "LINKER:--end-group"
-)
-add_dependencies(SwapDaemon Common Logging Crypto)
 target_include_directories(SwapDaemon PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/include
