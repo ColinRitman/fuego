@@ -131,6 +131,7 @@ namespace CryptoNote
     bool burn_info(const std::vector<std::string> &args);
     bool migrate_cold(const std::vector<std::string> &args);
     bool propose_slash(const std::vector<std::string> &args);
+    bool get_report(const std::vector<std::string> &args);
 
     // HTLC (atomic swap) commands
     bool create_htlc(const std::vector<std::string> &args);
