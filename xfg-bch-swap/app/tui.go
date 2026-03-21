@@ -13,10 +13,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Styles
 var (
 	headerStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#627EEA")).
+			Foreground(lipgloss.Color("#0AC18E")).
 			Bold(true)
 
 	priceStyle = lipgloss.NewStyle().
@@ -39,13 +38,8 @@ var (
 	statusStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#FF6347"))
 
-	borderStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("#333333")).
-			Padding(0, 1)
-
 	activeTabStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#627EEA")).
+			Foreground(lipgloss.Color("#0AC18E")).
 			Bold(true).
 			Underline(true)
 
@@ -53,17 +47,16 @@ var (
 			Foreground(lipgloss.Color("#555555"))
 )
 
-// activeSwap tracks a pending atomic swap initiated by the ETH taker.
 type activeSwap struct {
 	offerID   string
-	preimage  string // hex — SECRET, user must save
-	hashLock  string // hex — shared with maker
+	preimage  string
+	hashLock  string
 	xfgAmount uint64
-	ethNeeded float64
+	bchNeeded float64
 	rate      float64
 	startedAt time.Time
-	xfgLocked bool // maker has locked XFG
-	htlcIndex int  // index of matching HTLC (-1 = not found)
+	xfgLocked bool
+	htlcIndex int
 }
 
 type tuiModel struct {
@@ -78,7 +71,7 @@ type tuiModel struct {
 	statusAt  time.Time
 	connected bool
 	lastFetch time.Time
-	tab       int // 0=book, 1=trades, 2=info
+	tab       int
 	swap      *activeSwap
 	htlcCount uint32
 }
@@ -87,10 +80,7 @@ type refreshMsg struct{}
 type tickMsg time.Time
 
 func newTuiModel(client *FuegoClient) tuiModel {
-	return tuiModel{
-		client: client,
-		tab:    0,
-	}
+	return tuiModel{client: client, tab: 0}
 }
 
 func (m tuiModel) Init() tea.Cmd {
@@ -135,16 +125,13 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
-
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
-
 	case refreshMsg:
 		m.refresh()
 		return m, nil
-
 	case tickMsg:
 		if time.Since(m.lastFetch) > 10*time.Second {
 			m.refresh()
@@ -164,17 +151,14 @@ func (m *tuiModel) refresh() {
 	}
 	m.offers = offers
 	m.connected = true
-
 	price, err := m.client.GetPrice()
 	if err == nil {
 		m.price = price
 	}
-
 	trades, err := m.client.GetTrades(20)
 	if err == nil {
 		m.trades = trades
 	}
-
 	m.monitorSwap()
 	m.lastFetch = time.Now()
 }
@@ -184,7 +168,6 @@ func (m *tuiModel) processCommand() {
 	if len(parts) == 0 {
 		return
 	}
-
 	cmd := strings.ToLower(parts[0])
 	switch cmd {
 	case "accept":
@@ -219,9 +202,7 @@ func (m *tuiModel) processCommand() {
 	m.statusAt = time.Now()
 }
 
-// doAccept initiates an atomic swap: generates preimage/hashlock, computes ETH needed.
 func (m *tuiModel) doAccept(idPrefix string) {
-	// Find offer by prefix match
 	var offer *SwapOffer
 	for i := range m.offers {
 		if strings.HasPrefix(m.offers[i].OfferID, idPrefix) {
@@ -233,37 +214,30 @@ func (m *tuiModel) doAccept(idPrefix string) {
 		m.status = "Offer not found: " + idPrefix
 		return
 	}
-
-	// Generate 32-byte random preimage
 	preimage := make([]byte, 32)
 	if _, err := crand.Read(preimage); err != nil {
 		m.status = "Crypto error: " + err.Error()
 		return
 	}
-
-	// SHA-256 hashlock (compatible with Ethereum HTLC contracts)
 	hash := sha256.Sum256(preimage)
-
 	xfg := float64(offer.XfgAmount) / 1e7
 	rate := float64(offer.RateNum) / 1e7
-	ethNeeded := xfg / rate
+	bchNeeded := xfg / rate
 
 	m.swap = &activeSwap{
 		offerID:   offer.OfferID,
 		preimage:  hex.EncodeToString(preimage),
 		hashLock:  hex.EncodeToString(hash[:]),
 		xfgAmount: offer.XfgAmount,
-		ethNeeded: ethNeeded,
+		bchNeeded: bchNeeded,
 		rate:      rate,
 		startedAt: time.Now(),
 		htlcIndex: -1,
 	}
-
-	m.status = fmt.Sprintf("SWAP INITIATED — Lock %.6f ETH with hashlock %s...", ethNeeded, m.swap.hashLock[:16])
-	m.tab = 2 // switch to info tab
+	m.status = fmt.Sprintf("SWAP INITIATED — Lock %.6f BCH with hashlock %s...", bchNeeded, m.swap.hashLock[:16])
+	m.tab = 2
 }
 
-// doQueryHtlc inspects an HTLC output by chain index.
 func (m *tuiModel) doQueryHtlc(indexStr string) {
 	idx, err := strconv.ParseUint(indexStr, 10, 32)
 	if err != nil {
@@ -287,7 +261,6 @@ func (m *tuiModel) doQueryHtlc(indexStr string) {
 	m.status = fmt.Sprintf("HTLC #%d: %.2f XFG, timeout=%d, %s, hash=%s...", idx, xfg, htlc.TimeoutHeight, state, hashPfx)
 }
 
-// monitorSwap checks the XFG chain for the maker's HTLC matching our hashlock.
 func (m *tuiModel) monitorSwap() {
 	if m.swap == nil || m.swap.xfgLocked {
 		return
@@ -296,7 +269,6 @@ func (m *tuiModel) monitorSwap() {
 	if err != nil {
 		return
 	}
-	// Scan any new HTLCs since last check
 	for i := m.htlcCount; i < count; i++ {
 		htlc, err := m.client.GetHtlc(i)
 		if err != nil {
@@ -317,11 +289,7 @@ func (m tuiModel) View() string {
 	if m.width == 0 {
 		return ""
 	}
-
-	// Header bar
 	header := m.renderHeader()
-
-	// Tab content
 	var content string
 	switch m.tab {
 	case 0:
@@ -331,30 +299,17 @@ func (m tuiModel) View() string {
 	case 2:
 		content = m.renderInfo()
 	}
-
-	// Input bar
 	inputBar := m.renderInput()
-
-	// Compose
-	return lipgloss.JoinVertical(lipgloss.Left,
-		header,
-		"",
-		content,
-		"",
-		inputBar,
-	)
+	return lipgloss.JoinVertical(lipgloss.Left, header, "", content, "", inputBar)
 }
 
 func (m tuiModel) renderHeader() string {
-	// Connection indicator
 	var connStr string
 	if m.connected {
 		connStr = greenStyle.Render("●") + dimStyle.Render(" EFier")
 	} else {
 		connStr = redStyle.Render("●") + dimStyle.Render(" offline")
 	}
-
-	// Price
 	var priceStr string
 	if m.price != nil {
 		rate, _ := strconv.ParseFloat(m.price.CompositeRate, 64)
@@ -362,20 +317,15 @@ func (m tuiModel) renderHeader() string {
 			rate, _ = strconv.ParseFloat(m.price.SeedRate, 64)
 		}
 		if rate > 0 {
-			ethPerXfg := 1.0 / rate
-			priceStr = priceStyle.Render(fmt.Sprintf("1 XFG = %.8f ETH", ethPerXfg))
-
-			// USD range
+			bchPerXfg := 1.0 / rate
+			priceStr = priceStyle.Render(fmt.Sprintf("1 XFG = %.8f BCH", bchPerXfg))
 			usdMid, _ := strconv.ParseFloat(m.price.XfgUsdMid, 64)
 			if usdMid > 0 {
 				priceStr += dimStyle.Render(fmt.Sprintf("  ($%.4f)", usdMid))
 			}
 		}
 	}
-
-	title := headerStyle.Render("◆ XFG⇄ETH")
-
-	// Tabs
+	title := headerStyle.Render("₿ XFG⇄BCH")
 	tabs := []string{"[1]Book", "[2]Trades", "[3]Info"}
 	var tabStr string
 	for i, t := range tabs {
@@ -385,15 +335,12 @@ func (m tuiModel) renderHeader() string {
 			tabStr += inactiveTabStyle.Render(t) + " "
 		}
 	}
-
 	left := title + "  " + priceStr
 	right := tabStr + "  " + connStr
-
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
-
 	return left + strings.Repeat(" ", gap) + right
 }
 
@@ -401,39 +348,28 @@ func (m tuiModel) renderOrderBook() string {
 	if len(m.offers) == 0 {
 		return dimStyle.Render("  No offers available. Waiting for XFG holders to post swap offers...")
 	}
-
-	// Header
-	hdr := fmt.Sprintf("  %-10s %16s %16s %14s %s",
-		"OFFER", "XFG AMOUNT", "RATE (XFG/ETH)", "ETH VALUE", "AGE")
+	hdr := fmt.Sprintf("  %-10s %16s %16s %14s %s", "OFFER", "XFG AMOUNT", "RATE (XFG/BCH)", "BCH VALUE", "AGE")
 	lines := []string{dimStyle.Render(hdr)}
-
 	maxLines := m.height - 8
 	if maxLines < 3 {
 		maxLines = 3
 	}
-
 	for i, o := range m.offers {
 		if i >= maxLines {
 			lines = append(lines, dimStyle.Render(fmt.Sprintf("  ... and %d more", len(m.offers)-i)))
 			break
 		}
-
 		xfg := float64(o.XfgAmount) / 1e7
 		rate := float64(o.RateNum) / 1e7
-		ethVal := xfg / rate
-
+		bchVal := xfg / rate
 		age := formatAge(o.Timestamp)
 		id := o.OfferID
 		if len(id) > 8 {
 			id = id[:8]
 		}
-
-		line := fmt.Sprintf("  %-10s %13.2f XFG %13.1f %11.6f ETH %s",
-			id, xfg, rate, ethVal, age)
-
+		line := fmt.Sprintf("  %-10s %13.2f XFG %13.1f %11.6f BCH %s", id, xfg, rate, bchVal, age)
 		lines = append(lines, greenStyle.Render(line))
 	}
-
 	return strings.Join(lines, "\n")
 }
 
@@ -441,72 +377,59 @@ func (m tuiModel) renderTrades() string {
 	if len(m.trades) == 0 {
 		return dimStyle.Render("  No recent trades.")
 	}
-
-	hdr := fmt.Sprintf("  %16s %16s %14s %s",
-		"XFG VOLUME", "RATE (XFG/ETH)", "ETH VALUE", "AGE")
+	hdr := fmt.Sprintf("  %16s %16s %14s %s", "XFG VOLUME", "RATE (XFG/BCH)", "BCH VALUE", "AGE")
 	lines := []string{dimStyle.Render(hdr)}
-
 	maxLines := m.height - 8
 	if maxLines < 3 {
 		maxLines = 3
 	}
-
 	for i, t := range m.trades {
 		if i >= maxLines {
 			break
 		}
 		xfg := float64(t.XfgAmount) / 1e7
 		rate, _ := strconv.ParseFloat(t.Rate, 64)
-		ethVal := 0.0
+		bchVal := 0.0
 		if rate > 0 {
-			ethVal = xfg / rate
+			bchVal = xfg / rate
 		}
 		age := formatAge(t.Timestamp)
-
-		line := fmt.Sprintf("  %13.2f XFG %13.1f %11.6f ETH %s",
-			xfg, rate, ethVal, age)
+		line := fmt.Sprintf("  %13.2f XFG %13.1f %11.6f BCH %s", xfg, rate, bchVal, age)
 		lines = append(lines, line)
 	}
-
 	return strings.Join(lines, "\n")
 }
 
 func (m tuiModel) renderInfo() string {
 	var lines []string
-
-	// Active swap panel
 	if m.swap != nil {
 		lines = append(lines, headerStyle.Render("  Active Swap"))
 		lines = append(lines, "")
-
 		id := m.swap.offerID
 		if len(id) > 16 {
 			id = id[:16] + "..."
 		}
 		lines = append(lines, fmt.Sprintf("  Offer:      %s", id))
 		lines = append(lines, fmt.Sprintf("  XFG amount: %.2f", float64(m.swap.xfgAmount)/1e7))
-		lines = append(lines, fmt.Sprintf("  ETH needed: %.6f", m.swap.ethNeeded))
-		lines = append(lines, fmt.Sprintf("  Rate:       %.1f XFG/ETH", m.swap.rate))
+		lines = append(lines, fmt.Sprintf("  BCH needed: %.6f", m.swap.bchNeeded))
+		lines = append(lines, fmt.Sprintf("  Rate:       %.1f XFG/BCH", m.swap.rate))
 		lines = append(lines, "")
 		lines = append(lines, priceStyle.Render(fmt.Sprintf("  Hashlock: %s", m.swap.hashLock)))
 		lines = append(lines, redStyle.Render(fmt.Sprintf("  Preimage: %s", m.swap.preimage)))
 		lines = append(lines, redStyle.Render("  SAVE YOUR PREIMAGE — required to claim XFG"))
 		lines = append(lines, "")
-
 		if m.swap.xfgLocked {
 			lines = append(lines, greenStyle.Render(fmt.Sprintf("  XFG locked in HTLC #%d — submit preimage to claim", m.swap.htlcIndex)))
 		} else {
 			lines = append(lines, statusStyle.Render("  Waiting for XFG maker to lock..."))
-			lines = append(lines, dimStyle.Render("    1. Lock ETH on Ethereum with hashlock above"))
-			lines = append(lines, dimStyle.Render("    2. Maker sees your ETH lock, locks XFG"))
+			lines = append(lines, dimStyle.Render("    1. Lock BCH with hashlock above"))
+			lines = append(lines, dimStyle.Render("    2. Maker sees your BCH lock, locks XFG"))
 			lines = append(lines, dimStyle.Render("    3. Claim XFG with your preimage"))
 		}
 		lines = append(lines, "")
 	}
-
 	lines = append(lines, headerStyle.Render("  Price Sources"))
 	lines = append(lines, "")
-
 	if m.price != nil && len(m.price.Sources) > 0 {
 		for _, src := range m.price.Sources {
 			rate, _ := strconv.ParseFloat(src.Rate, 64)
@@ -515,13 +438,11 @@ func (m tuiModel) renderInfo() string {
 			if src.Stale {
 				staleStr = redStyle.Render(" [stale]")
 			}
-			lines = append(lines, fmt.Sprintf("  %-20s rate=%.1f  weight=%.1f%s",
-				src.Name, rate, weight, staleStr))
+			lines = append(lines, fmt.Sprintf("  %-20s rate=%.1f  weight=%.1f%s", src.Name, rate, weight, staleStr))
 		}
 	} else {
 		lines = append(lines, dimStyle.Render("  No price sources available"))
 	}
-
 	lines = append(lines, "")
 	lines = append(lines, headerStyle.Render("  Cross-Pair XFG Price"))
 	if m.price != nil {
@@ -537,31 +458,25 @@ func (m tuiModel) renderInfo() string {
 			lines = append(lines, fmt.Sprintf("    via %s: $%.4f", name, usd))
 		}
 	}
-
 	lines = append(lines, "")
 	lines = append(lines, headerStyle.Render("  Swap Flow"))
 	lines = append(lines, dimStyle.Render("  1. Browse offers from XFG holders (Book tab)"))
-	lines = append(lines, dimStyle.Render("  2. accept <offer_id> → locks your ETH in HTLC"))
+	lines = append(lines, dimStyle.Render("  2. accept <offer_id> → locks your BCH in HTLC"))
 	lines = append(lines, dimStyle.Render("  3. XFG maker sees hashlock, locks XFG"))
 	lines = append(lines, dimStyle.Render("  4. You claim XFG (reveals preimage)"))
-	lines = append(lines, dimStyle.Render("  5. Maker claims your ETH with revealed preimage"))
-
+	lines = append(lines, dimStyle.Render("  5. Maker claims your BCH with revealed preimage"))
 	lines = append(lines, "")
-	lines = append(lines, dimStyle.Render("  HEAT/ETH pool:  1 XFG = 10,000,000 HEAT (ERC-20)"))
-
+	lines = append(lines, dimStyle.Render("  HEAT/BCH pool:  1 XFG = 10,000,000 HEAT (ERC-20)"))
 	return strings.Join(lines, "\n")
 }
 
 func (m tuiModel) renderInput() string {
-	// Status message (fades after 5s)
 	var statusLine string
 	if m.status != "" && time.Since(m.statusAt) < 5*time.Second {
 		statusLine = statusStyle.Render("  " + m.status)
 	}
-
 	prompt := inputStyle.Render("  > " + m.input + "█")
 	hint := dimStyle.Render("  accept <id> | htlc [idx] | swap | r=refresh | tab | q")
-
 	if statusLine != "" {
 		return lipgloss.JoinVertical(lipgloss.Left, statusLine, prompt, hint)
 	}

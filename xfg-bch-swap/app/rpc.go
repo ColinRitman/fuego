@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// FuegoClient talks to a fuegod EFier node via JSON-RPC.
 type FuegoClient struct {
 	endpoint string
 	client   *http.Client
@@ -22,16 +21,14 @@ func NewFuegoClient(endpoint string) *FuegoClient {
 	}
 }
 
-// --- RPC types (mirror CoreRpcServerCommandsDefinitions.h) ---
-
 type SwapOffer struct {
-	OfferID     string `json:"offerId"`
-	XfgAmount   uint64 `json:"xfgAmount"`
-	RateNum     uint64 `json:"rateNum"`
-	Pair        uint8  `json:"pair"`
-	MakerPubKey string `json:"makerPubKey"`
-	Timestamp   uint64 `json:"timestamp"`
-	TTLBlocks   uint32 `json:"ttlBlocks"`
+	OfferID      string `json:"offerId"`
+	XfgAmount    uint64 `json:"xfgAmount"`
+	RateNum      uint64 `json:"rateNum"`
+	Pair         uint8  `json:"pair"`
+	MakerPubKey  string `json:"makerPubKey"`
+	Timestamp    uint64 `json:"timestamp"`
+	TTLBlocks    uint32 `json:"ttlBlocks"`
 	PostedHeight uint32 `json:"postedHeight"`
 }
 
@@ -64,16 +61,15 @@ type SwapPriceResponse struct {
 	CompositeRate string             `json:"compositeRate"`
 	SourceCount   uint32             `json:"sourceCount"`
 	Sources       []PriceSourceEntry `json:"sources"`
-	XfgUsdLow     string             `json:"xfgUsdLow"`
-	XfgUsdHigh    string             `json:"xfgUsdHigh"`
-	XfgUsdMid     string             `json:"xfgUsdMid"`
-	PairImplied   []PairImplied      `json:"pairImplied"`
-	Status        string             `json:"status"`
+	XfgUsdLow     string            `json:"xfgUsdLow"`
+	XfgUsdHigh    string            `json:"xfgUsdHigh"`
+	XfgUsdMid     string            `json:"xfgUsdMid"`
+	PairImplied   []PairImplied     `json:"pairImplied"`
+	Status        string            `json:"status"`
 }
 
-// GetOffers fetches swap offers for ETH (pair=1).
 func (c *FuegoClient) GetOffers() ([]SwapOffer, error) {
-	req := map[string]interface{}{"pair": 1}
+	req := map[string]interface{}{"pair": 2}
 	var resp struct {
 		Offers []SwapOffer `json:"offers"`
 		Status string      `json:"status"`
@@ -84,9 +80,8 @@ func (c *FuegoClient) GetOffers() ([]SwapOffer, error) {
 	return resp.Offers, nil
 }
 
-// GetPrice fetches composite price for ETH pair.
 func (c *FuegoClient) GetPrice() (*SwapPriceResponse, error) {
-	req := map[string]interface{}{"pair": 1}
+	req := map[string]interface{}{"pair": 2}
 	var resp SwapPriceResponse
 	if err := c.post("/getswapprice", req, &resp); err != nil {
 		return nil, err
@@ -94,9 +89,8 @@ func (c *FuegoClient) GetPrice() (*SwapPriceResponse, error) {
 	return &resp, nil
 }
 
-// GetTrades fetches recent trades for ETH pair.
 func (c *FuegoClient) GetTrades(limit int) ([]SwapTrade, error) {
-	req := map[string]interface{}{"pair": 1, "limit": limit}
+	req := map[string]interface{}{"pair": 2, "limit": limit}
 	var resp struct {
 		Trades []SwapTrade `json:"trades"`
 		Status string      `json:"status"`
@@ -107,7 +101,6 @@ func (c *FuegoClient) GetTrades(limit int) ([]SwapTrade, error) {
 	return resp.Trades, nil
 }
 
-// HtlcOutput represents an on-chain HTLC output.
 type HtlcOutput struct {
 	Amount        uint64 `json:"amount"`
 	RecipientKey  string `json:"recipientKey"`
@@ -118,7 +111,6 @@ type HtlcOutput struct {
 	Status        string `json:"status"`
 }
 
-// GetHtlc fetches an HTLC output by index.
 func (c *FuegoClient) GetHtlc(index uint32) (*HtlcOutput, error) {
 	req := map[string]interface{}{"index": index}
 	var resp HtlcOutput
@@ -128,7 +120,6 @@ func (c *FuegoClient) GetHtlc(index uint32) (*HtlcOutput, error) {
 	return &resp, nil
 }
 
-// GetHtlcCount returns the total number of HTLC outputs on chain.
 func (c *FuegoClient) GetHtlcCount() (uint32, error) {
 	var resp struct {
 		Count  uint32 `json:"count"`
@@ -140,7 +131,6 @@ func (c *FuegoClient) GetHtlcCount() (uint32, error) {
 	return resp.Count, nil
 }
 
-// GetInfo fetches basic node info.
 func (c *FuegoClient) GetInfo() (map[string]interface{}, error) {
 	var resp map[string]interface{}
 	if err := c.post("/getinfo", nil, &resp); err != nil {

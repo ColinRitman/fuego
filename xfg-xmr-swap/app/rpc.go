@@ -25,13 +25,13 @@ func NewFuegoClient(endpoint string) *FuegoClient {
 // --- RPC types (mirror CoreRpcServerCommandsDefinitions.h) ---
 
 type SwapOffer struct {
-	OfferID     string `json:"offerId"`
-	XfgAmount   uint64 `json:"xfgAmount"`
-	RateNum     uint64 `json:"rateNum"`
-	Pair        uint8  `json:"pair"`
-	MakerPubKey string `json:"makerPubKey"`
-	Timestamp   uint64 `json:"timestamp"`
-	TTLBlocks   uint32 `json:"ttlBlocks"`
+	OfferID      string `json:"offerId"`
+	XfgAmount    uint64 `json:"xfgAmount"`
+	RateNum      uint64 `json:"rateNum"`
+	Pair         uint8  `json:"pair"`
+	MakerPubKey  string `json:"makerPubKey"`
+	Timestamp    uint64 `json:"timestamp"`
+	TTLBlocks    uint32 `json:"ttlBlocks"`
 	PostedHeight uint32 `json:"postedHeight"`
 }
 
@@ -64,16 +64,16 @@ type SwapPriceResponse struct {
 	CompositeRate string             `json:"compositeRate"`
 	SourceCount   uint32             `json:"sourceCount"`
 	Sources       []PriceSourceEntry `json:"sources"`
-	XfgUsdLow     string             `json:"xfgUsdLow"`
-	XfgUsdHigh    string             `json:"xfgUsdHigh"`
-	XfgUsdMid     string             `json:"xfgUsdMid"`
-	PairImplied   []PairImplied      `json:"pairImplied"`
-	Status        string             `json:"status"`
+	XfgUsdLow     string            `json:"xfgUsdLow"`
+	XfgUsdHigh    string            `json:"xfgUsdHigh"`
+	XfgUsdMid     string            `json:"xfgUsdMid"`
+	PairImplied   []PairImplied     `json:"pairImplied"`
+	Status        string            `json:"status"`
 }
 
-// GetOffers fetches swap offers for ETH (pair=1).
+// GetOffers fetches swap offers for XMR (pair=0).
 func (c *FuegoClient) GetOffers() ([]SwapOffer, error) {
-	req := map[string]interface{}{"pair": 1}
+	req := map[string]interface{}{"pair": 0}
 	var resp struct {
 		Offers []SwapOffer `json:"offers"`
 		Status string      `json:"status"`
@@ -84,9 +84,9 @@ func (c *FuegoClient) GetOffers() ([]SwapOffer, error) {
 	return resp.Offers, nil
 }
 
-// GetPrice fetches composite price for ETH pair.
+// GetPrice fetches composite price for XMR pair.
 func (c *FuegoClient) GetPrice() (*SwapPriceResponse, error) {
-	req := map[string]interface{}{"pair": 1}
+	req := map[string]interface{}{"pair": 0}
 	var resp SwapPriceResponse
 	if err := c.post("/getswapprice", req, &resp); err != nil {
 		return nil, err
@@ -94,9 +94,9 @@ func (c *FuegoClient) GetPrice() (*SwapPriceResponse, error) {
 	return &resp, nil
 }
 
-// GetTrades fetches recent trades for ETH pair.
+// GetTrades fetches recent trades for XMR pair.
 func (c *FuegoClient) GetTrades(limit int) ([]SwapTrade, error) {
-	req := map[string]interface{}{"pair": 1, "limit": limit}
+	req := map[string]interface{}{"pair": 0, "limit": limit}
 	var resp struct {
 		Trades []SwapTrade `json:"trades"`
 		Status string      `json:"status"`

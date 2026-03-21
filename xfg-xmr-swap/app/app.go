@@ -6,7 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// Run starts the swap client: splash screen → main TUI.
+// Run starts the swap client: splash screen -> main TUI.
 func Run(cfg Config) error {
 	// Phase 1: splash screen
 	splash := newSplashModel()
