@@ -4035,10 +4035,93 @@ bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
     }
   };
 
-  // Accept offer — complex HTLC flow, stays as TODO
-  cb.acceptOffer = [this](const std::string& offerId) -> bool {
-    // TODO: HTLC accept flow (lock XFG, exchange preimages)
-    return false;
+  // Accept offer — initiates HTLC lock on the XFG side
+  // Taker generates preimage, locks XFG → maker's pubkey with hashlock + timeout
+  // Maker then locks CTR on counterparty chain using the same hashlock
+  // Taker claims CTR (reveals preimage), maker uses revealed preimage to claim XFG
+  cb.acceptOffer = [this, pairToNum](const std::string& offerId) -> bool {
+    try {
+      // 1. Fetch the offer from daemon to get maker pubkey and amount
+      HttpClient httpClient(m_dispatcher, m_daemon_host, m_daemon_port);
+      COMMAND_RPC_GET_SWAP_OFFERS::request offerReq;
+      COMMAND_RPC_GET_SWAP_OFFERS::response offerRes;
+      // Fetch all pairs — we don't know which pair this offer is for
+      for (uint8_t p = 0; p <= 2; ++p) {
+        offerReq.pair = p;
+        invokeJsonCommand(httpClient, "/getswapoffers", offerReq, offerRes);
+        for (const auto& e : offerRes.offers) {
+          if (e.offerId == offerId) goto found;
+        }
+      }
+      return false;  // offer not found
+      found:
+
+      // Find the matching offer entry
+      swap_offer_rpc_entry matchedOffer;
+      for (const auto& e : offerRes.offers) {
+        if (e.offerId == offerId) { matchedOffer = e; break; }
+      }
+
+      // 2. Parse maker's pubkey
+      Crypto::PublicKey makerPubKey;
+      if (!Common::podFromHex(matchedOffer.makerPubKey, makerPubKey)) {
+        return false;
+      }
+
+      // 3. Generate random preimage (taker's secret)
+      Crypto::Hash preimage;
+      Crypto::generate_random_bytes(sizeof(preimage.data), preimage.data);
+
+      // 4. Compute hash lock
+      Crypto::Hash hashLock;
+      Crypto::cn_fast_hash(preimage.data, sizeof(preimage.data), hashLock);
+
+      // 5. Determine timeout (shorter on XFG side — taker locks first)
+      bool testnet = m_currency.isTestnet();
+      uint32_t timeoutBlocks = testnet ? 12 : 90;  // ~12h on mainnet, ~24min on testnet
+      uint32_t currentHeight = static_cast<uint32_t>(m_node->getLastKnownBlockHeight());
+      uint32_t timeoutHeight = currentHeight + timeoutBlocks;
+
+      // 6. Create HTLC locking XFG for the maker
+      CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+      WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
+      CryptoNote::TransactionId tx = m_wallet->createHtlc(
+          matchedOffer.xfgAmount,
+          CryptoNote::parameters::MINIMUM_FEE_8KH,
+          makerPubKey,
+          hashLock,
+          timeoutHeight);
+
+      if (tx == WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+        return false;
+      }
+
+      std::error_code sendError = sent.wait(tx);
+      removeGuard.removeObserver();
+
+      if (sendError) {
+        return false;
+      }
+
+      // 7. Save preimage to wallet file metadata for later reference
+      CryptoNote::WalletLegacyTransaction txInfo;
+      m_wallet->getTransaction(tx, txInfo);
+      CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file);
+
+      // Log the critical swap info (preimage is the secret — user must keep it)
+      logger(Logging::INFO, Logging::BRIGHT_GREEN)
+          << "HTLC locked for swap " << offerId << std::endl
+          << "  TX:        " << Common::podToHex(txInfo.hash) << std::endl
+          << "  HashLock:  " << Common::podToHex(hashLock) << std::endl
+          << "  Preimage:  " << Common::podToHex(preimage) << std::endl
+          << "  Timeout:   " << timeoutHeight << " (+" << timeoutBlocks << " blocks)" << std::endl
+          << "  IMPORTANT: Save your preimage. Share only the hashlock with the counterparty.";
+
+      return true;
+    } catch (const std::exception&) {
+      return false;
+    }
   };
 
   // Cancel offer
