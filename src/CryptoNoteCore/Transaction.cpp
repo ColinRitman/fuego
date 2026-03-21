@@ -104,6 +104,8 @@ namespace CryptoNote {
     virtual size_t addInput(const KeyInput& input) override;
     virtual size_t addInput(const MultisignatureInput& input) override;
     virtual size_t addInput(const TransactionInputCommitmentSpend& input) override;
+    virtual size_t addInput(const TransactionInputHashLockClaim& input) override;
+    virtual size_t addInput(const TransactionInputHashLockRefund& input) override;
     virtual size_t addInput(const AccountKeys& senderKeys, const TransactionTypes::InputKeyInfo& info, KeyPair& ephKeys) override;
 
     virtual size_t addOutput(uint64_t amount, const AccountPublicAddress& to) override;
@@ -111,12 +113,14 @@ namespace CryptoNote {
     virtual size_t addOutput(uint64_t amount, const KeyOutput& out) override;
     virtual size_t addOutput(uint64_t amount, const MultisignatureOutput& out) override;
     virtual size_t addOutput(uint64_t amount, const TransactionOutputCommitment& out) override;
+    virtual size_t addOutput(uint64_t amount, const TransactionOutputHashLock& out) override;
 
     virtual void signInputKey(size_t input, const TransactionTypes::InputKeyInfo& info, const KeyPair& ephKeys) override;
     virtual void signInputMultisignature(size_t input, const PublicKey& sourceTransactionKey, size_t outputIndex, const AccountKeys& accountKeys) override;
     virtual void signInputMultisignature(size_t input, const KeyPair& ephemeralKeys) override;
     virtual void signInputCommitmentSpend(size_t input, const std::vector<const Crypto::PublicKey*>& ringKeys,
                                           const KeyPair& commitmentKeys, size_t realIndex) override;
+    virtual void signInputHashLock(size_t input, const KeyPair& signingKeys) override;
 
 
     // secret key
@@ -297,6 +301,20 @@ namespace CryptoNote {
     return transaction.inputs.size() - 1;
   }
 
+  size_t TransactionImpl::addInput(const TransactionInputHashLockClaim& input) {
+    checkIfSigning();
+    transaction.inputs.push_back(input);
+    invalidateHash();
+    return transaction.inputs.size() - 1;
+  }
+
+  size_t TransactionImpl::addInput(const TransactionInputHashLockRefund& input) {
+    checkIfSigning();
+    transaction.inputs.push_back(input);
+    invalidateHash();
+    return transaction.inputs.size() - 1;
+  }
+
   size_t TransactionImpl::addOutput(uint64_t amount, const AccountPublicAddress& to) {
     checkIfSigning();
 
@@ -355,6 +373,15 @@ namespace CryptoNote {
     TransactionOutput realOut = { amount, out };
     transaction.outputs.emplace_back(realOut);
     transaction.version = TRANSACTION_VERSION_2;
+    invalidateHash();
+    return outputIndex;
+  }
+
+  size_t TransactionImpl::addOutput(uint64_t amount, const TransactionOutputHashLock& out) {
+    checkIfSigning();
+    size_t outputIndex = transaction.outputs.size();
+    TransactionOutput realOut = { amount, out };
+    transaction.outputs.emplace_back(realOut);
     invalidateHash();
     return outputIndex;
   }
@@ -434,6 +461,16 @@ namespace CryptoNote {
     auto txPrefixHash = getTransactionPrefixHash();
 
     generate_signature(txPrefixHash, ephemeralKeys.publicKey, ephemeralKeys.secretKey, signature);
+
+    getSignatures(index).push_back(signature);
+    invalidateHash();
+  }
+
+  void TransactionImpl::signInputHashLock(size_t index, const KeyPair& signingKeys) {
+    Signature signature;
+    auto txPrefixHash = getTransactionPrefixHash();
+
+    generate_signature(txPrefixHash, signingKeys.publicKey, signingKeys.secretKey, signature);
 
     getSignatures(index).push_back(signature);
     invalidateHash();

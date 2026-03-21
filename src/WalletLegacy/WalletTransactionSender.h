@@ -77,6 +77,14 @@ public:
                                                             const std::vector<DepositId>& depositIds,
                                                             uint64_t fee);
 
+  std::unique_ptr<WalletRequest> makeHtlcRequest(TransactionId& transactionId,
+                                                  std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
+                                                  uint64_t amount, uint64_t fee,
+                                                  const Crypto::PublicKey& recipientKey,
+                                                  const Crypto::Hash& hashLock,
+                                                  uint32_t timeoutHeight,
+                                                  uint64_t mixIn);
+
 std::shared_ptr<WalletRequest> makeSendFusionRequest(TransactionId& transactionId, std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
                                                      const std::vector<WalletLegacyTransfer>& transfers, const std::list<TransactionOutputInformation>& fusionInputs,
                                                      uint64_t fee, const std::string& extra = "", uint64_t mixIn = 0, uint64_t unlockTimestamp = 0);
@@ -94,6 +102,8 @@ private:
   std::unique_ptr<WalletRequest> doSendCommitmentWithdrawTransaction(std::shared_ptr<SendTransactionContext>&& context,
                                                                      std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
                                                                      const std::vector<DepositId>& depositIds);
+  std::unique_ptr<WalletRequest> doSendHtlcTransaction(std::shared_ptr<SendTransactionContext>&& context,
+                                                       std::deque<std::unique_ptr<WalletLegacyEvent>>& events);
 
   void sendTransactionRandomOutsByAmount(bool isMultisigTransaction,
                                          std::shared_ptr<SendTransactionContext> context,

@@ -166,6 +166,11 @@ namespace CryptoNote {
     uint64_t fullDepositAmount() const;
     uint64_t depositAmountAtHeight(size_t height) const;
     uint64_t getBurnedXfgAtHeight(size_t height) const;
+
+    // HTLC output queries
+    size_t getHtlcOutputCount() const;
+    bool getHtlcOutput(uint32_t index, Blockchain::HashLockOutputUsage& out) const;
+
     uint8_t getBlockMajorVersionForHeight(uint32_t height) const;
 
     // Commitment index accessors

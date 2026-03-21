@@ -106,6 +106,8 @@ std::unordered_map<std::string, RpcServer::RpcHandler<RpcServer::HandlerFunction
   { "/sendrawtransaction", { jsonMethod<COMMAND_RPC_SEND_RAW_TX>(&RpcServer::on_send_raw_tx), false } },
   { "/feeaddress", { jsonMethod<COMMAND_RPC_GET_FEE_ADDRESS>(&RpcServer::on_get_fee_address), true } },
   { "/getethereal", { jsonMethod<COMMAND_RPC_GET_ETHERNAL_FLAME>(&RpcServer::on_get_ethereal_flame), true } },
+  { "/gethtlc", { jsonMethod<COMMAND_RPC_GET_HTLC_OUTPUT>(&RpcServer::on_get_htlc_output), true } },
+  { "/gethtlccount", { jsonMethod<COMMAND_RPC_GET_HTLC_COUNT>(&RpcServer::on_get_htlc_count), true } },
   { "/paymentid", { jsonMethod<COMMAND_RPC_GEN_PAYMENT_ID>(&RpcServer::on_get_payment_id), true } },
 
   // disabled in restricted rpc mode
@@ -730,6 +732,28 @@ bool RpcServer::on_get_info(const COMMAND_RPC_GET_INFO::request& req, COMMAND_RP
 
 bool RpcServer::on_get_height(const COMMAND_RPC_GET_HEIGHT::request& req, COMMAND_RPC_GET_HEIGHT::response& res) {
   res.height = m_core.get_current_blockchain_height();
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_htlc_output(const COMMAND_RPC_GET_HTLC_OUTPUT::request& req, COMMAND_RPC_GET_HTLC_OUTPUT::response& res) {
+  Blockchain::HashLockOutputUsage htlc;
+  if (!m_core.getHtlcOutput(req.index, htlc)) {
+    res.status = "HTLC output not found";
+    return true;
+  }
+  res.amount = htlc.amount;
+  res.recipientKey = Common::podToHex(htlc.recipientKey);
+  res.refundKey = Common::podToHex(htlc.refundKey);
+  res.hashLock = Common::podToHex(htlc.hashLock);
+  res.timeoutHeight = htlc.timeoutHeight;
+  res.isSpent = htlc.isSpent;
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_htlc_count(const COMMAND_RPC_GET_HTLC_COUNT::request& req, COMMAND_RPC_GET_HTLC_COUNT::response& res) {
+  res.count = static_cast<uint32_t>(m_core.getHtlcOutputCount());
   res.status = CORE_RPC_STATUS_OK;
   return true;
 }

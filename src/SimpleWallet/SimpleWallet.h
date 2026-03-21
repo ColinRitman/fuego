@@ -132,6 +132,11 @@ namespace CryptoNote
     bool migrate_cold(const std::vector<std::string> &args);
     bool propose_slash(const std::vector<std::string> &args);
 
+    // HTLC (atomic swap) commands
+    bool create_htlc(const std::vector<std::string> &args);
+    bool claim_htlc(const std::vector<std::string> &args);
+    bool refund_htlc(const std::vector<std::string> &args);
+
      bool create_cold_secret(const std::vector<std::string> &args);
 
     // USER-FACING: Proof generation from deposits

@@ -805,7 +805,8 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
           } else if (out.target.type() == typeid(TransactionOutputHashLock)) {
             const auto& htlcOut = ::boost::get<TransactionOutputHashLock>(out.target);
             HashLockOutputUsage htlcUsage;
-            htlcUsage.transactionIndex    = transactionIndex;
+            htlcUsage.blockIndex          = transactionIndex.block;
+            htlcUsage.txInBlock           = transactionIndex.transaction;
             htlcUsage.outputInTransaction = o;
             htlcUsage.amount              = out.amount;
             htlcUsage.recipientKey        = htlcOut.recipientKey;
@@ -2929,6 +2930,20 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
     return m_bankingIndex.getBurnedXfgAtHeight(static_cast<BankingIndex::DepositHeight>(height));
   }
 
+  // --- HTLC Output Accessors ---
+
+  size_t Blockchain::getHtlcOutputCount() const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    return m_htlcOutputs.size();
+  }
+
+  bool Blockchain::getHtlcOutput(uint32_t index, HashLockOutputUsage& out) const {
+    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+    if (index >= m_htlcOutputs.size()) return false;
+    out = m_htlcOutputs[index];
+    return true;
+  }
+
   // --- Commitment Index Accessors ---
 
   std::optional<CommitmentEntry> Blockchain::getCommitmentByHash(const Crypto::Hash& commitment) const {
@@ -3590,7 +3605,8 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
       const auto& htlcOut = ::boost::get<TransactionOutputHashLock>(transaction.tx.outputs[output].target);
       transaction.m_global_output_indexes[output] = static_cast<uint32_t>(m_htlcOutputs.size());
       HashLockOutputUsage htlcUsage;
-      htlcUsage.transactionIndex    = transactionIndex;
+      htlcUsage.blockIndex          = transactionIndex.block;
+      htlcUsage.txInBlock           = transactionIndex.transaction;
       htlcUsage.outputInTransaction = output;
       htlcUsage.amount              = transaction.tx.outputs[output].amount;
       htlcUsage.recipientKey        = htlcOut.recipientKey;

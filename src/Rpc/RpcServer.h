@@ -82,6 +82,10 @@ private:
   bool on_get_height(const COMMAND_RPC_GET_HEIGHT::request& req, COMMAND_RPC_GET_HEIGHT::response& res);
   bool on_get_ethereal_flame(const COMMAND_RPC_GET_ETHERNAL_FLAME::request& req, COMMAND_RPC_GET_ETHERNAL_FLAME::response& res);
 
+  // HTLC (atomic swap) RPC endpoints
+  bool on_get_htlc_output(const COMMAND_RPC_GET_HTLC_OUTPUT::request& req, COMMAND_RPC_GET_HTLC_OUTPUT::response& res);
+  bool on_get_htlc_count(const COMMAND_RPC_GET_HTLC_COUNT::request& req, COMMAND_RPC_GET_HTLC_COUNT::response& res);
+
   bool on_get_deposits(const COMMAND_RPC_GET_DEPOSITS::request& req, COMMAND_RPC_GET_DEPOSITS::response& res);
   bool on_get_transactions(const COMMAND_RPC_GET_TRANSACTIONS::request& req, COMMAND_RPC_GET_TRANSACTIONS::response& res);
   // Commitment Index RPC endpoints (Fuego → EVM bridge)

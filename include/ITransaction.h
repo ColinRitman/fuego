@@ -116,6 +116,8 @@ public:
   virtual size_t addInput(const KeyInput& input) = 0;
   virtual size_t addInput(const MultisignatureInput& input) = 0;
   virtual size_t addInput(const TransactionInputCommitmentSpend& input) = 0;
+  virtual size_t addInput(const TransactionInputHashLockClaim& input) = 0;
+  virtual size_t addInput(const TransactionInputHashLockRefund& input) = 0;
   virtual size_t addInput(const AccountKeys& senderKeys, const TransactionTypes::InputKeyInfo& info, KeyPair& ephKeys) = 0;
 
   virtual size_t addOutput(uint64_t amount, const AccountPublicAddress& to) = 0;
@@ -123,6 +125,7 @@ public:
   virtual size_t addOutput(uint64_t amount, const KeyOutput& out) = 0;
   virtual size_t addOutput(uint64_t amount, const MultisignatureOutput& out) = 0;
   virtual size_t addOutput(uint64_t amount, const TransactionOutputCommitment& out) = 0;
+  virtual size_t addOutput(uint64_t amount, const TransactionOutputHashLock& out) = 0;
 
   // transaction info
   virtual void setTransactionSecretKey(const Crypto::SecretKey& key) = 0;
@@ -137,6 +140,7 @@ public:
   // realIndex is position of the real spend within the ring.
   virtual void signInputCommitmentSpend(size_t input, const std::vector<const Crypto::PublicKey*>& ringKeys,
                                         const KeyPair& commitmentKeys, size_t realIndex) = 0;
+  virtual void signInputHashLock(size_t input, const KeyPair& signingKeys) = 0;
 };
 
 class ITransaction : 

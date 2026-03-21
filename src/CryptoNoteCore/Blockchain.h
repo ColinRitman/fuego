@@ -131,6 +131,36 @@ namespace CryptoNote {
     uint64_t depositAmountAtHeight(size_t height) const;
     uint64_t depositInterestAtHeight(size_t height) const;
     uint64_t getBurnedXfgAtHeight(size_t height) const;
+
+    // HTLC (Hash Time-Lock Contract) output tracking for atomic swaps.
+    struct HashLockOutputUsage {
+      uint32_t blockIndex;
+      uint16_t txInBlock;
+      uint16_t outputInTransaction;
+      uint64_t amount;
+      Crypto::PublicKey recipientKey;
+      Crypto::PublicKey refundKey;
+      Crypto::Hash hashLock;
+      uint32_t timeoutHeight;
+      bool isSpent = false;
+
+      void serialize(ISerializer& s) {
+        s(blockIndex, "block");
+        s(txInBlock, "tx");
+        s(outputInTransaction, "outindex");
+        s(amount, "amount");
+        s(recipientKey, "recipient_key");
+        s(refundKey, "refund_key");
+        s(hashLock, "hash_lock");
+        s(timeoutHeight, "timeout_height");
+        s(isSpent, "spent");
+      }
+    };
+
+    // HTLC output queries
+    size_t getHtlcOutputCount() const;
+    bool getHtlcOutput(uint32_t index, HashLockOutputUsage& out) const;
+
     uint64_t coinsEmittedAtHeight(uint64_t height);
     uint64_t difficultyAtHeight(uint64_t height);
     bool isInCheckpointZone(const uint32_t height);
@@ -322,29 +352,6 @@ namespace CryptoNote {
     };
     typedef parallel_flat_hash_map<uint64_t, std::vector<CommitmentOutputRef>> CommitmentOutputsContainer;
 
-    // HTLC (Hash Time-Lock Contract) output tracking for atomic swaps.
-    // Indexed by global output index. Tracks whether each HTLC has been spent.
-    struct HashLockOutputUsage {
-      TransactionIndex transactionIndex;
-      uint16_t outputInTransaction;
-      uint64_t amount;
-      Crypto::PublicKey recipientKey;
-      Crypto::PublicKey refundKey;
-      Crypto::Hash hashLock;
-      uint32_t timeoutHeight;
-      bool isSpent = false;
-
-      void serialize(ISerializer& s) {
-        s(transactionIndex, "txindex");
-        s(outputInTransaction, "outindex");
-        s(amount, "amount");
-        s(recipientKey, "recipient_key");
-        s(refundKey, "refund_key");
-        s(hashLock, "hash_lock");
-        s(timeoutHeight, "timeout_height");
-        s(isSpent, "spent");
-      }
-    };
     typedef std::vector<HashLockOutputUsage> HashLockOutputsContainer;
 
     const Currency& m_currency;

@@ -45,6 +45,7 @@
 #include "Common/Util.h"
 #include "Common/DnsTools.h"
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
+#include "CryptoNoteCore/TransactionApi.h"
 #include "CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
 #include "NodeRpcProxy/NodeRpcProxy.h"
 #include "Rpc/CoreRpcServerCommandsDefinitions.h"
@@ -548,6 +549,11 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("burn_info", boost::bind(&simple_wallet::burn_info, this, boost::arg<1>()), "burn_info <id> - Get detailed info of burn by ID");
 
   m_consoleHandler.setHandler("migrate_cold", boost::bind(&simple_wallet::migrate_cold, this, boost::arg<1>()), "migrate_cold <id> - Migrate a pre-v3 legacy deposit to v3 format (register commitment for L2 claims)");
+
+  // HTLC (atomic swap) commands
+  m_consoleHandler.setHandler("create_htlc", boost::bind(&simple_wallet::create_htlc, this, boost::arg<1>()), "create_htlc <amount> <recipient_pubkey> <preimage_hex> <timeout_blocks> - Lock funds in a hash time-lock contract for atomic swaps");
+  m_consoleHandler.setHandler("claim_htlc", boost::bind(&simple_wallet::claim_htlc, this, boost::arg<1>()), "claim_htlc <htlc_index> <amount> <preimage_hex> - Claim funds from an HTLC using the secret preimage");
+  m_consoleHandler.setHandler("refund_htlc", boost::bind(&simple_wallet::refund_htlc, this, boost::arg<1>()), "refund_htlc <htlc_index> <amount> - Refund expired HTLC funds back to sender");
   // Hidden — only surfaced inside the elder_council panel. Direct use requires knowing it exists.
   m_consoleHandler.setHandler("propose_slash", boost::bind(&simple_wallet::propose_slash, this, boost::arg<1>()), "");
 
@@ -3560,6 +3566,294 @@ bool simple_wallet::reset(const std::vector<std::string> &args) {
   }
 
   std::cout << std::endl;
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+// HTLC (atomic swap) commands
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::create_htlc(const std::vector<std::string> &args) {
+  if (args.size() != 4) {
+    fail_msg_writer() << "Usage: create_htlc <amount> <recipient_pubkey_hex> <preimage_hex> <timeout_blocks>";
+    fail_msg_writer() << "  amount:          XFG to lock in the HTLC";
+    fail_msg_writer() << "  recipient_pubkey: 64-char hex Ed25519 public key of the swap counterparty";
+    fail_msg_writer() << "  preimage:        64-char hex secret (you keep this, share only the hash)";
+    fail_msg_writer() << "  timeout_blocks:  blocks until refund becomes possible (~8 min each)";
+    return true;
+  }
+
+  try {
+    // Parse amount
+    uint64_t amount;
+    if (!m_currency.parseAmount(args[0], amount)) {
+      fail_msg_writer() << "Invalid amount: " << args[0];
+      return true;
+    }
+
+    // Parse recipient public key
+    Crypto::PublicKey recipientKey;
+    if (!Common::podFromHex(args[1], recipientKey)) {
+      fail_msg_writer() << "Invalid recipient public key hex: " << args[1];
+      return true;
+    }
+
+    // Parse preimage and compute hash lock
+    Crypto::Hash preimage;
+    if (!Common::podFromHex(args[2], preimage)) {
+      fail_msg_writer() << "Invalid preimage hex (expected 64 hex chars): " << args[2];
+      return true;
+    }
+
+    Crypto::Hash hashLock;
+    Crypto::cn_fast_hash(preimage.data, sizeof(preimage.data), hashLock);
+
+    // Parse timeout
+    uint32_t timeoutBlocks;
+    try {
+      timeoutBlocks = boost::lexical_cast<uint32_t>(args[3]);
+    } catch (...) {
+      fail_msg_writer() << "Invalid timeout_blocks: " << args[3];
+      return true;
+    }
+
+    // Compute absolute timeout height
+    uint32_t currentHeight = static_cast<uint32_t>(m_node->getLastKnownBlockHeight());
+    uint32_t timeoutHeight = currentHeight + timeoutBlocks;
+
+    // Validate timeout range
+    bool testnet = m_currency.isTestnet();
+    uint32_t minTimeout = testnet ? CryptoNote::TESTNET_HTLC_MIN_TIMEOUT : CryptoNote::HTLC_MIN_TIMEOUT;
+    uint32_t maxTimeout = testnet ? CryptoNote::TESTNET_HTLC_MAX_TIMEOUT : CryptoNote::HTLC_MAX_TIMEOUT;
+    if (timeoutBlocks < minTimeout || timeoutBlocks > maxTimeout) {
+      fail_msg_writer() << "Timeout must be between " << minTimeout << " and " << maxTimeout << " blocks";
+      return true;
+    }
+
+    // Get our spend pubkey for display
+    AccountKeys keys;
+    m_wallet->getAccountKeys(keys);
+
+    // Confirm
+    success_msg_writer() << "Creating HTLC:";
+    success_msg_writer() << "  Amount:         " << m_currency.formatAmount(amount) << " XFG";
+    success_msg_writer() << "  Recipient:      " << Common::podToHex(recipientKey);
+    success_msg_writer() << "  Hash lock:      " << Common::podToHex(hashLock);
+    success_msg_writer() << "  Timeout height: " << timeoutHeight << " (current: " << currentHeight << ", +" << timeoutBlocks << " blocks)";
+    success_msg_writer() << "  Refund key:     " << Common::podToHex(keys.address.spendPublicKey) << " (your spend pubkey)";
+    std::cout << "Confirm? (y/n): ";
+    std::string confirm;
+    std::getline(std::cin, confirm);
+    if (confirm != "y" && confirm != "Y") {
+      success_msg_writer() << "Cancelled.";
+      return true;
+    }
+
+    // Send through WalletLegacy
+    CryptoNote::WalletHelper::SendCompleteResultObserver sent;
+    WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
+
+    CryptoNote::TransactionId tx = m_wallet->createHtlc(amount, CryptoNote::parameters::MINIMUM_FEE_8KH,
+                                                         recipientKey, hashLock, timeoutHeight);
+    if (tx == WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+      fail_msg_writer() << "Failed to create HTLC transaction";
+      return true;
+    }
+
+    std::error_code sendError = sent.wait(tx);
+    removeGuard.removeObserver();
+
+    if (sendError) {
+      fail_msg_writer() << sendError.message();
+      return true;
+    }
+
+    CryptoNote::WalletLegacyTransaction txInfo;
+    m_wallet->getTransaction(tx, txInfo);
+    success_msg_writer(true) << "HTLC created successfully!";
+    success_msg_writer(true) << "  Transaction hash: " << Common::podToHex(txInfo.hash);
+    success_msg_writer(true) << "  KEEP YOUR PREIMAGE SAFE: " << Common::podToHex(preimage);
+    success_msg_writer(true) << "  Share this hash lock with counterparty: " << Common::podToHex(hashLock);
+
+    CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file);
+
+  } catch (const std::exception& e) {
+    fail_msg_writer() << e.what();
+  }
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::claim_htlc(const std::vector<std::string> &args) {
+  if (args.size() != 3) {
+    fail_msg_writer() << "Usage: claim_htlc <htlc_index> <amount> <preimage_hex>";
+    fail_msg_writer() << "  htlc_index: global HTLC output index (shown when HTLC was created)";
+    fail_msg_writer() << "  amount:     exact XFG amount locked in the HTLC";
+    fail_msg_writer() << "  preimage:   64-char hex secret that hashes to the HTLC's hash lock";
+    return true;
+  }
+
+  try {
+    uint32_t htlcIndex;
+    try {
+      htlcIndex = boost::lexical_cast<uint32_t>(args[0]);
+    } catch (...) {
+      fail_msg_writer() << "Invalid HTLC index: " << args[0];
+      return true;
+    }
+
+    uint64_t amount;
+    if (!m_currency.parseAmount(args[1], amount)) {
+      fail_msg_writer() << "Invalid amount: " << args[1];
+      return true;
+    }
+
+    Crypto::Hash preimage;
+    if (!Common::podFromHex(args[2], preimage)) {
+      fail_msg_writer() << "Invalid preimage hex: " << args[2];
+      return true;
+    }
+
+    uint64_t fee = CryptoNote::parameters::MINIMUM_FEE_8KH;
+    if (amount <= fee) {
+      fail_msg_writer() << "Amount must be greater than fee (" << m_currency.formatAmount(fee) << " XFG)";
+      return true;
+    }
+
+    // Build raw claim transaction
+    std::unique_ptr<CryptoNote::ITransaction> transaction = CryptoNote::createTransaction();
+
+    // Add HTLC claim input
+    CryptoNote::TransactionInputHashLockClaim claimInput;
+    claimInput.amount = amount;
+    claimInput.outputIndex = htlcIndex;
+    claimInput.preimage = preimage;
+    transaction->addInput(claimInput);
+
+    // Add output to self (amount - fee)
+    AccountKeys keys;
+    m_wallet->getAccountKeys(keys);
+    transaction->addOutput(amount - fee, keys.address);
+
+    // Sign with our spend key (we are the recipient)
+    CryptoNote::KeyPair signingKeys;
+    signingKeys.publicKey = keys.address.spendPublicKey;
+    signingKeys.secretKey = keys.spendSecretKey;
+    transaction->signInputHashLock(0, signingKeys);
+
+    // Relay
+    CryptoNote::BinaryArray txData = transaction->getTransactionData();
+    CryptoNote::Transaction rawTx;
+    Crypto::Hash txHash, txPrefixHash;
+    if (!CryptoNote::parseAndValidateTransactionFromBinaryArray(txData, rawTx, txHash, txPrefixHash)) {
+      fail_msg_writer() << "Failed to serialize claim transaction";
+      return true;
+    }
+
+    success_msg_writer() << "Relaying HTLC claim transaction...";
+    std::promise<std::error_code> relayPromise;
+    auto relayFuture = relayPromise.get_future();
+    m_node->relayTransaction(rawTx, [&relayPromise](std::error_code ec) {
+      relayPromise.set_value(ec);
+    });
+
+    auto relayError = relayFuture.get();
+    if (relayError) {
+      fail_msg_writer() << "Failed to relay: " << relayError.message();
+      return true;
+    }
+
+    success_msg_writer(true) << "HTLC claimed successfully!";
+    success_msg_writer(true) << "  Transaction hash: " << Common::podToHex(txHash);
+    success_msg_writer(true) << "  Received: " << m_currency.formatAmount(amount - fee) << " XFG (minus " << m_currency.formatAmount(fee) << " fee)";
+
+  } catch (const std::exception& e) {
+    fail_msg_writer() << e.what();
+  }
+
+  return true;
+}
+
+//----------------------------------------------------------------------------------------------------
+bool simple_wallet::refund_htlc(const std::vector<std::string> &args) {
+  if (args.size() != 2) {
+    fail_msg_writer() << "Usage: refund_htlc <htlc_index> <amount>";
+    fail_msg_writer() << "  htlc_index: global HTLC output index";
+    fail_msg_writer() << "  amount:     exact XFG amount locked in the HTLC";
+    return true;
+  }
+
+  try {
+    uint32_t htlcIndex;
+    try {
+      htlcIndex = boost::lexical_cast<uint32_t>(args[0]);
+    } catch (...) {
+      fail_msg_writer() << "Invalid HTLC index: " << args[0];
+      return true;
+    }
+
+    uint64_t amount;
+    if (!m_currency.parseAmount(args[1], amount)) {
+      fail_msg_writer() << "Invalid amount: " << args[1];
+      return true;
+    }
+
+    uint64_t fee = CryptoNote::parameters::MINIMUM_FEE_8KH;
+    if (amount <= fee) {
+      fail_msg_writer() << "Amount must be greater than fee (" << m_currency.formatAmount(fee) << " XFG)";
+      return true;
+    }
+
+    // Build raw refund transaction
+    std::unique_ptr<CryptoNote::ITransaction> transaction = CryptoNote::createTransaction();
+
+    // Add HTLC refund input
+    CryptoNote::TransactionInputHashLockRefund refundInput;
+    refundInput.amount = amount;
+    refundInput.outputIndex = htlcIndex;
+    transaction->addInput(refundInput);
+
+    // Add output to self (amount - fee)
+    AccountKeys keys;
+    m_wallet->getAccountKeys(keys);
+    transaction->addOutput(amount - fee, keys.address);
+
+    // Sign with our spend key (we are the refunder)
+    CryptoNote::KeyPair signingKeys;
+    signingKeys.publicKey = keys.address.spendPublicKey;
+    signingKeys.secretKey = keys.spendSecretKey;
+    transaction->signInputHashLock(0, signingKeys);
+
+    // Relay
+    CryptoNote::BinaryArray txData = transaction->getTransactionData();
+    CryptoNote::Transaction rawTx;
+    Crypto::Hash txHash, txPrefixHash;
+    if (!CryptoNote::parseAndValidateTransactionFromBinaryArray(txData, rawTx, txHash, txPrefixHash)) {
+      fail_msg_writer() << "Failed to serialize refund transaction";
+      return true;
+    }
+
+    success_msg_writer() << "Relaying HTLC refund transaction...";
+    std::promise<std::error_code> relayPromise;
+    auto relayFuture = relayPromise.get_future();
+    m_node->relayTransaction(rawTx, [&relayPromise](std::error_code ec) {
+      relayPromise.set_value(ec);
+    });
+
+    auto relayError = relayFuture.get();
+    if (relayError) {
+      fail_msg_writer() << "Failed to relay: " << relayError.message();
+      return true;
+    }
+
+    success_msg_writer(true) << "HTLC refunded successfully!";
+    success_msg_writer(true) << "  Transaction hash: " << Common::podToHex(txHash);
+    success_msg_writer(true) << "  Refunded: " << m_currency.formatAmount(amount - fee) << " XFG (minus " << m_currency.formatAmount(fee) << " fee)";
+
+  } catch (const std::exception& e) {
+    fail_msg_writer() << e.what();
+  }
+
   return true;
 }
 
