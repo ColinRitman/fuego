@@ -352,6 +352,10 @@ double Currency::getBurnPercentage() const {
     {
       return boost::get<TransactionInputCommitmentSpend>(in).amount;
     }
+    else if (in.type() == typeid(TransactionInputCommitmentTransfer))
+    {
+      return boost::get<TransactionInputCommitmentTransfer>(in).amount;
+    }
     else if (in.type() == typeid(TransactionInputHashLockClaim))
     {
       return boost::get<TransactionInputHashLockClaim>(in).amount;
