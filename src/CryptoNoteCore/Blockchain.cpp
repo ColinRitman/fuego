@@ -210,6 +210,11 @@ public:
       logger(INFO) << operation << "commitment outputs";
       s(m_bs.m_commitmentOutputs, "commitment_outputs");
 
+      logger(INFO) << operation << "fee pool state";
+      s(m_bs.m_feePoolBalance, "fee_pool_balance");
+      s(m_bs.m_currentEpochSwapFees, "current_epoch_swap_fees");
+      s(m_bs.m_totalCdLocked, "total_cd_locked");
+
     auto dur = std::chrono::steady_clock::now() - start;
 
     logger(INFO) << "Serialization time: " << std::chrono::duration_cast<std::chrono::milliseconds>(dur).count() << "ms";
@@ -3569,6 +3574,20 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
         m_transactionMap.erase(transactionHash);
         return false;
       }
+      // CD redemption: reduce locked supply, deduct claimed interest from fee pool
+      m_totalCdLocked -= cin.amount;
+      if (cin.claimedInterest > 0 && cin.claimedInterest <= m_feePoolBalance) {
+        m_feePoolBalance -= cin.claimedInterest;
+      }
+    } else if (inv.type() == typeid(TransactionInputCommitmentTransfer)) {
+      const auto& xfer = ::boost::get<TransactionInputCommitmentTransfer>(inv);
+      auto result = m_spent_keys.insert(std::make_pair(xfer.keyImage, block.height));
+      if (!result.second) {
+        logger(ERROR, BRIGHT_RED) << "Double spending commitment transfer was pushed to blockchain.";
+        m_transactionMap.erase(transactionHash);
+        return false;
+      }
+      // Transfer doesn't change locked supply (old CD consumed, new CD produced — net zero)
     } else if (inv.type() == typeid(TransactionInputHashLockClaim)) {
       const auto& claim = ::boost::get<TransactionInputHashLockClaim>(inv);
       if (claim.outputIndex >= m_htlcOutputs.size() || m_htlcOutputs[claim.outputIndex].isSpent) {
@@ -3577,6 +3596,10 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
         return false;
       }
       m_htlcOutputs[claim.outputIndex].isSpent = true;
+      // Accumulate swap fee into fee pool (1% of claim amount)
+      uint64_t swapFee = (claim.amount * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
+      m_feePoolBalance += swapFee;
+      m_currentEpochSwapFees += swapFee;
     } else if (inv.type() == typeid(TransactionInputHashLockRefund)) {
       const auto& refund = ::boost::get<TransactionInputHashLockRefund>(inv);
       if (refund.outputIndex >= m_htlcOutputs.size() || m_htlcOutputs[refund.outputIndex].isSpent) {
@@ -3585,6 +3608,10 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
         return false;
       }
       m_htlcOutputs[refund.outputIndex].isSpent = true;
+      // Accumulate swap fee into fee pool (1% of refund amount)
+      uint64_t swapFee = (refund.amount * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
+      m_feePoolBalance += swapFee;
+      m_currentEpochSwapFees += swapFee;
     }
   }
 
@@ -3609,6 +3636,8 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
       ref.commitKey           = commitOut.commitKey;
       ref.term                = commitOut.term;
       amountOutputs.push_back(ref);
+      // Track total XFG locked in CDs
+      m_totalCdLocked += transaction.tx.outputs[output].amount;
     } else if (transaction.tx.outputs[output].target.type() == typeid(TransactionOutputHashLock)) {
       const auto& htlcOut = ::boost::get<TransactionOutputHashLock>(transaction.tx.outputs[output].target);
       transaction.m_global_output_indexes[output] = static_cast<uint32_t>(m_htlcOutputs.size());
@@ -3726,6 +3755,10 @@ void Blockchain::popTransaction(const Transaction& transaction, const Crypto::Ha
       if (amountOutputs->second.empty()) {
         m_commitmentOutputs.erase(amountOutputs);
       }
+      // Reverse CD locked supply tracking
+      if (m_totalCdLocked >= output.amount) {
+        m_totalCdLocked -= output.amount;
+      }
     } else if (output.target.type() == typeid(TransactionOutputHashLock)) {
       if (m_htlcOutputs.empty()) {
         logger(ERROR, BRIGHT_RED) <<
@@ -3761,21 +3794,42 @@ void Blockchain::popTransaction(const Transaction& transaction, const Crypto::Ha
 
       amountOutputs[in.outputIndex].isUsed = false;
     } else if (input.type() == typeid(TransactionInputCommitmentSpend)) {
-      size_t count = m_spent_keys.erase(::boost::get<TransactionInputCommitmentSpend>(input).keyImage);
+      const auto& cin = ::boost::get<TransactionInputCommitmentSpend>(input);
+      size_t count = m_spent_keys.erase(cin.keyImage);
       if (count != 1) {
         logger(ERROR, BRIGHT_RED) <<
           "Blockchain consistency broken - cannot find spent commitment key.";
+      }
+      // Reverse: restore locked supply and fee pool
+      m_totalCdLocked += cin.amount;
+      if (cin.claimedInterest > 0) {
+        m_feePoolBalance += cin.claimedInterest;
+      }
+    } else if (input.type() == typeid(TransactionInputCommitmentTransfer)) {
+      const auto& xfer = ::boost::get<TransactionInputCommitmentTransfer>(input);
+      size_t count = m_spent_keys.erase(xfer.keyImage);
+      if (count != 1) {
+        logger(ERROR, BRIGHT_RED) <<
+          "Blockchain consistency broken - cannot find spent commitment transfer key.";
       }
     } else if (input.type() == typeid(TransactionInputHashLockClaim)) {
       const auto& claim = ::boost::get<TransactionInputHashLockClaim>(input);
       if (claim.outputIndex < m_htlcOutputs.size()) {
         m_htlcOutputs[claim.outputIndex].isSpent = false;
       }
+      // Reverse swap fee from fee pool
+      uint64_t swapFee = (claim.amount * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
+      if (m_feePoolBalance >= swapFee) m_feePoolBalance -= swapFee;
+      if (m_currentEpochSwapFees >= swapFee) m_currentEpochSwapFees -= swapFee;
     } else if (input.type() == typeid(TransactionInputHashLockRefund)) {
       const auto& refund = ::boost::get<TransactionInputHashLockRefund>(input);
       if (refund.outputIndex < m_htlcOutputs.size()) {
         m_htlcOutputs[refund.outputIndex].isSpent = false;
       }
+      // Reverse swap fee from fee pool
+      uint64_t swapFee = (refund.amount * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
+      if (m_feePoolBalance >= swapFee) m_feePoolBalance -= swapFee;
+      if (m_currentEpochSwapFees >= swapFee) m_currentEpochSwapFees -= swapFee;
     }
   }
 
