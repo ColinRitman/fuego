@@ -14,7 +14,7 @@ SwapHub has two surfaces:
 
 ## Design Principles
 
-- **All pairs in one view.** ETH, HEAT, LUSD, XMR, BCH visible simultaneously.
+- **All pairs in one view.** ETH, HEAT, LUSD, BCH visible simultaneously. XMR deferred to v11 (requires adaptor signatures).
 - **Privacy by default.** Swaps go P2P. EFiers relay gossip, never see user data.
 - **Standalone + wallet-connected.** Read-only explorer mode without a wallet, full trading with one.
 - **EFiers are the only public infra.** Free community service funded by consensus rewards.
@@ -24,8 +24,9 @@ SwapHub has two surfaces:
 
 - COLD3 rail / Ethereum settlement contracts (separate spec)
 - Swap fee pool design (separate spec)
-- Dandelion++ P2P privacy (v11, separate spec)
-- XMR adaptor signatures (v11, separate spec)
+- Dandelion++ P2P privacy (v11 priority, separate spec)
+- XMR adaptor signatures (v11, requires DLEQ proofs + multisig — separate spec)
+- XMR pair support in swaphub (deferred until adaptor sig work lands)
 
 ## Prerequisites (daemon-side work before swaphub)
 
@@ -57,8 +58,8 @@ SwapHub has two surfaces:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│ ◆ SWAPHUB          ETH/XFG ▲0.46   XMR/XFG ▼29.2   BCH/XFG ▲21.3    │
-│                     HEAT 1:10M       LUSD $0.01       BLK 184209      │
+│ ◆ SWAPHUB          ETH/XFG ▲0.46   BCH/XFG ▲21.3   HEAT 1:10M       │
+│                     LUSD $0.01       BLK 184209                       │
 ├─────────────────────────────────────────┬───────────────────────────────┤
 │                                         │         ORDER BOOK           │
 │          CANDLESTICK CHART              │  ─────────────────────────── │
@@ -79,7 +80,7 @@ SwapHub has two surfaces:
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Market ticker bar (top):** All pairs with live prices and directional arrows. HEAT conversion rate and LUSD price always visible. Current block height. Updates every tick.
+**Market ticker bar (top):** All active pairs with live prices and directional arrows. HEAT conversion rate and LUSD price always visible. Current block height. Updates every tick. XMR pair slot reserved for v11.
 
 **Chart area (left 60%):** Candlestick chart for the selected pair. Price scale on right edge. TWAP and composite price below chart. Renders using box-drawing characters with green (bullish) / red (bearish) coloring.
 
@@ -94,10 +95,9 @@ SwapHub has two surfaces:
 | Key | Action |
 |-----|--------|
 | `1` | Select ETH/XFG pair |
-| `2` | Select XMR/XFG pair |
-| `3` | Select BCH/XFG pair |
-| `4` | Select HEAT/XFG pair |
-| `5` | Select LUSD/XFG pair |
+| `2` | Select BCH/XFG pair |
+| `3` | Select HEAT/XFG pair |
+| `4` | Select LUSD/XFG pair |
 | `Tab` | Cycle through pairs |
 | `b` | Open buy order entry |
 | `s` | Open sell order entry |
@@ -165,14 +165,12 @@ swaphub
 │   ├── ERC-20 HTLC contract interactions
 │   └── Transaction signing via MetaMask popup
 │
-├── Electron Cash RPC (:7773)  [optional]
-│   ├── BCH balance
-│   ├── BCH HTLC script operations
-│   └── CashToken queries
-│
-└── monero-wallet-rpc (:18083)  [optional]
-    ├── XMR balance
-    └── XMR settlement (v11 adaptor sigs)
+└── Electron Cash RPC (:7773)  [optional]
+    ├── BCH balance
+    ├── BCH HTLC script operations
+    └── CashToken queries
+
+Note: monero-wallet-rpc integration deferred to v11 (adaptor signatures required).
 ```
 
 ### 1.6 CLI Flags
@@ -184,13 +182,13 @@ Connection:
   --daemon, -d      Fuego daemon RPC endpoint (default: http://127.0.0.1:18180)
                     Alias: --efier, -e (connects to any node, not just EFiers)
   --wallet, -w      Fuego wallet RPC endpoint (optional)
-  --testnet         Use testnet defaults (:28280 / :28282)
+  --testnet         Use testnet defaults (:20808 / :28280)
   --eth-rpc         Ethereum RPC endpoint (optional, for ETH/HEAT/LUSD)
   --bch-rpc         Bitcoin Cash RPC endpoint (optional)
-  --xmr-rpc         Monero wallet RPC endpoint (optional)
+  --xmr-rpc         Monero wallet RPC endpoint (v11, not yet supported)
 
 Display:
-  --pair, -p        Starting pair (eth, xmr, bch, heat, lusd; default: eth)
+  --pair, -p        Starting pair (eth, bch, heat, lusd; default: eth)
   --no-splash       Skip splash screen
   --compact         Compact layout for small terminals
 
@@ -231,13 +229,13 @@ Auto-advances after 3 seconds or on any keypress.
 ### 1.8 Data Flow
 
 **Refresh cycle:** Every 5 seconds (configurable), swaphub fetches:
-1. Offers for all pairs (5 parallel calls to `/getswapoffers` with pair 0-4)
+1. Offers for active pairs (4 parallel calls to `/getswapoffers` — pairs 1-4, skipping XMR)
 2. Trades for the selected pair (`/getswaptrades`)
-3. Prices for all pairs (5 parallel calls to `/getswapprice`)
+3. Prices for active pairs (4 parallel calls to `/getswapprice`)
 4. Wallet balance (if connected)
 5. HTLC status (if active swap in progress)
 
-Offer and price fetches are parallelized via goroutines to avoid sequential latency on the daemon's RPC. Total: ~13 requests per tick, but only 3-4 sequential round-trips due to parallelism. If this proves too heavy, a future daemon-side `/getallswapoffers` batch endpoint can reduce it to 1 call.
+Offer and price fetches are parallelized via goroutines to avoid sequential latency on the daemon's RPC. Total: ~11 requests per tick, but only 3-4 sequential round-trips due to parallelism. If this proves too heavy, a future daemon-side `/getallswapoffers` batch endpoint can reduce it to 1 call.
 
 **Candlestick construction:** Trades are bucketed into 5-minute candles client-side. OHLCV calculated per bucket. Chart shows last N candles that fit the terminal width.
 
@@ -293,8 +291,8 @@ if (url == "/" || url.find("/static/") == 0) {
 ### 2.2 Web UI Features
 
 - **All-pairs dashboard** — same layout concept as the TUI but in a browser
-- **Candlestick charts** — lightweight charting library (lightweight-charts or custom canvas)
-- **Live orderbook** — polls `/getswapoffers` every 5 seconds
+- **Price charts** — TradingView charting library (lightweight version, previously used on usexfg.org). Candlestick, line, area charts with standard indicators. Data fed from `/getswaptrades` history.
+- **Live orderbook** — polls `/getswapoffers` every 5 seconds, standard depth visualization
 - **Trade tape** — recent trades with age
 - **Price display** — TWAP, composite, cross-pair implied USD
 - **HTLC explorer** — browse on-chain HTLCs by index
@@ -311,9 +309,9 @@ if (url == "/" || url.find("/static/") == 0) {
 ### 2.4 Tech Stack
 
 - Vanilla HTML + CSS + JS (no framework — keeps bundle tiny)
-- Single `index.html` with inlined CSS/JS, or small bundle
-- Charts: HTML5 canvas (custom) or lightweight-charts (~40KB)
-- Total embedded size target: < 200KB gzipped
+- TradingView Lightweight Charts for price charts (previously deployed on usexfg.org, check usexfg GitHub for existing copy)
+- Standard HTML/CSS for orderbook, trade tape, stats
+- Total embedded size target: < 500KB gzipped (TradingView lib adds ~45KB)
 
 ### 2.5 Serving
 
@@ -386,15 +384,15 @@ See separate v11 spec when available.
 
 ## 5. Pair Configuration
 
-| Pair ID | Display | Assets | Settlement |
-|---------|---------|--------|------------|
-| 0 | XMR/XFG | XMR ↔ XFG | HTLC (v11: adaptor sigs) |
-| 1 | ETH/XFG | ETH ↔ XFG | HTLC + ETH contract |
-| 2 | BCH/XFG | BCH ↔ XFG | HTLC + BCH script |
-| 3 | HEAT/XFG | HEAT ↔ XFG | ERC-20 HTLC contract |
-| 4 | LUSD/XFG | LUSD ↔ XFG | ERC-20 HTLC contract |
+| Pair ID | Display | Assets | Settlement | Status |
+|---------|---------|--------|------------|--------|
+| 0 | XMR/XFG | XMR ↔ XFG | Adaptor sigs + multisig | v11 (deferred) |
+| 1 | ETH/XFG | ETH ↔ XFG | HTLC + ETH contract | Active |
+| 2 | BCH/XFG | BCH ↔ XFG | HTLC + BCH script | Active |
+| 3 | HEAT/XFG | HEAT ↔ XFG | ERC-20 HTLC contract | Active |
+| 4 | LUSD/XFG | LUSD ↔ XFG | ERC-20 HTLC contract | Active |
 
-HEAT and LUSD share the same ERC-20 HTLC contract on Ethereum — different token address, same mechanism.
+HEAT and LUSD share the same ERC-20 HTLC contract on Ethereum — different token address, same mechanism. Pair 0 (XMR) is reserved but not functional until v11 adaptor signature work lands.
 
 ---
 
