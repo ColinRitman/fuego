@@ -2264,6 +2264,30 @@ bool Blockchain::checkTransactionInputs(const Transaction& tx, const Crypto::Has
         }
         ++inputIndex;
       }
+      else if (txin.type() == typeid(TransactionInputCommitmentTransfer))
+      {
+        const TransactionInputCommitmentTransfer& xfer = boost::get<TransactionInputCommitmentTransfer>(txin);
+
+        if (xfer.outputIndexes.empty()) {
+          logger(ERROR, BRIGHT_RED) << "CommitmentTransfer input has empty outputIndexes in tx " << transactionHash;
+          return false;
+        }
+
+        // Key image double-spend check
+        if (have_tx_keyimg_as_spent(xfer.keyImage)) {
+          logger(DEBUGGING) << "CommitmentTransfer key image already spent: " << Common::podToHex(xfer.keyImage);
+          return false;
+        }
+
+        if (!isInCheckpointZone(getCurrentBlockchainHeight())) {
+          if (!checkCommitmentTransferInput(xfer, tx_prefix_hash, tx.signatures[inputIndex], pmax_used_block_height)) {
+            logger(INFO, BRIGHT_WHITE) << "CommitmentTransfer ring signature check failed in tx " << transactionHash;
+            return false;
+          }
+        }
+
+        ++inputIndex;
+      }
       else
       {
         logger(INFO, BRIGHT_WHITE) << "Transaction << " << transactionHash << " contains input of unsupported type.";
@@ -2459,6 +2483,93 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
   bool valid = Crypto::check_ring_signature(tx_prefix_hash, txin.keyImage, ringKeys, sig.data());
   if (!valid) {
     logger(DEBUGGING) << "CommitmentSpend ring signature check failed for keyImage: " << Common::podToHex(txin.keyImage);
+  }
+  return valid;
+}
+
+bool Blockchain::checkCommitmentTransferInput(
+    const TransactionInputCommitmentTransfer& txin,
+    const Crypto::Hash& tx_prefix_hash,
+    const std::vector<Crypto::Signature>& sig,
+    uint32_t* pmax_related_block_height) {
+  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
+
+  // Subgroup check (same as CommitmentSpend)
+  static const Crypto::KeyImage I = { { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } };
+  static const Crypto::KeyImage L = { { 0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10 } };
+  if (!(scalarmultKey(txin.keyImage, L) == I)) {
+    logger(ERROR) << "CommitmentTransfer key image not in valid Ed25519 domain";
+    return false;
+  }
+
+  // newTerm must meet minimum
+  if (txin.newTerm < CryptoNote::parameters::CD_TRANSFER_MIN_REMAINING_TERM) {
+    logger(ERROR) << "CommitmentTransfer newTerm " << txin.newTerm
+                  << " below minimum " << CryptoNote::parameters::CD_TRANSFER_MIN_REMAINING_TERM;
+    return false;
+  }
+
+  // Resolve commitment outputs for this amount
+  auto it = m_commitmentOutputs.find(txin.amount);
+  if (it == m_commitmentOutputs.end()) {
+    logger(INFO) << "CommitmentTransfer: no commitment outputs for amount " << txin.amount;
+    return false;
+  }
+  const auto& amountRefs = it->second;
+
+  // Decode absolute indices from relative offsets
+  std::vector<uint64_t> absoluteIndexes;
+  absoluteIndexes.reserve(txin.outputIndexes.size());
+  uint64_t absoluteIndex = 0;
+  for (uint32_t relIdx : txin.outputIndexes) {
+    absoluteIndex += relIdx;
+    absoluteIndexes.push_back(absoluteIndex);
+  }
+
+  // Collect ring keys — NO maturity check (transfers allowed anytime)
+  std::vector<const Crypto::PublicKey*> ringKeys;
+  ringKeys.reserve(absoluteIndexes.size());
+  bool hasNonForever = false;
+  for (uint64_t absIdx : absoluteIndexes) {
+    if (absIdx >= amountRefs.size()) {
+      logger(INFO) << "CommitmentTransfer: global index " << absIdx << " out of range";
+      return false;
+    }
+    const CommitmentOutputRef& ref = amountRefs[absIdx];
+    ringKeys.push_back(&ref.commitKey);
+
+    if (ref.term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+      hasNonForever = true;
+    }
+
+    // Reject slashed outputs
+    if (ref.isSlashed) {
+      logger(INFO) << "CommitmentTransfer: ring member at index " << absIdx << " is slashed — rejected";
+      return false;
+    }
+
+    if (pmax_related_block_height) {
+      uint32_t blockHeight = ref.transactionIndex.block;
+      if (*pmax_related_block_height < blockHeight) {
+        *pmax_related_block_height = blockHeight;
+      }
+    }
+  }
+
+  // All-FOREVER guard (same as CommitmentSpend)
+  if (!hasNonForever) {
+    logger(INFO) << "CommitmentTransfer: all ring members are burned outputs — no valid transfer possible";
+    return false;
+  }
+
+  if (ringKeys.size() != sig.size()) {
+    logger(ERROR) << "CommitmentTransfer: ring size " << ringKeys.size() << " != sig count " << sig.size();
+    return false;
+  }
+
+  bool valid = Crypto::check_ring_signature(tx_prefix_hash, txin.keyImage, ringKeys, sig.data());
+  if (!valid) {
+    logger(DEBUGGING) << "CommitmentTransfer ring signature check failed for keyImage: " << Common::podToHex(txin.keyImage);
   }
   return valid;
 }
@@ -2819,7 +2930,20 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
 
     uint64_t in_amount = m_currency.getTransactionAllInputsAmount(transactions[i], block.height);
 	  uint64_t out_amount = getOutputAmount(transactions[i]);
-    uint64_t fee = in_amount < out_amount ? m_currency.minimumFee(blockData.majorVersion) : in_amount - out_amount;
+
+    // Compute swap fee for HTLC inputs — goes to fee pool, NOT miner
+    uint64_t txSwapFee = 0;
+    for (const auto& inp : transactions[i].inputs) {
+      if (inp.type() == typeid(TransactionInputHashLockClaim)) {
+        uint64_t amt = boost::get<TransactionInputHashLockClaim>(inp).amount;
+        txSwapFee += (amt * CryptoNote::parameters::SWAP_FEE_RATE_BPS) / CryptoNote::parameters::SWAP_FEE_RATE_DIVISOR;
+      } else if (inp.type() == typeid(TransactionInputHashLockRefund)) {
+        uint64_t amt = boost::get<TransactionInputHashLockRefund>(inp).amount;
+        txSwapFee += (amt * CryptoNote::parameters::SWAP_FEE_RATE_BPS) / CryptoNote::parameters::SWAP_FEE_RATE_DIVISOR;
+      }
+    }
+
+    uint64_t fee = in_amount < out_amount ? m_currency.minimumFee(blockData.majorVersion) : in_amount - out_amount - txSwapFee;
 
     bool isTransactionValid = true;
     if (block.bl.majorVersion < BLOCK_MAJOR_VERSION_8 && transactions[i].version > TRANSACTION_VERSION_1) {
@@ -3273,7 +3397,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
                   }
                   if (!sigValid) {
                     logger(WARNING) << "Slash verdict ignored: invalid EFier signature from EFiD "
-                                    << static_cast<int>(senderEfid);
+                                    << static_cast<int>(senderEfid + 1);
                   } else {
                     slashGatesOk = true;
                   }
@@ -3310,7 +3434,7 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
 
                 if (!quorumReached) {
                   // Just a vote — not a slash. Wait for quorum.
-                  logger(INFO) << "Slash vote recorded: EFiD " << static_cast<int>(senderEfid)
+                  logger(INFO) << "Slash vote recorded: EFiD " << static_cast<int>(senderEfid + 1)
                                << " → deposit " << Common::podToHex(elderfierMsg.targetDepositHash)
                                << " | votes: " << votesNow << "/" << activeEfiers
                                << " (need " << static_cast<int>(elderfierMsg.requiredThreshold) << "%)";
@@ -3458,8 +3582,24 @@ bool Blockchain::pushBlock(BlockEntry &block) {
     uint64_t epochNumber = newHeight / epochDuration;
     uint64_t epochStart = (epochNumber - 1) * epochDuration;
     uint64_t epochEnd = epochStart + epochDuration - 1;
+    // Compute fee rate for this epoch: (swapFees * PRECISION) / totalCdLocked
+    uint64_t epochFeeRate = 0;
+    uint64_t epochSwapFees = m_currentEpochSwapFees;
+    uint64_t epochCdLocked = m_totalCdLocked;
+    if (epochCdLocked > 0 && epochSwapFees > 0) {
+      epochFeeRate = (epochSwapFees * CryptoNote::parameters::FEE_POOL_RATE_PRECISION) / epochCdLocked;
+    }
+    m_commitmentIndex.recordEpochFeeRate(epochNumber, epochFeeRate, epochSwapFees, epochCdLocked);
+
+    // Reset epoch accumulator for next epoch
+    m_currentEpochSwapFees = 0;
+
     EpochReport report = m_commitmentIndex.generateEpochReport(
         epochNumber, epochStart, epochEnd, newHeight);
+    // Fill in fee pool fields
+    report.swapFeesCollected = epochSwapFees;
+    report.totalCdLockedAtStart = epochCdLocked;
+    report.feeRateFixedPoint = epochFeeRate;
     m_commitmentIndex.storeEpochReport(report);
     logger(INFO) << "=== Epoch " << epochNumber << " Report ==="
                  << " blocks=" << epochStart << "-" << epochEnd
@@ -3467,7 +3607,10 @@ bool Blockchain::pushBlock(BlockEntry &block) {
                  << " signed=" << report.participatingEfierCount
                  << " missing=" << report.missingEfierIds.size()
                  << " double_signs=" << report.doubleSignEvents.size()
-                 << " recommendations=" << report.slash_advisory.size();
+                 << " recommendations=" << report.slash_advisory.size()
+                 << " swapFees=" << epochSwapFees
+                 << " cdLocked=" << epochCdLocked
+                 << " feeRate=" << epochFeeRate;
     for (auto& rec : report.slash_advisory) {
       logger(WARNING) << "elder_council ADVISORY (use `propose_slash` to act): " << rec;
     }
