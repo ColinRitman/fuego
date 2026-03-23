@@ -12,7 +12,7 @@
 
 **Scope (M1 only):**
 - Splash screen with doom fire animation
-- Market ticker bar showing all 4 active pairs
+- Market ticker bar showing all 5 active pairs
 - Candlestick chart for selected pair
 - Orderbook (asks + bids with spread)
 - Trade tape (recent trades)
@@ -23,7 +23,8 @@
 **NOT in scope (later milestones):**
 - Wallet RPC integration, `wallet_rpc.go` (M2)
 - MetaMask bridge, `eth_bridge.go` (M3)
-- BCH/XMR RPC connections, `bch_rpc.go`, `xmr_rpc.go` (M4)
+- BCH RPC connection, `bch_rpc.go` (M4)
+- Solana bridge, `sol_bridge.go`, `sol_rpc.go` (M3)
 - EFier web UI (M5)
 - Wallet `swap` command rewrite (M6)
 - HTLC monitor view `htlc.go` — M1 handles HTLC queries inline in `input.go`; full monitor view deferred to M2
@@ -113,21 +114,21 @@ package app
 
 // Pair IDs match fuegod's SwapOfferRelay pair numbering.
 const (
-	PairXMR  uint8 = 0 // v11 — deferred
+	PairSOL  uint8 = 0
 	PairETH  uint8 = 1
 	PairBCH  uint8 = 2
 	PairHEAT uint8 = 3
 	PairLUSD uint8 = 4
 )
 
-// ActivePairs lists pairs supported in this version (excludes XMR).
-var ActivePairs = []uint8{PairETH, PairBCH, PairHEAT, PairLUSD}
+// ActivePairs lists all supported pairs.
+var ActivePairs = []uint8{PairETH, PairSOL, PairBCH, PairHEAT, PairLUSD}
 
 // PairName returns the display name for a pair (e.g. "ETH/XFG").
 func PairName(pair uint8) string {
 	switch pair {
-	case PairXMR:
-		return "XMR/XFG"
+	case PairSOL:
+		return "SOL/XFG"
 	case PairETH:
 		return "ETH/XFG"
 	case PairBCH:
@@ -144,8 +145,8 @@ func PairName(pair uint8) string {
 // PairShort returns the short counterparty symbol (e.g. "ETH").
 func PairShort(pair uint8) string {
 	switch pair {
-	case PairXMR:
-		return "XMR"
+	case PairSOL:
+		return "SOL"
 	case PairETH:
 		return "ETH"
 	case PairBCH:
@@ -162,6 +163,8 @@ func PairShort(pair uint8) string {
 // PairFromString parses a pair name string to its ID. Returns (0, false) on failure.
 func PairFromString(s string) (uint8, bool) {
 	switch s {
+	case "sol":
+		return PairSOL, true
 	case "eth":
 		return PairETH, true
 	case "bch":
@@ -170,14 +173,12 @@ func PairFromString(s string) (uint8, bool) {
 		return PairHEAT, true
 	case "lusd":
 		return PairLUSD, true
-	case "xmr":
-		return PairXMR, true
 	default:
 		return 0, false
 	}
 }
 
-// HotkeyToPair maps hotkey number (1-4) to pair ID.
+// HotkeyToPair maps hotkey number (1-5) to pair ID.
 func HotkeyToPair(key int) (uint8, bool) {
 	if key >= 1 && key <= len(ActivePairs) {
 		return ActivePairs[key-1], true
@@ -253,7 +254,7 @@ func main() {
 		case "--pair", "-p":
 			p, ok := app.PairFromString(strings.ToLower(next()))
 			if !ok {
-				fmt.Fprintf(os.Stderr, "unknown pair (use: eth, bch, heat, lusd)\n")
+				fmt.Fprintf(os.Stderr, "unknown pair (use: eth, sol, bch, heat, lusd)\n")
 				os.Exit(1)
 			}
 			cfg.StartPair = p
@@ -272,7 +273,7 @@ func main() {
 			fmt.Println("  --testnet       Use testnet defaults (:28280)")
 			fmt.Println()
 			fmt.Println("Display:")
-			fmt.Println("  --pair, -p      Starting pair: eth, bch, heat, lusd (default: eth)")
+			fmt.Println("  --pair, -p      Starting pair: eth, sol, bch, heat, lusd (default: eth)")
 			fmt.Println("  --no-splash     Skip splash screen")
 			fmt.Println("  --compact       Compact layout for small terminals")
 			fmt.Println()
@@ -2012,7 +2013,7 @@ func (m *tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch key {
 	case "q":
 		return m, tea.Quit
-	case "1", "2", "3", "4":
+	case "1", "2", "3", "4", "5":
 		n, _ := strconv.Atoi(key)
 		if pair, ok := HotkeyToPair(n); ok {
 			m.selected = pair
@@ -2077,7 +2078,7 @@ func (m *tuiModel) processInput() {
 		return
 	case "pair":
 		if len(args) < 1 {
-			m.status = "Usage: pair <eth|bch|heat|lusd>"
+			m.status = "Usage: pair <eth|sol|bch|heat|lusd>"
 		} else if p, ok := PairFromString(args[0]); ok {
 			m.selected = p
 			m.status = "Switched to " + PairName(p)
@@ -2338,7 +2339,7 @@ git commit -m "swaphub M1 complete: standalone read-only trading terminal
 
 Multi-pair TUI with candlestick charts, orderbook, trade tape,
 market ticker, doom fire splash, and parallel daemon RPC fetching.
-Supports ETH, BCH, HEAT, LUSD pairs (XMR deferred to v11)."
+Supports ETH, SOL, BCH, HEAT, LUSD pairs."
 ```
 
 ---
@@ -2350,7 +2351,7 @@ This plan covers **M1 only**. After M1 is complete and merged, the following mil
 | Milestone | Summary | Key dependency |
 |-----------|---------|----------------|
 | **M2** | Wallet RPC integration (offer/accept/cancel/HTLC ops) | Wallet RPC endpoints must exist in WalletRpcServer |
-| **M3** | MetaMask bridge (ETH/HEAT/LUSD signing) | M2 (needs wallet for XFG side) |
+| **M3** | MetaMask + Phantom bridges (ETH/HEAT/LUSD + SOL signing) | M2 (needs wallet for XFG side) |
 | **M4** | BCH connection (Electron Cash RPC) | M2 |
 | **M5** | EFier web UI (embedded in fuegod, TradingView charts) | Independent of swaphub binary |
 | **M6** | Wallet `swap` command rewrite (fork/execvp swaphub) | M2 |
