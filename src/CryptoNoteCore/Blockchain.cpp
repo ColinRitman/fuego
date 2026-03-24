@@ -2424,6 +2424,7 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
   ringKeys.reserve(absoluteIndexes.size());
   bool hasNonForever = false;
   uint32_t currentHeight = getCurrentBlockchainHeight();
+  uint32_t oldestRingMemberHeight = currentHeight;  // track for interest bounds
   for (uint64_t absIdx : absoluteIndexes) {
     if (absIdx >= amountRefs.size()) {
       logger(INFO) << "CommitmentSpend: global index " << absIdx << " out of range (" << amountRefs.size() << " commitment outputs at this amount)";
@@ -2431,6 +2432,12 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
     }
     const CommitmentOutputRef& ref = amountRefs[absIdx];
     ringKeys.push_back(&ref.commitKey);
+
+    // Track oldest ring member for interest bounds check
+    uint32_t memberHeight = ref.transactionIndex.block;
+    if (memberHeight < oldestRingMemberHeight) {
+      oldestRingMemberHeight = memberHeight;
+    }
 
     if (ref.term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
       hasNonForever = true;
@@ -2483,8 +2490,27 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
   bool valid = Crypto::check_ring_signature(tx_prefix_hash, txin.keyImage, ringKeys, sig.data());
   if (!valid) {
     logger(DEBUGGING) << "CommitmentSpend ring signature check failed for keyImage: " << Common::podToHex(txin.keyImage);
+    return false;
   }
-  return valid;
+
+  // Declare-and-verify: validate claimedInterest against max possible
+  if (txin.claimedInterest > 0) {
+    // Max interest = what the oldest ring member could have accrued
+    uint64_t maxInterest = m_currency.calculateCdInterest(
+        txin.amount, oldestRingMemberHeight, currentHeight, m_commitmentIndex);
+    // Also capped by available fee pool balance
+    if (maxInterest > m_feePoolBalance) {
+      maxInterest = m_feePoolBalance;
+    }
+    if (txin.claimedInterest > maxInterest) {
+      logger(INFO) << "CommitmentSpend: claimedInterest " << txin.claimedInterest
+                   << " exceeds max " << maxInterest
+                   << " (oldest ring member at height " << oldestRingMemberHeight << ")";
+      return false;
+    }
+  }
+
+  return true;
 }
 
 bool Blockchain::checkCommitmentTransferInput(
