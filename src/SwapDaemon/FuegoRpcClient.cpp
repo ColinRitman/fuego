@@ -273,7 +273,7 @@ bool FuegoRpcClient::getTransactionOutputs(const std::string& txHashHex,
     // The tx blob is hex-encoded CryptoNote::Transaction.
     // We decode it and walk the outputs looking for KeyOutputs.
     std::string txHex = txsHex[0].getString();
-    std::string txBlob = Common::fromHex(txHex);
+ //   std::string txBlob = Common::fromHex(txHex);
 
     // Use CryptoNote binary deserialization.  Rather than pulling in the
     // full serialization stack here, we store the hex for the caller and

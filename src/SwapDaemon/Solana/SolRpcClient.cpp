@@ -31,9 +31,10 @@
 #include <cassert>
 
 #include <openssl/sha.h>
+#include "../../crypto/musig2.cpp"
 
 extern "C" {
-#include "crypto/crypto-ops.h"
+#include "../../crypto/crypto-ops.h"
 }
 
 namespace XfgSwap {
@@ -272,7 +273,7 @@ static void ed25519Sign(const uint8_t* message, size_t msgLen,
   // Step 5: s = r + hram * a (mod L)
   // sc_muladd computes: s = a * b + c (mod L) with 32-byte inputs
   uint8_t s[32];
-  sc_muladd(s, hram, az, r);
+  Crypto::sc_muladd(s, hram, az, r);
   memcpy(signature + 32, s, 32);
 }
 
