@@ -329,7 +329,6 @@ target_link_libraries(testnet-wallet-cli PRIVATE
     ${Boost_LIBRARIES}
     Serialization
     ${JSONCPP_LIBRARIES}
-    ncurses
 )
 
 set_target_properties(testnet-wallet-cli PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/src")
