@@ -386,7 +386,6 @@ target_link_libraries(SimpleWallet PRIVATE
     ${Boost_LIBRARIES}
     Serialization
     ${JSONCPP_LIBRARIES}
-    ncurses
 )
 
 target_link_libraries(PaymentGateService PRIVATE
