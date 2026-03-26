@@ -31,6 +31,10 @@ public:
   SwapDaemon(const std::string& fuegodHost, uint16_t fuegodPort,
              const std::string& dataDir, Logging::ILogger& logger);
 
+  // Configure wallet RPC endpoint for escrow funding.
+  // Must be called before processSwap() can fund escrow.
+  void setWalletRpc(const std::string& host, uint16_t port);
+
   // Start a new swap as initiator (Bob: has XFG, wants counterparty coin).
   bool initiate(SwapParams params);
 
@@ -58,6 +62,17 @@ public:
 private:
   // Generate a unique swap ID from the current time and random data.
   std::string generateSwapId();
+
+  // Fund the XFG escrow by sending to the Musig2 joint key address.
+  // Computes escrow address from params.escrowPubKey, sends XFG via
+  // wallet RPC, and stores the resulting tx hash in params.
+  // Returns true on success.
+  bool fundEscrow(SwapParams& params);
+
+  // Verify that the escrow funding tx exists and contains an output
+  // with the expected amount to the joint escrow key.
+  // Returns true if the escrow is confirmed on chain.
+  bool verifyEscrowFunding(const SwapParams& params);
 
   FuegoRpcClient m_rpc;
   SwapDatabase m_db;

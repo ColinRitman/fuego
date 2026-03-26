@@ -84,10 +84,6 @@ private:
   bool on_get_height(const COMMAND_RPC_GET_HEIGHT::request& req, COMMAND_RPC_GET_HEIGHT::response& res);
   bool on_get_ethereal_flame(const COMMAND_RPC_GET_ETHERNAL_FLAME::request& req, COMMAND_RPC_GET_ETHERNAL_FLAME::response& res);
 
-  // HTLC (atomic swap) RPC endpoints
-  bool on_get_htlc_output(const COMMAND_RPC_GET_HTLC_OUTPUT::request& req, COMMAND_RPC_GET_HTLC_OUTPUT::response& res);
-  bool on_get_htlc_count(const COMMAND_RPC_GET_HTLC_COUNT::request& req, COMMAND_RPC_GET_HTLC_COUNT::response& res);
-
   // Swap orderbook RPC endpoints
   bool on_get_swap_offers(const COMMAND_RPC_GET_SWAP_OFFERS::request& req, COMMAND_RPC_GET_SWAP_OFFERS::response& res);
   bool on_get_swap_price(const COMMAND_RPC_GET_SWAP_PRICE::request& req, COMMAND_RPC_GET_SWAP_PRICE::response& res);

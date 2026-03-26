@@ -412,109 +412,6 @@ namespace CryptoNote
     return doSendDepositWithdrawTransaction(std::move(context), events, depositIds);
   }
 
-  std::unique_ptr<WalletRequest> WalletTransactionSender::makeHtlcRequest(
-      TransactionId& transactionId,
-      std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
-      uint64_t amount, uint64_t fee,
-      const Crypto::PublicKey& recipientKey,
-      const Crypto::Hash& hashLock,
-      uint32_t timeoutHeight,
-      uint64_t mixIn)
-  {
-    mixIn = m_currency.maxMixin();
-
-    uint64_t neededMoney = getSumWithOverflowCheck(amount, fee);
-    std::shared_ptr<SendTransactionContext> context = std::make_shared<SendTransactionContext>();
-    context->dynamicRingSize = true;
-    context->dustPolicy.dustThreshold = m_currency.defaultDustThreshold();
-
-    context->foundMoney = selectTransfersToSend(neededMoney, false, context->dustPolicy.dustThreshold, context->selectedTransfers);
-
-    throwIf(context->foundMoney < neededMoney, error::WRONG_AMOUNT);
-
-    transactionId = m_transactionsCache.addNewTransaction(neededMoney, fee, std::string(), {}, 0, {});
-    context->transactionId = transactionId;
-    context->mixIn = mixIn;
-
-    context->isHtlc = true;
-    context->htlcRecipientKey = recipientKey;
-    context->htlcHashLock = hashLock;
-    context->htlcTimeoutHeight = timeoutHeight;
-
-    Crypto::SecretKey transactionSK;
-    return makeGetRandomOutsRequest(std::move(context), true, transactionSK);
-  }
-
-  std::unique_ptr<WalletRequest> WalletTransactionSender::doSendHtlcTransaction(
-      std::shared_ptr<SendTransactionContext>&& context,
-      std::deque<std::unique_ptr<WalletLegacyEvent>>& events)
-  {
-    if (m_isStoping) {
-      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::TX_CANCELLED)));
-      return std::unique_ptr<WalletRequest>();
-    }
-
-    try {
-      WalletLegacyTransaction& transactionInfo = m_transactionsCache.getTransaction(context->transactionId);
-      std::unique_ptr<ITransaction> transaction = createTransaction();
-
-      uint64_t totalAmount = std::abs(transactionInfo.totalAmount);
-
-      std::vector<TransactionSourceEntry> sources;
-      prepareKeyInputs(context->selectedTransfers, context->outs, sources, context->mixIn);
-      std::vector<TransactionTypes::InputKeyInfo> inputs = convertSources(std::vector<TransactionSourceEntry>(sources));
-
-      std::vector<uint64_t> decomposedChange = splitAmount(context->foundMoney - totalAmount, context->dustPolicy.dustThreshold);
-
-      // Build the HTLC output
-      CryptoNote::TransactionOutputHashLock htlcOut;
-      htlcOut.recipientKey = context->htlcRecipientKey;
-      htlcOut.refundKey = m_keys.address.spendPublicKey;
-      htlcOut.hashLock = context->htlcHashLock;
-      htlcOut.timeoutHeight = context->htlcTimeoutHeight;
-
-      transaction->addOutput(totalAmount - transactionInfo.fee, htlcOut);
-
-      for (uint64_t changeOut : decomposedChange) {
-        transaction->addOutput(changeOut, m_keys.address);
-      }
-
-      transaction->setUnlockTime(transactionInfo.unlockTime);
-
-      std::vector<KeyPair> ephKeys;
-      ephKeys.reserve(inputs.size());
-
-      for (size_t i = 0; i < inputs.size(); ++i) {
-        KeyPair ephKey;
-        const AccountKeys& keys = (i < sources.size() && sources[i].hasCustomKeys)
-                                      ? sources[i].customKeys
-                                      : m_keys;
-        transaction->addInput(keys, inputs[i], ephKey);
-        ephKeys.push_back(std::move(ephKey));
-      }
-
-      for (size_t i = 0; i < inputs.size(); ++i) {
-        transaction->signInputKey(i, inputs[i], ephKeys[i]);
-      }
-
-      transactionInfo.hash = transaction->getTransactionHash();
-
-      Transaction lowlevelTransaction = convertTransaction(*transaction, static_cast<size_t>(m_upperTransactionSizeLimit));
-      m_transactionsCache.updateTransaction(context->transactionId, lowlevelTransaction, totalAmount, {});
-
-      notifyBalanceChanged(events);
-
-      return std::unique_ptr<WalletRequest>(new WalletRelayTransactionRequest(lowlevelTransaction, std::bind(&WalletTransactionSender::relayTransactionCallback, this, context,
-                                                                              std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)));
-    } catch (std::system_error& ec) {
-      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, ec.code()));
-    } catch (std::exception&) {
-      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::INTERNAL_WALLET_ERROR)));
-    }
-
-    return std::unique_ptr<WalletRequest>();
-  }
-
   std::shared_ptr<WalletRequest> WalletTransactionSender::makeSendFusionRequest(TransactionId &transactionId, std::deque<std::unique_ptr<WalletLegacyEvent>> &events,
                                                                                 const std::vector<WalletLegacyTransfer> &transfers, const std::list<TransactionOutputInformation> &fusionInputs, uint64_t fee, const std::string &extra, uint64_t mixIn, uint64_t unlockTimestamp)
   {
@@ -676,11 +573,7 @@ namespace CryptoNote
       }
     }
 
-    if (context->isHtlc)
-    {
-      nextRequest = doSendHtlcTransaction(std::move(context), events);
-    }
-    else if (isMultisigTransaction)
+    if (isMultisigTransaction)
     {
       nextRequest = doSendMultisigTransaction(std::move(context), events);
     }

@@ -13,6 +13,7 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "SwapDaemon.h"
+#include "AdaptorSwap.h"
 #include "Common/StringTools.h"
 #include "crypto/hash.h"
 #include "crypto/crypto.h"
@@ -33,7 +34,6 @@ SwapDaemon::SwapDaemon(const std::string& fuegodHost, uint16_t fuegodPort,
 }
 
 std::string SwapDaemon::generateSwapId() {
-  // Hash current timestamp + random bytes for a unique swap ID
   struct {
     time_t timestamp;
     uint8_t random[32];
@@ -45,12 +45,10 @@ std::string SwapDaemon::generateSwapId() {
   Crypto::Hash hash;
   Crypto::cn_fast_hash(&seed, sizeof(seed), hash);
 
-  // Use first 16 bytes (32 hex chars) for a compact but unique ID
   return Common::toHex(hash.data, 16);
 }
 
 bool SwapDaemon::initiate(SwapParams params) {
-  // Validate connection to fuegod
   uint32_t currentHeight = 0;
   if (!m_rpc.getHeight(currentHeight)) {
     m_logger(Logging::ERROR) << "Cannot connect to fuegod";
@@ -59,17 +57,16 @@ bool SwapDaemon::initiate(SwapParams params) {
 
   m_logger(Logging::INFO) << "Connected to fuegod at height " << currentHeight;
 
-  // Generate swap ID if not already set
   if (params.swapId.empty()) {
     params.swapId = generateSwapId();
   }
 
-  // Set default timeout height if not specified (current + 180 blocks = ~1 day)
+  // Set default XFG timeout (cooperative refund window: ~1 day)
   if (params.xfgTimeoutHeight == 0) {
     params.xfgTimeoutHeight = currentHeight + 180;
   }
 
-  // Validate price against TWAP (one-directional floor protection)
+  // Validate price against TWAP
   RateCheck rc = m_oracle.validateSwapAmounts(params.pair, params.xfgAmount, params.ctrAmount);
   if (rc == RateCheck::BELOW_FLOOR) {
     m_logger(Logging::ERROR)
@@ -88,14 +85,14 @@ bool SwapDaemon::initiate(SwapParams params) {
       << swapPairToString(params.pair);
   }
 
-  // Generate hashlock: create random preimage, hash it
-  Crypto::generate_random_bytes(sizeof(params.preimage.data), params.preimage.data);
-  Crypto::cn_fast_hash(params.preimage.data, sizeof(params.preimage.data), params.hashLock);
+  // ── Adaptor sig step 1: generate swap keypair ──
+  adaptor_generate_keys(params);
 
-  // Create state machine
+  m_logger(Logging::INFO) << "Generated swap keypair: "
+    << Common::podToHex(params.ourSwapPubKey);
+
   SwapStateMachine sm(params);
 
-  // Save to database
   if (!m_db.saveSwap(sm)) {
     m_logger(Logging::ERROR) << "Failed to save swap to database";
     return false;
@@ -107,7 +104,7 @@ bool SwapDaemon::initiate(SwapParams params) {
   m_logger(Logging::INFO) << "  XFG amount: " << params.xfgAmount << " atomic";
   m_logger(Logging::INFO) << "  CTR amount: " << params.ctrAmount << " atomic";
   m_logger(Logging::INFO) << "  Timeout height: " << params.xfgTimeoutHeight;
-  m_logger(Logging::INFO) << "  HashLock: " << Common::podToHex(params.hashLock);
+  m_logger(Logging::INFO) << "  Our swap pubkey: " << Common::podToHex(params.ourSwapPubKey);
   m_logger(Logging::INFO) << "  Share this swap ID with your counterparty: " << params.swapId;
 
   return true;
@@ -126,16 +123,30 @@ bool SwapDaemon::accept(const std::string& swapId) {
     return false;
   }
 
-  m_logger(Logging::INFO) << "Accepting swap " << swapId;
-  m_logger(Logging::INFO) << "  Next step: lock XFG in HTLC";
+  auto& params = sm.params();
 
-  // In a full implementation, this would:
-  // 1. Construct the HTLC transaction
-  // 2. Sign and broadcast it
-  // 3. Transition to XFG_LOCKED
-  // For now, we just mark it as accepted by transitioning state
+  // ── Adaptor sig step 2: key aggregation ──
+  // Peer's pubkey must be set before calling accept
+  if (!adaptor_key_aggregate(params)) {
+    m_logger(Logging::ERROR) << "Musig2 key aggregation failed";
+    return false;
+  }
 
-  if (!sm.transition(SwapState::XFG_LOCKED)) {
+  m_logger(Logging::INFO) << "Musig2 escrow key: "
+    << Common::podToHex(params.escrowPubKey);
+
+  // If Bob, generate adaptor point + DLEQ proof
+  if (params.role == SwapRole::BOB) {
+    // Use escrow pubkey as DLEQ base point
+    if (!adaptor_generate_adaptor(params, params.escrowPubKey)) {
+      m_logger(Logging::ERROR) << "Adaptor point generation failed";
+      return false;
+    }
+    m_logger(Logging::INFO) << "Adaptor point T: "
+      << Common::podToHex(params.adaptorPoint);
+  }
+
+  if (!sm.transition(SwapState::ADAPTOR_KEYS_EXCHANGED)) {
     m_logger(Logging::ERROR) << "State transition failed";
     return false;
   }
@@ -145,7 +156,9 @@ bool SwapDaemon::accept(const std::string& swapId) {
     return false;
   }
 
-  m_logger(Logging::INFO) << "Swap " << swapId << " -> XFG_LOCKED (HTLC broadcast pending)";
+  m_logger(Logging::INFO) << "Swap " << swapId << " -> ADAPTOR_KEYS_EXCHANGED";
+  m_logger(Logging::INFO) << "  Next: fund XFG escrow to joint key "
+    << Common::podToHex(params.escrowPubKey);
   return true;
 }
 
@@ -161,39 +174,24 @@ bool SwapDaemon::checkTimeouts() {
 
   for (const auto& swapId : swapIds) {
     SwapStateMachine sm;
-    if (!m_db.loadSwap(swapId, sm)) {
-      continue;
-    }
-
-    if (sm.isTerminal()) {
-      continue;
-    }
+    if (!m_db.loadSwap(swapId, sm)) continue;
+    if (sm.isTerminal()) continue;
 
     const auto& params = sm.params();
 
-    // Check XFG timeout
     if (params.xfgTimeoutHeight > 0 && currentHeight >= params.xfgTimeoutHeight) {
       SwapState current = sm.currentState();
 
-      if (current == SwapState::XFG_LOCKED && params.role == SwapRole::BOB) {
-        // Bob can refund XFG
+      // Cooperative refund possible from escrow-funded or pre-sigs-ready states
+      if ((current == SwapState::ADAPTOR_ESCROW_FUNDED ||
+           current == SwapState::ADAPTOR_PRESIGS_READY) &&
+          params.role == SwapRole::BOB) {
         m_logger(Logging::WARNING) << "Swap " << swapId
-          << " XFG timeout reached at height " << currentHeight
-          << " (deadline was " << params.xfgTimeoutHeight << ")";
+          << " XFG timeout reached at height " << currentHeight;
 
-        if (sm.transition(SwapState::XFG_REFUNDED)) {
+        if (sm.transition(SwapState::ADAPTOR_REFUNDED)) {
           m_db.saveSwap(sm);
-          m_logger(Logging::INFO) << "Swap " << swapId << " -> XFG_REFUNDED";
-          anyExpired = true;
-        }
-      } else if (current == SwapState::CTR_LOCKED && params.role == SwapRole::ALICE) {
-        // Alice can refund counterparty chain
-        m_logger(Logging::WARNING) << "Swap " << swapId
-          << " CTR timeout reached";
-
-        if (sm.transition(SwapState::CTR_REFUNDED)) {
-          m_db.saveSwap(sm);
-          m_logger(Logging::INFO) << "Swap " << swapId << " -> CTR_REFUNDED";
+          m_logger(Logging::INFO) << "Swap " << swapId << " -> ADAPTOR_REFUNDED";
           anyExpired = true;
         }
       }
@@ -235,31 +233,41 @@ bool SwapDaemon::processSwap(const std::string& swapId) {
 
   switch (current) {
     case SwapState::INITIATED:
-      // Waiting for HTLC creation -- nothing to do automatically
-      m_logger(Logging::INFO) << "  Waiting for HTLC lock. Use 'accept' to proceed.";
+      m_logger(Logging::INFO) << "  Waiting for peer pubkey. Use 'accept' after exchanging keys.";
       break;
 
-    case SwapState::XFG_LOCKED:
-      // Check if counterparty has locked their funds
-      // In full implementation: poll counterparty chain for lock tx
-      m_logger(Logging::INFO) << "  XFG locked. Waiting for counterparty to lock "
-        << swapPairToString(params.pair) << ".";
+    case SwapState::ADAPTOR_KEYS_EXCHANGED:
+      m_logger(Logging::INFO) << "  Keys aggregated. Escrow key: "
+        << Common::podToHex(params.escrowPubKey);
+      m_logger(Logging::INFO) << "  Next: fund XFG → escrow key, then exchange nonces + pre-sigs.";
       break;
 
-    case SwapState::CTR_LOCKED:
-      // Both sides locked. Alice should claim XFG (reveals preimage).
+    case SwapState::ADAPTOR_ESCROW_FUNDED:
+      m_logger(Logging::INFO) << "  Escrow funded (tx: "
+        << Common::podToHex(params.escrowTxHash) << ").";
+      m_logger(Logging::INFO) << "  Next: exchange Musig2 nonces and create adaptor pre-sigs.";
+      break;
+
+    case SwapState::ADAPTOR_PRESIGS_READY:
+      m_logger(Logging::INFO) << "  Pre-sigs ready. Waiting for counterparty ("
+        << swapPairToString(params.pair) << ") lock.";
+      break;
+
+    case SwapState::ADAPTOR_CTR_LOCKED:
       if (params.role == SwapRole::ALICE) {
-        m_logger(Logging::INFO) << "  Both sides locked. Ready to claim XFG (will reveal preimage).";
+        m_logger(Logging::INFO) << "  " << swapPairToString(params.pair)
+          << " locked. Claim it to reveal adaptor secret.";
       } else {
-        m_logger(Logging::INFO) << "  Both sides locked. Waiting for Alice to claim XFG.";
+        m_logger(Logging::INFO) << "  " << swapPairToString(params.pair)
+          << " locked. Waiting for Alice to claim (reveals adaptor secret).";
       }
       break;
 
-    case SwapState::XFG_CLAIMED:
-      // Preimage is now public. Bob should claim counterparty funds.
+    case SwapState::ADAPTOR_SECRET_REVEALED:
       if (params.role == SwapRole::BOB) {
-        m_logger(Logging::INFO) << "  XFG claimed by Alice. Preimage revealed. Claim "
-          << swapPairToString(params.pair) << " now.";
+        m_logger(Logging::INFO) << "  Adaptor secret learned. Adapt pre-sig and broadcast escrow spend.";
+      } else {
+        m_logger(Logging::INFO) << "  Secret revealed. Waiting for Bob to spend XFG escrow.";
       }
       break;
 
@@ -280,12 +288,12 @@ void SwapDaemon::listSwaps() {
 
   std::cout << std::left
             << std::setw(34) << "SWAP ID"
-            << std::setw(14) << "STATE"
+            << std::setw(22) << "STATE"
             << std::setw(6)  << "PAIR"
             << std::setw(6)  << "ROLE"
             << std::setw(18) << "XFG AMOUNT"
             << std::endl;
-  std::cout << std::string(78, '-') << std::endl;
+  std::cout << std::string(86, '-') << std::endl;
 
   for (const auto& swapId : swapIds) {
     SwapStateMachine sm;
@@ -297,7 +305,7 @@ void SwapDaemon::listSwaps() {
     const auto& p = sm.params();
     std::cout << std::left
               << std::setw(34) << p.swapId
-              << std::setw(14) << swapStateToString(sm.currentState())
+              << std::setw(22) << swapStateToString(sm.currentState())
               << std::setw(6)  << swapPairToString(p.pair)
               << std::setw(6)  << (p.role == SwapRole::BOB ? "BOB" : "ALICE")
               << std::setw(18) << p.xfgAmount
@@ -322,22 +330,27 @@ void SwapDaemon::showSwap(const std::string& swapId) {
   std::cout << "  XFG amount:       " << p.xfgAmount << " atomic ("
             << (static_cast<double>(p.xfgAmount) / 10000000.0) << " XFG)" << std::endl;
   std::cout << "  CTR amount:       " << p.ctrAmount << " atomic" << std::endl;
-  std::cout << "  HashLock:         " << Common::podToHex(p.hashLock) << std::endl;
 
-  // Only show preimage if we know it (non-zero)
+  // Adaptor sig fields
+  std::cout << "  Our swap pubkey:  " << Common::podToHex(p.ourSwapPubKey) << std::endl;
+  std::cout << "  Peer swap pubkey: " << Common::podToHex(p.peerSwapPubKey) << std::endl;
+  std::cout << "  Escrow key:       " << Common::podToHex(p.escrowPubKey) << std::endl;
+
+  Crypto::PublicKey zeroPk;
+  std::memset(&zeroPk, 0, sizeof(zeroPk));
+  if (std::memcmp(&p.adaptorPoint, &zeroPk, sizeof(zeroPk)) != 0) {
+    std::cout << "  Adaptor point T:  " << Common::podToHex(p.adaptorPoint) << std::endl;
+  }
+
   Crypto::Hash zeroHash;
   std::memset(&zeroHash, 0, sizeof(zeroHash));
-  if (std::memcmp(&p.preimage, &zeroHash, sizeof(zeroHash)) != 0) {
-    std::cout << "  Preimage:         " << Common::podToHex(p.preimage) << std::endl;
-  } else {
-    std::cout << "  Preimage:         [unknown]" << std::endl;
+  if (std::memcmp(&p.escrowTxHash, &zeroHash, sizeof(zeroHash)) != 0) {
+    std::cout << "  Escrow tx:        " << Common::podToHex(p.escrowTxHash) << std::endl;
+    std::cout << "  Escrow out idx:   " << p.escrowOutputIndex << std::endl;
   }
 
   std::cout << "  XFG timeout:      height " << p.xfgTimeoutHeight << std::endl;
-  std::cout << "  CTR timeout:      block " << p.ctrTimeoutBlock << std::endl;
-  std::cout << "  HTLC output idx:  " << p.htlcOutputIndex << std::endl;
-  std::cout << "  Alice XFG pubkey: " << Common::podToHex(p.aliceXfgPubKey) << std::endl;
-  std::cout << "  Bob XFG pubkey:   " << Common::podToHex(p.bobXfgPubKey) << std::endl;
+  std::cout << "  CTR timeout:      slot/block " << p.ctrTimeoutBlock << std::endl;
 
   if (!p.ctrLockTxId.empty()) {
     std::cout << "  CTR lock tx:      " << p.ctrLockTxId << std::endl;
@@ -382,8 +395,10 @@ bool SwapDaemon::refund(const std::string& swapId) {
   const auto& params = sm.params();
   SwapState current = sm.currentState();
 
-  // Can only refund XFG if we're Bob and XFG is locked
-  if (current == SwapState::XFG_LOCKED && params.role == SwapRole::BOB) {
+  // Cooperative refund: both parties sign a non-adaptor Musig2 sig
+  // spending escrow back to Bob. Available from ESCROW_FUNDED or PRESIGS_READY.
+  if (current == SwapState::ADAPTOR_ESCROW_FUNDED ||
+      current == SwapState::ADAPTOR_PRESIGS_READY) {
     if (currentHeight < params.xfgTimeoutHeight) {
       m_logger(Logging::ERROR) << "Cannot refund yet. Current height: " << currentHeight
         << ", timeout: " << params.xfgTimeoutHeight
@@ -391,30 +406,16 @@ bool SwapDaemon::refund(const std::string& swapId) {
       return false;
     }
 
-    // In full implementation: construct and broadcast refund tx
-    m_logger(Logging::INFO) << "Timeout elapsed. Constructing XFG refund transaction...";
+    m_logger(Logging::INFO) << "Timeout elapsed. Initiating cooperative refund...";
+    m_logger(Logging::INFO) << "  Both parties must sign a refund tx (no adaptor point).";
 
-    if (!sm.transition(SwapState::XFG_REFUNDED)) {
+    if (!sm.transition(SwapState::ADAPTOR_REFUNDED)) {
       m_logger(Logging::ERROR) << "State transition failed";
       return false;
     }
 
     m_db.saveSwap(sm);
-    m_logger(Logging::INFO) << "Swap " << swapId << " -> XFG_REFUNDED";
-    return true;
-  }
-
-  // Can refund counterparty if we're Alice and CTR is locked
-  if (current == SwapState::CTR_LOCKED && params.role == SwapRole::ALICE) {
-    m_logger(Logging::INFO) << "Constructing counterparty refund transaction...";
-
-    if (!sm.transition(SwapState::CTR_REFUNDED)) {
-      m_logger(Logging::ERROR) << "State transition failed";
-      return false;
-    }
-
-    m_db.saveSwap(sm);
-    m_logger(Logging::INFO) << "Swap " << swapId << " -> CTR_REFUNDED";
+    m_logger(Logging::INFO) << "Swap " << swapId << " -> ADAPTOR_REFUNDED";
     return true;
   }
 

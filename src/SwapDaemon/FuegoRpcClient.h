@@ -16,19 +16,11 @@
 
 #include <string>
 #include <cstdint>
+#include <vector>
 #include "crypto/hash.h"
 #include "crypto/crypto.h"
 
 namespace XfgSwap {
-
-struct HtlcOutputInfo {
-  uint64_t amount;
-  Crypto::PublicKey recipientKey;
-  Crypto::PublicKey refundKey;
-  Crypto::Hash hashLock;
-  uint32_t timeoutHeight;
-  bool isSpent;
-};
 
 struct NodeInfo {
   uint32_t height;
@@ -37,18 +29,28 @@ struct NodeInfo {
   std::string status;
 };
 
+// Result from a wallet RPC transfer call.
+struct TransferResult {
+  std::string txHash;       // hex-encoded transaction hash
+  std::string txSecretKey;  // hex-encoded tx secret key
+};
+
+// Minimal parsed output from a fetched transaction.
+struct TxOutputInfo {
+  uint64_t amount;
+  Crypto::PublicKey targetKey;  // KeyOutput target public key
+};
+
 class FuegoRpcClient {
 public:
   FuegoRpcClient(const std::string& host, uint16_t port);
 
+  // Configure the wallet RPC endpoint (separate from fuegod).
+  // Must be called before sendTransfer().
+  void setWalletRpc(const std::string& host, uint16_t port);
+
   // Query /getheight
   bool getHeight(uint32_t& height);
-
-  // Query /gethtlc (future RPC endpoint)
-  bool getHtlcOutput(uint32_t index, HtlcOutputInfo& out);
-
-  // Query /gethtlccount (future RPC endpoint)
-  bool getHtlcCount(size_t& count);
 
   // Relay via /sendrawtransaction
   bool sendRawTransaction(const std::string& txHex);
@@ -56,12 +58,38 @@ public:
   // Query /getinfo
   bool getInfo(NodeInfo& info);
 
+  // ── Wallet RPC (talks to fire_wallet --rpc-bind-port) ──
+
+  // Send XFG via wallet RPC "transfer" method.
+  // address: base58-encoded destination, amount: atomic units.
+  // Returns true on success, fills result with tx hash and secret key.
+  bool sendTransfer(const std::string& address, uint64_t amount,
+                    uint64_t mixin, TransferResult& result);
+
+  // ── Daemon RPC for tx inspection ──
+
+  // Fetch a transaction by hash and extract its outputs.
+  // txHashHex: 64-char hex hash. Returns false if tx not found.
+  bool getTransactionOutputs(const std::string& txHashHex,
+                             std::vector<TxOutputInfo>& outputs);
+
 private:
-  // Synchronous HTTP POST using POSIX sockets
-  std::string httpPost(const std::string& path, const std::string& body);
+  // Synchronous HTTP POST to an arbitrary host:port
+  std::string httpPost(const std::string& host, uint16_t port,
+                       const std::string& path, const std::string& body);
+
+  // Convenience: POST to fuegod
+  std::string daemonPost(const std::string& path, const std::string& body);
+
+  // Convenience: JSON-RPC call to wallet RPC
+  std::string walletJsonRpc(const std::string& method, const std::string& params);
 
   std::string m_host;
   uint16_t m_port;
+
+  // Wallet RPC endpoint (optional, needed for sendTransfer)
+  std::string m_walletHost;
+  uint16_t m_walletPort = 0;
 };
 
 } // namespace XfgSwap

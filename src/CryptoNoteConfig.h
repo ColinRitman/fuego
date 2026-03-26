@@ -152,12 +152,20 @@ namespace CryptoNote
         const uint64_t EPOCH_DURATION_BLOCKS = 900;              // Mainnet: 900 blocks (5 days at 480s/block)
         const uint64_t TESTNET_EPOCH_DURATION_BLOCKS = 10;       // Testnet: 10 blocks (fast epochs for testing)
 
-        // CD Fee Pool — funded by atomic swap (HTLC) fees, distributed as interest to CD holders
-        const uint64_t SWAP_FEE_RATE_BPS = 100;                // 1% of HTLC claim/refund amount (100 basis points)
+        // CD Fee Pool — funded by atomic swap fees, distributed as interest to CD holders
+        const uint64_t SWAP_FEE_RATE_BPS = 100;                // 1% of swap claim/refund amount (100 basis points)
         const uint64_t SWAP_FEE_RATE_DIVISOR = 10000;          // basis point denominator
         const uint64_t FEE_POOL_RATE_PRECISION = 1000000ULL;   // 1e6 fixed-point (fits uint32_t for div128_32)
         const uint64_t TESTNET_SWAP_FEE_RATE_BPS = 100;        // 1% on testnet (same as mainnet)
         const uint32_t CD_TRANSFER_MIN_REMAINING_TERM = 1;     // minimum term for transferred CD
+
+        // Dynamic banking fee: 0.1% per active EFier (10 BPS each)
+        const uint64_t BANKING_FEE_PER_ELFIER_BPS = 10;      // 0.1% per active EFier
+        const uint64_t BANKING_FEE_BPS_DIVISOR = 10000;      // basis point denominator
+        // Swap fee split: 80% CD yield / 10% EFiers / 10% Fuego Treasury
+        const uint64_t SWAP_FEE_CD_SHARE_PCT = 80;           // 80% of epoch swap fees → CD yield pool
+        const uint64_t SWAP_FEE_EFIER_SHARE_PCT = 10;        // 10% of epoch swap fees → EFier distribution
+        const uint64_t SWAP_FEE_TREASURY_SHARE_PCT = 10;     // 10% of epoch swap fees → Fuego Treasury
 
         // MAINNET DEPOSITS
         const uint64_t DEPOSIT_MIN_AMOUNT = AMOUNT_TIER_0;   // 0.8 XFG
@@ -261,13 +269,7 @@ namespace CryptoNote
 	const uint8_t  BLOCK_MAJOR_VERSION_8                         =  8;
 	const uint8_t  BLOCK_MAJOR_VERSION_9                         =  9;
 	const uint8_t  BLOCK_MAJOR_VERSION_10                        = 10; //upgradekit
-	const uint8_t  BLOCK_MAJOR_VERSION_11                        = 11; //HTLC atomic swaps
-
-	// HTLC (Hash Time-Lock Contract) constants for atomic swaps
-	const uint32_t HTLC_MIN_TIMEOUT       = 45;     // ~6 hours minimum lock (griefing protection)
-	const uint32_t HTLC_MAX_TIMEOUT       = 2160;   // ~12 days maximum lock
-	const uint32_t TESTNET_HTLC_MIN_TIMEOUT = 4;    // ~32 min minimum lock (fast for testing)
-	const uint32_t TESTNET_HTLC_MAX_TIMEOUT = 180;  // ~24h max lock (testing)
+	const uint8_t  BLOCK_MAJOR_VERSION_11                        = 11; // future: uniform coinbase decomposition
 
 	const uint8_t  BLOCK_MINOR_VERSION_0 			             =  0;
 	const uint8_t  BLOCK_MINOR_VERSION_1 			             =  1;
@@ -331,7 +333,7 @@ namespace CryptoNote
                                      	// TESTNET parameters
 //--------------------------------------------------------------------------------------------------------------------------
 
- 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101df831d86532febc7d2a1a7ce4632a2c9bdbc9c1c58d2aa4fe42cc4e70242d33f";
+ 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101eae9a3035cf3facc4a723c8334d5d3836950188703b407793c020741c46c1466";
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */

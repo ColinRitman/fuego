@@ -25,17 +25,24 @@ SwapStateMachine::SwapStateMachine()
   , m_state(SwapState::INITIATED)
   , m_createdAt(std::time(nullptr))
   , m_updatedAt(m_createdAt) {
-  // Zero-init crypto POD fields
   std::memset(&m_params.aliceXfgPubKey, 0, sizeof(m_params.aliceXfgPubKey));
   std::memset(&m_params.bobXfgPubKey, 0, sizeof(m_params.bobXfgPubKey));
+  std::memset(&m_params.ourSwapSecKey, 0, sizeof(m_params.ourSwapSecKey));
+  std::memset(&m_params.ourSwapPubKey, 0, sizeof(m_params.ourSwapPubKey));
+  std::memset(&m_params.peerSwapPubKey, 0, sizeof(m_params.peerSwapPubKey));
+  std::memset(&m_params.escrowPubKey, 0, sizeof(m_params.escrowPubKey));
+  std::memset(&m_params.adaptorPoint, 0, sizeof(m_params.adaptorPoint));
+  std::memset(&m_params.adaptorSecret, 0, sizeof(m_params.adaptorSecret));
+  std::memset(&m_params.escrowTxHash, 0, sizeof(m_params.escrowTxHash));
   std::memset(&m_params.hashLock, 0, sizeof(m_params.hashLock));
   std::memset(&m_params.preimage, 0, sizeof(m_params.preimage));
-  m_params.pair = SwapPair::XMR;
+  m_params.pair = SwapPair::SOL;
   m_params.role = SwapRole::BOB;
   m_params.xfgAmount = 0;
   m_params.ctrAmount = 0;
   m_params.xfgTimeoutHeight = 0;
   m_params.ctrTimeoutBlock = 0;
+  m_params.escrowOutputIndex = 0;
   m_params.htlcOutputIndex = 0;
 }
 
@@ -53,27 +60,35 @@ bool SwapStateMachine::isValidTransition(SwapState newState) const {
   }
 
   switch (m_state) {
+    // ── Adaptor signature flow ──
     case SwapState::INITIATED:
-      return newState == SwapState::XFG_LOCKED;
+      return newState == SwapState::ADAPTOR_KEYS_EXCHANGED;
 
-    case SwapState::XFG_LOCKED:
-      return newState == SwapState::CTR_LOCKED ||
-             newState == SwapState::XFG_REFUNDED;
+    case SwapState::ADAPTOR_KEYS_EXCHANGED:
+      return newState == SwapState::ADAPTOR_ESCROW_FUNDED;
 
-    case SwapState::CTR_LOCKED:
-      return newState == SwapState::XFG_CLAIMED ||
-             newState == SwapState::CTR_REFUNDED;
+    case SwapState::ADAPTOR_ESCROW_FUNDED:
+      return newState == SwapState::ADAPTOR_PRESIGS_READY ||
+             newState == SwapState::ADAPTOR_REFUNDED;
 
-    case SwapState::XFG_CLAIMED:
-      return newState == SwapState::CTR_CLAIMED;
+    case SwapState::ADAPTOR_PRESIGS_READY:
+      return newState == SwapState::ADAPTOR_CTR_LOCKED ||
+             newState == SwapState::ADAPTOR_REFUNDED;
 
-    // Terminal states -- no further transitions except FAILED (handled above)
-    case SwapState::CTR_CLAIMED:
-    case SwapState::XFG_REFUNDED:
-    case SwapState::CTR_REFUNDED:
+    case SwapState::ADAPTOR_CTR_LOCKED:
+      return newState == SwapState::ADAPTOR_SECRET_REVEALED ||
+             newState == SwapState::ADAPTOR_REFUNDED;
+
+    case SwapState::ADAPTOR_SECRET_REVEALED:
+      return newState == SwapState::ADAPTOR_XFG_SPENT;
+
+    // Terminal states
+    case SwapState::ADAPTOR_XFG_SPENT:
+    case SwapState::ADAPTOR_REFUNDED:
     case SwapState::FAILED:
       return false;
 
+    // Legacy HTLC states (kept for DB compat, no transitions)
     default:
       return false;
   }
@@ -109,9 +124,8 @@ time_t SwapStateMachine::updatedAt() const {
 }
 
 bool SwapStateMachine::isTerminal() const {
-  return m_state == SwapState::CTR_CLAIMED ||
-         m_state == SwapState::XFG_REFUNDED ||
-         m_state == SwapState::CTR_REFUNDED ||
+  return m_state == SwapState::ADAPTOR_XFG_SPENT ||
+         m_state == SwapState::ADAPTOR_REFUNDED ||
          m_state == SwapState::FAILED;
 }
 
@@ -125,14 +139,20 @@ std::string SwapStateMachine::serialize() const {
   root.insert("ctrAmount", static_cast<int64_t>(m_params.ctrAmount));
   root.insert("state", static_cast<int64_t>(static_cast<uint8_t>(m_state)));
 
+  // Adaptor sig fields
+  root.insert("ourSwapPubKey", Common::podToHex(m_params.ourSwapPubKey));
+  root.insert("peerSwapPubKey", Common::podToHex(m_params.peerSwapPubKey));
+  root.insert("escrowPubKey", Common::podToHex(m_params.escrowPubKey));
+  root.insert("adaptorPoint", Common::podToHex(m_params.adaptorPoint));
+  root.insert("escrowTxHash", Common::podToHex(m_params.escrowTxHash));
+  root.insert("escrowOutputIndex", static_cast<int64_t>(m_params.escrowOutputIndex));
+
+  // Legacy fields (kept for backward compat in DB)
   root.insert("aliceXfgPubKey", Common::podToHex(m_params.aliceXfgPubKey));
   root.insert("bobXfgPubKey", Common::podToHex(m_params.bobXfgPubKey));
-  root.insert("hashLock", Common::podToHex(m_params.hashLock));
-  root.insert("preimage", Common::podToHex(m_params.preimage));
 
   root.insert("xfgTimeoutHeight", static_cast<int64_t>(m_params.xfgTimeoutHeight));
   root.insert("ctrTimeoutBlock", static_cast<int64_t>(m_params.ctrTimeoutBlock));
-  root.insert("htlcOutputIndex", static_cast<int64_t>(m_params.htlcOutputIndex));
 
   root.insert("ctrLockTxId", m_params.ctrLockTxId);
   root.insert("ctrAddress", m_params.ctrAddress);
@@ -154,14 +174,28 @@ SwapStateMachine SwapStateMachine::deserialize(const std::string& json) {
   params.xfgAmount = static_cast<uint64_t>(root("xfgAmount").getInteger());
   params.ctrAmount = static_cast<uint64_t>(root("ctrAmount").getInteger());
 
-  Common::podFromHex(root("aliceXfgPubKey").getString(), params.aliceXfgPubKey);
-  Common::podFromHex(root("bobXfgPubKey").getString(), params.bobXfgPubKey);
-  Common::podFromHex(root("hashLock").getString(), params.hashLock);
-  Common::podFromHex(root("preimage").getString(), params.preimage);
+  // Adaptor sig fields
+  if (root.contains("ourSwapPubKey"))
+    Common::podFromHex(root("ourSwapPubKey").getString(), params.ourSwapPubKey);
+  if (root.contains("peerSwapPubKey"))
+    Common::podFromHex(root("peerSwapPubKey").getString(), params.peerSwapPubKey);
+  if (root.contains("escrowPubKey"))
+    Common::podFromHex(root("escrowPubKey").getString(), params.escrowPubKey);
+  if (root.contains("adaptorPoint"))
+    Common::podFromHex(root("adaptorPoint").getString(), params.adaptorPoint);
+  if (root.contains("escrowTxHash"))
+    Common::podFromHex(root("escrowTxHash").getString(), params.escrowTxHash);
+  if (root.contains("escrowOutputIndex"))
+    params.escrowOutputIndex = static_cast<uint32_t>(root("escrowOutputIndex").getInteger());
+
+  // Legacy fields
+  if (root.contains("aliceXfgPubKey"))
+    Common::podFromHex(root("aliceXfgPubKey").getString(), params.aliceXfgPubKey);
+  if (root.contains("bobXfgPubKey"))
+    Common::podFromHex(root("bobXfgPubKey").getString(), params.bobXfgPubKey);
 
   params.xfgTimeoutHeight = static_cast<uint32_t>(root("xfgTimeoutHeight").getInteger());
   params.ctrTimeoutBlock = static_cast<uint64_t>(root("ctrTimeoutBlock").getInteger());
-  params.htlcOutputIndex = static_cast<uint32_t>(root("htlcOutputIndex").getInteger());
 
   params.ctrLockTxId = root("ctrLockTxId").getString();
   params.ctrAddress = root("ctrAddress").getString();

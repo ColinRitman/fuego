@@ -133,13 +133,10 @@ namespace CryptoNote
     bool propose_slash(const std::vector<std::string> &args);
     bool get_report(const std::vector<std::string> &args);
 
-    // HTLC (atomic swap) commands
-    bool create_htlc(const std::vector<std::string> &args);
-    bool claim_htlc(const std::vector<std::string> &args);
-    bool refund_htlc(const std::vector<std::string> &args);
-
-    // Swap terminal (ncurses TUI)
-    bool swap_terminal(const std::vector<std::string> &args);
+    // Adaptor signature swap commands
+    bool initiate_swap(const std::vector<std::string> &args);
+    bool complete_swap(const std::vector<std::string> &args);
+    bool refund_swap(const std::vector<std::string> &args);
 
      bool create_cold_secret(const std::vector<std::string> &args);
 

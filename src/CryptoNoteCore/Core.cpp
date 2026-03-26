@@ -572,15 +572,23 @@ bool core::get_block_template(Block& b, const AccountPublicAddress& adr, difficu
     std::vector<Transaction> blockTxs;
     std::vector<Crypto::Hash> missed;
     m_mempool.getTransactions(b.transactionHashes, blockTxs, missed);
-    bankingFeesInBlock = Blockchain::computeBankingFeesFromTransactions(blockTxs);
+    uint32_t activeEfCount = m_blockchain.getActiveEfierCount();
+    bankingFeesInBlock = Blockchain::computeBankingFeesFromTransactions(blockTxs, activeEfCount);
 
-    // Per-block EFier distribution: split this block's banking fees among active EFiers
-    if (bankingFeesInBlock > 0) {
-      efierRewards = m_blockchain.getCommitmentIndex().computePerBlockEfierRewards(bankingFeesInBlock, b.previousBlockHash);
+    // Swap fee share: per-block drip from 20% of last epoch's swap fees
+    uint64_t efierSwapReward = m_blockchain.getEfierSwapRewardPerBlock();
+
+    // Total EFier input = banking fees (from miner) + swap reward (from fee pool)
+    uint64_t totalEfierInput = bankingFeesInBlock + efierSwapReward;
+
+    // Per-block EFier distribution: split among active EFiers
+    if (totalEfierInput > 0) {
+      efierRewards = m_blockchain.getCommitmentIndex().computePerBlockEfierRewards(totalEfierInput, b.previousBlockHash);
     }
 
     if (bankingFeesInBlock > 0 || !efierRewards.empty()) {
       logger(DEBUGGING) << "Block template banking fees: " << bankingFeesInBlock
+        << ", swap reward: " << efierSwapReward
         << ", EFier rewards: " << efierRewards.size() << " outputs";
     }
   }
@@ -1329,16 +1337,6 @@ bool core::removeMessageQueue(MessageQueue<BlockchainMessage>& messageQueue) {
 
 uint64_t core::getBurnedXfgAtHeight(size_t height) const {
   return m_blockchain.getBurnedXfgAtHeight(height);
-}
-
-// --- HTLC Output Accessors ---
-
-size_t core::getHtlcOutputCount() const {
-  return m_blockchain.getHtlcOutputCount();
-}
-
-bool core::getHtlcOutput(uint32_t index, Blockchain::HashLockOutputUsage& out) const {
-  return m_blockchain.getHtlcOutput(index, out);
 }
 
 // --- Commitment Index Accessors ---

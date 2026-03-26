@@ -116,8 +116,6 @@ public:
   virtual TransactionId deposit(uint32_t term, uint64_t amount, uint64_t fee, uint64_t mixIn = 4) override;
   virtual TransactionId deposit(uint32_t term, uint64_t amount, uint64_t fee, const std::string& extra, uint64_t mixIn = 4);
   virtual TransactionId withdrawDeposits(const std::vector<DepositId>& depositIds, uint64_t fee) override;
-  virtual TransactionId createHtlc(uint64_t amount, uint64_t fee, const Crypto::PublicKey& recipientKey,
-                                   const Crypto::Hash& hashLock, uint32_t timeoutHeight, uint64_t mixIn = 0) override;
   virtual std::error_code cancelTransaction(size_t transactionId) override;
 
   virtual void getAccountKeys(AccountKeys& keys) override;

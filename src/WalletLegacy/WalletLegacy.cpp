@@ -874,35 +874,6 @@ TransactionId WalletLegacy::withdrawDeposits(const std::vector<DepositId>& depos
   return txId;
 }
 
-TransactionId WalletLegacy::createHtlc(uint64_t amount, uint64_t fee, const Crypto::PublicKey& recipientKey,
-                                       const Crypto::Hash& hashLock, uint32_t timeoutHeight, uint64_t mixIn) {
-  throwIfNotInitialised();
-
-  TransactionId txId = 0;
-  std::unique_ptr<WalletRequest> request;
-  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
-
-  fee = m_currency.minimumFee();
-
-  {
-    std::unique_lock<std::mutex> lock(m_cacheMutex);
-    request = m_sender->makeHtlcRequest(txId, events, amount, fee, recipientKey, hashLock, timeoutHeight, mixIn);
-
-    if (request != nullptr) {
-      pushBalanceUpdatedEvents(events);
-    }
-  }
-
-  notifyClients(events);
-
-  if (request) {
-    m_asyncContextCounter.addAsyncContext();
-    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
-  }
-
-  return txId;
-}
-
 /* go through all unlocked outputs and return a total of
   everything below the dust threshold */
 uint64_t WalletLegacy::dustBalance()

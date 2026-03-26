@@ -101,6 +101,10 @@ namespace CryptoNote {
     uint64_t getFeePoolBalance() const { return m_feePoolBalance; }
     uint64_t getCurrentEpochSwapFees() const { return m_currentEpochSwapFees; }
     uint64_t getTotalCdLocked() const { return m_totalCdLocked; }
+    uint32_t getActiveEfierCount() const { return m_activeEfierCount; }
+    uint64_t getBankingFeeRateBps() const { return static_cast<uint64_t>(m_activeEfierCount) * parameters::BANKING_FEE_PER_ELFIER_BPS; }
+    uint64_t getEfierSwapRewardPerBlock() const { return m_efierSwapRewardPerBlock; }
+    uint64_t getTreasuryBalance() const { return m_treasuryBalance; }
     uint8_t getBlockMajorVersionForHeight(uint32_t height) const;
     uint8_t blockMajorVersion;
     bool addNewBlock(const Block& bl_, block_verification_context& bvc);
@@ -135,35 +139,6 @@ namespace CryptoNote {
     uint64_t depositInterestAtHeight(size_t height) const;
     uint64_t getBurnedXfgAtHeight(size_t height) const;
 
-    // HTLC (Hash Time-Lock Contract) output tracking for atomic swaps.
-    struct HashLockOutputUsage {
-      uint32_t blockIndex;
-      uint16_t txInBlock;
-      uint16_t outputInTransaction;
-      uint64_t amount;
-      Crypto::PublicKey recipientKey;
-      Crypto::PublicKey refundKey;
-      Crypto::Hash hashLock;
-      uint32_t timeoutHeight;
-      bool isSpent = false;
-
-      void serialize(ISerializer& s) {
-        s(blockIndex, "block");
-        s(txInBlock, "tx");
-        s(outputInTransaction, "outindex");
-        s(amount, "amount");
-        s(recipientKey, "recipient_key");
-        s(refundKey, "refund_key");
-        s(hashLock, "hash_lock");
-        s(timeoutHeight, "timeout_height");
-        s(isSpent, "spent");
-      }
-    };
-
-    // HTLC output queries
-    size_t getHtlcOutputCount() const;
-    bool getHtlcOutput(uint32_t index, HashLockOutputUsage& out) const;
-
     uint64_t coinsEmittedAtHeight(uint64_t height);
     uint64_t difficultyAtHeight(uint64_t height);
     bool isInCheckpointZone(const uint32_t height);
@@ -181,8 +156,8 @@ namespace CryptoNote {
     bool getElderfierBySigningPubkey(const Crypto::PublicKey& pubkey, ElderfierRegistration& out) const;
     CommitmentIndex::Height getCommitmentHighestBlock() const;
 
-    // Banking fee computation: scan transactions for HEAT/COLD commitments, return 0.1% sum
-    static uint64_t computeBankingFeesFromTransactions(const std::vector<Transaction>& txs);
+    // Banking fee computation: scan transactions for HEAT/COLD commitments, 0.1% per active EFier
+    static uint64_t computeBankingFeesFromTransactions(const std::vector<Transaction>& txs, uint32_t activeEfierCount);
 
     // Access CommitmentIndex for epoch boundary checks and fee tracking
     CommitmentIndex& getCommitmentIndex() { return m_commitmentIndex; }
@@ -355,8 +330,6 @@ namespace CryptoNote {
     };
     typedef parallel_flat_hash_map<uint64_t, std::vector<CommitmentOutputRef>> CommitmentOutputsContainer;
 
-    typedef std::vector<HashLockOutputUsage> HashLockOutputsContainer;
-
     const Currency& m_currency;
     tx_memory_pool& m_tx_pool;
     mutable std::recursive_mutex m_blockchain_lock; // TODO: add here reader/writer lock
@@ -388,12 +361,25 @@ namespace CryptoNote {
     TransactionMap m_transactionMap;
     MultisignatureOutputsContainer m_multisignatureOutputs;
     CommitmentOutputsContainer     m_commitmentOutputs;
-    HashLockOutputsContainer       m_htlcOutputs;
 
-    // Fee pool: accumulates swap fees from HTLC claims/refunds, distributed as interest to CD holders.
+    // Fee pool: accumulates swap fees, distributed as interest to CD holders.
     uint64_t m_feePoolBalance = 0;        // total XFG available for CD interest payouts
     uint64_t m_currentEpochSwapFees = 0;  // fees accumulated in current epoch (reset each epoch boundary)
     uint64_t m_totalCdLocked = 0;         // total XFG locked in CDs (for epoch rate calculation)
+
+    // Cumulative fee pool accounting (lifetime totals, never reset)
+    uint64_t m_totalSwapFeesCollected = 0;    // all swap fees ever entering the pool
+    uint64_t m_totalCdInterestPaid = 0;       // total interest paid out to CD holders
+    uint64_t m_totalEfierSwapPaid = 0;        // total EFier 10% share distributed via coinbase
+    uint64_t m_totalTreasuryAccrued = 0;      // total 10% accumulated to treasury
+
+    // EFier fee state: dynamic banking fee + swap fee share
+    uint32_t m_activeEfierCount = 0;           // active EFiers (snapshot at epoch boundary)
+    uint64_t m_efierSwapRewardPerBlock = 0;    // 10% of last epoch's swap fees / epoch_duration
+    uint64_t m_efierSwapRewardRemaining = 0;   // undistributed EFier swap share (drips to 0 by epoch end)
+
+    // Treasury: 10% of swap fees accumulates for protocol use
+    uint64_t m_treasuryBalance = 0;
     UpgradeDetector m_upgradeDetectorV2;
     UpgradeDetector m_upgradeDetectorV3;
     UpgradeDetector m_upgradeDetectorV4;

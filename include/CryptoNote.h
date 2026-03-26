@@ -100,19 +100,6 @@ struct TransactionOutputUnified {
   Crypto::MembershipProof proof;            // 1-of-N: amount is a valid denomination
 };
 
-// v11+ hash time-locked contract output (HTLC) for atomic swaps.
-// Two spending paths:
-//   Claim:  provide preimage s where H(s) == hashLock, signed with recipientKey
-//   Refund: after timeoutHeight, signed with refundKey
-// Hash function is cn_fast_hash (Keccak-256), native to CryptoNote.
-// Amount is in TransactionOutput.amount (visible, same as v10 transfers).
-struct TransactionOutputHashLock {
-  Crypto::PublicKey recipientKey;           // claim path: must sign with this key
-  Crypto::PublicKey refundKey;              // refund path: must sign with this key (after timeout)
-  Crypto::Hash hashLock;                    // H(secret), Keccak-256
-  uint32_t timeoutHeight;                   // absolute block height for refund eligibility
-};
-
 // v11+ unified input — replaces KeyInput + TransactionInputCommitmentSpend.
 // ALL v11 inputs (transfers, deposit withdrawals) use this type.
 // Amount hidden; MLSAG proves spend authority + commitment balance.
@@ -126,26 +113,9 @@ struct TransactionInputUnified {
   Crypto::EllipticCurveScalar sigC0;                 // MLSAG initial challenge scalar
 };
 
-// v11+ HTLC claim input — spend an HTLC by providing the hash preimage.
-// Requires: H(preimage) == hashLock AND valid signature with recipientKey.
-// Signature stored in tx.signatures[input_idx] (1 signature).
-struct TransactionInputHashLockClaim {
-  uint64_t amount;                                   // must match HTLC output amount
-  uint32_t outputIndex;                              // global output index of the HTLC
-  Crypto::Hash preimage;                             // s where cn_fast_hash(s) == hashLock
-};
+typedef boost::variant<BaseInput, KeyInput, MultisignatureInput, TransactionInputCommitmentSpend, TransactionInputCommitmentTransfer, TransactionInputUnified> TransactionInput;
 
-// v11+ HTLC refund input — reclaim an HTLC after timeout expires.
-// Requires: current_height >= timeoutHeight AND valid signature with refundKey.
-// Signature stored in tx.signatures[input_idx] (1 signature).
-struct TransactionInputHashLockRefund {
-  uint64_t amount;                                   // must match HTLC output amount
-  uint32_t outputIndex;                              // global output index of the HTLC
-};
-
-typedef boost::variant<BaseInput, KeyInput, MultisignatureInput, TransactionInputCommitmentSpend, TransactionInputCommitmentTransfer, TransactionInputUnified, TransactionInputHashLockClaim, TransactionInputHashLockRefund> TransactionInput;
-
-typedef boost::variant<KeyOutput, MultisignatureOutput, TransactionOutputCommitment, TransactionOutputUnified, TransactionOutputHashLock> TransactionOutputTarget;
+typedef boost::variant<KeyOutput, MultisignatureOutput, TransactionOutputCommitment, TransactionOutputUnified> TransactionOutputTarget;
 
 struct TransactionOutput {
   uint64_t amount;

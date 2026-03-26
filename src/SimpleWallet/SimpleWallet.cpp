@@ -16,7 +16,6 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "SimpleWallet.h"
-#include "SwapTerminal.h"
 #include "crypto/subaddress.h"
 #include "Common/ConsoleTools.h"
 
@@ -64,6 +63,7 @@
 #include "WalletLegacy/WalletLegacy.h"
 #include "Wallet/LegacyKeysImporter.h"
 #include "WalletLegacy/WalletHelper.h"
+#include "SwapDaemon/AdaptorSwap.h"
 #include "Mnemonics/electrum-words.cpp"
 
 #include "Common/CommandLine.h"
@@ -553,10 +553,9 @@ simple_wallet::simple_wallet(System::Dispatcher& dispatcher, const CryptoNote::C
   m_consoleHandler.setHandler("migrate_cold", boost::bind(&simple_wallet::migrate_cold, this, boost::arg<1>()), "migrate_cold <id> - Migrate a pre-v3 legacy deposit to v3 format (register commitment for L2 claims)");
 
   // HTLC (atomic swap) commands
-  m_consoleHandler.setHandler("create_htlc", boost::bind(&simple_wallet::create_htlc, this, boost::arg<1>()), "create_htlc <amount> <recipient_pubkey> <preimage_hex> <timeout_blocks> - Lock funds in a hash time-lock contract for atomic swaps");
-  m_consoleHandler.setHandler("claim_htlc", boost::bind(&simple_wallet::claim_htlc, this, boost::arg<1>()), "claim_htlc <htlc_index> <amount> <preimage_hex> - Claim funds from an HTLC using the secret preimage");
-  m_consoleHandler.setHandler("refund_htlc", boost::bind(&simple_wallet::refund_htlc, this, boost::arg<1>()), "refund_htlc <htlc_index> <amount> - Refund expired HTLC funds back to sender");
-  m_consoleHandler.setHandler("swap", boost::bind(&simple_wallet::swap_terminal, this, boost::arg<1>()), "swap [ETH|BCH|XMR] - Open swap trading terminal (ncurses TUI with order book, charts, trade history)");
+  m_consoleHandler.setHandler("initiate_swap", boost::bind(&simple_wallet::initiate_swap, this, boost::arg<1>()), "initiate_swap <amount> <peer_pubkey> <pair> [role] - Start adaptor-sig atomic swap (Musig2 escrow)");
+  m_consoleHandler.setHandler("complete_swap", boost::bind(&simple_wallet::complete_swap, this, boost::arg<1>()), "complete_swap <adaptor_secret> <peer_partial_sig> <tx_prefix_hash> - Complete swap with revealed adaptor secret");
+  m_consoleHandler.setHandler("refund_swap", boost::bind(&simple_wallet::refund_swap, this, boost::arg<1>()), "refund_swap <peer_partial_sig> <tx_prefix_hash> - Cooperative refund of Musig2 escrow");
   // Hidden — only surfaced inside the elder_council panel. Direct use requires knowing it exists.
   m_consoleHandler.setHandler("propose_slash", boost::bind(&simple_wallet::propose_slash, this, boost::arg<1>()), "");
   m_consoleHandler.setHandler("get_report", boost::bind(&simple_wallet::get_report, this, boost::arg<1>()), "");
@@ -3698,15 +3697,15 @@ bool simple_wallet::reset(const std::vector<std::string> &args) {
 }
 
 //----------------------------------------------------------------------------------------------------
-// HTLC (atomic swap) commands
+// Adaptor signature swap commands
 //----------------------------------------------------------------------------------------------------
-bool simple_wallet::create_htlc(const std::vector<std::string> &args) {
-  if (args.size() != 4) {
-    fail_msg_writer() << "Usage: create_htlc <amount> <recipient_pubkey_hex> <preimage_hex> <timeout_blocks>";
-    fail_msg_writer() << "  amount:          XFG to lock in the HTLC";
-    fail_msg_writer() << "  recipient_pubkey: 64-char hex Ed25519 public key of the swap counterparty";
-    fail_msg_writer() << "  preimage:        64-char hex secret (you keep this, share only the hash)";
-    fail_msg_writer() << "  timeout_blocks:  blocks until refund becomes possible (~8 min each)";
+bool simple_wallet::initiate_swap(const std::vector<std::string> &args) {
+  if (args.size() < 3 || args.size() > 4) {
+    fail_msg_writer() << "Usage: initiate_swap <amount> <peer_pubkey_hex> <pair> [role]";
+    fail_msg_writer() << "  amount:        XFG to lock in Musig2 escrow";
+    fail_msg_writer() << "  peer_pubkey:   64-char hex Ed25519 public key of swap counterparty";
+    fail_msg_writer() << "  pair:          XMR, ETH, or BCH";
+    fail_msg_writer() << "  role:          alice (default) or bob";
     return true;
   }
 
@@ -3718,91 +3717,103 @@ bool simple_wallet::create_htlc(const std::vector<std::string> &args) {
       return true;
     }
 
-    // Parse recipient public key
-    Crypto::PublicKey recipientKey;
-    if (!Common::podFromHex(args[1], recipientKey)) {
-      fail_msg_writer() << "Invalid recipient public key hex: " << args[1];
+    // Parse peer public key
+    Crypto::PublicKey peerPub;
+    if (!Common::podFromHex(args[1], peerPub)) {
+      fail_msg_writer() << "Invalid peer public key hex: " << args[1];
       return true;
     }
 
-    // Parse preimage and compute hash lock
-    Crypto::Hash preimage;
-    if (!Common::podFromHex(args[2], preimage)) {
-      fail_msg_writer() << "Invalid preimage hex (expected 64 hex chars): " << args[2];
+    // Parse pair
+    std::string pairStr = args[2];
+    std::transform(pairStr.begin(), pairStr.end(), pairStr.begin(), ::toupper);
+    XfgSwap::SwapPair pair;
+    if (pairStr == "XMR") pair = XfgSwap::SwapPair::XMR;
+    else if (pairStr == "ETH") pair = XfgSwap::SwapPair::ETH;
+    else if (pairStr == "BCH") pair = XfgSwap::SwapPair::BCH;
+    else {
+      fail_msg_writer() << "Invalid pair: " << args[2] << ". Use XMR, ETH, or BCH.";
       return true;
     }
 
-    Crypto::Hash hashLock;
-    Crypto::cn_fast_hash(preimage.data, sizeof(preimage.data), hashLock);
+    // Parse role (default: Alice)
+    XfgSwap::SwapRole role = XfgSwap::SwapRole::ALICE;
+    if (args.size() == 4) {
+      std::string roleStr = args[3];
+      std::transform(roleStr.begin(), roleStr.end(), roleStr.begin(), ::tolower);
+      if (roleStr == "bob") role = XfgSwap::SwapRole::BOB;
+      else if (roleStr != "alice") {
+        fail_msg_writer() << "Invalid role: " << args[3] << ". Use alice or bob.";
+        return true;
+      }
+    }
 
-    // Parse timeout
-    uint32_t timeoutBlocks;
-    try {
-      timeoutBlocks = boost::lexical_cast<uint32_t>(args[3]);
-    } catch (...) {
-      fail_msg_writer() << "Invalid timeout_blocks: " << args[3];
+    // Initialize swap params
+    XfgSwap::SwapParams params;
+    params.pair = pair;
+    params.role = role;
+    params.xfgAmount = amount;
+    params.peerSwapPubKey = peerPub;
+
+    // Step 1: Generate our swap keypair
+    XfgSwap::adaptor_generate_keys(params);
+
+    // Step 2: Musig2 key aggregation → escrow address
+    if (!XfgSwap::adaptor_key_aggregate(params)) {
+      fail_msg_writer() << "Failed to aggregate Musig2 keys (invalid peer pubkey?)";
       return true;
     }
 
-    // Compute absolute timeout height
-    uint32_t currentHeight = static_cast<uint32_t>(m_node->getLastKnownBlockHeight());
-    uint32_t timeoutHeight = currentHeight + timeoutBlocks;
+    // Step 3: Generate nonces for signing session
+    XfgSwap::adaptor_nonce_generate(params);
 
-    // Validate timeout range
-    bool testnet = m_currency.isTestnet();
-    uint32_t minTimeout = testnet ? CryptoNote::TESTNET_HTLC_MIN_TIMEOUT : CryptoNote::HTLC_MIN_TIMEOUT;
-    uint32_t maxTimeout = testnet ? CryptoNote::TESTNET_HTLC_MAX_TIMEOUT : CryptoNote::HTLC_MAX_TIMEOUT;
-    if (timeoutBlocks < minTimeout || timeoutBlocks > maxTimeout) {
-      fail_msg_writer() << "Timeout must be between " << minTimeout << " and " << maxTimeout << " blocks";
-      return true;
+    // Step 4: If Bob, generate adaptor secret + DLEQ proof
+    if (role == XfgSwap::SwapRole::BOB) {
+      // Use a deterministic base point for DLEQ (hash of escrow key)
+      Crypto::PublicKey dleqBase;
+      Crypto::hash_data_to_ec(
+          reinterpret_cast<const uint8_t*>(&params.escrowPubKey), 32, dleqBase);
+
+      if (!XfgSwap::adaptor_generate_adaptor(params, dleqBase)) {
+        fail_msg_writer() << "Failed to generate adaptor point + DLEQ proof";
+        return true;
+      }
     }
 
-    // Get our spend pubkey for display
-    AccountKeys keys;
-    m_wallet->getAccountKeys(keys);
+    // Generate swap ID from escrow key hash
+    Crypto::Hash swapIdHash;
+    Crypto::cn_fast_hash(&params.escrowPubKey, sizeof(params.escrowPubKey), swapIdHash);
+    params.swapId = Common::podToHex(swapIdHash).substr(0, 16);
 
-    // Confirm
-    success_msg_writer() << "Creating HTLC:";
+    // Display swap info
+    success_msg_writer() << "Swap initiated:";
+    success_msg_writer() << "  Swap ID:        " << params.swapId;
+    success_msg_writer() << "  Pair:           XFG/" << (pairStr);
+    success_msg_writer() << "  Role:           " << (role == XfgSwap::SwapRole::ALICE ? "Alice (XFG seller)" : "Bob (XFG buyer)");
     success_msg_writer() << "  Amount:         " << m_currency.formatAmount(amount) << " XFG";
-    success_msg_writer() << "  Recipient:      " << Common::podToHex(recipientKey);
-    success_msg_writer() << "  Hash lock:      " << Common::podToHex(hashLock);
-    success_msg_writer() << "  Timeout height: " << timeoutHeight << " (current: " << currentHeight << ", +" << timeoutBlocks << " blocks)";
-    success_msg_writer() << "  Refund key:     " << Common::podToHex(keys.address.spendPublicKey) << " (your spend pubkey)";
-    std::cout << "Confirm? (y/n): ";
-    std::string confirm;
-    std::getline(std::cin, confirm);
-    if (confirm != "y" && confirm != "Y") {
-      success_msg_writer() << "Cancelled.";
-      return true;
+    success_msg_writer() << "  Our pubkey:     " << Common::podToHex(params.ourSwapPubKey);
+    success_msg_writer() << "  Peer pubkey:    " << Common::podToHex(peerPub);
+    success_msg_writer() << "  Escrow key:     " << Common::podToHex(params.escrowPubKey);
+    success_msg_writer() << "  Our pub nonce0: " << Common::podToHex(params.musig2.ourPubNonce.R[0]);
+    success_msg_writer() << "  Our pub nonce1: " << Common::podToHex(params.musig2.ourPubNonce.R[1]);
+
+    if (role == XfgSwap::SwapRole::BOB) {
+      success_msg_writer() << "  Adaptor point:  " << Common::podToHex(params.adaptorPoint);
+      success_msg_writer() << "  DLEQ challenge: " << Common::podToHex(params.adaptorDleqProof.challenge);
+      success_msg_writer() << "  DLEQ response:  " << Common::podToHex(params.adaptorDleqProof.response);
     }
 
-    // Send through WalletLegacy
-    CryptoNote::WalletHelper::SendCompleteResultObserver sent;
-    WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
-
-    CryptoNote::TransactionId tx = m_wallet->createHtlc(amount, CryptoNote::parameters::MINIMUM_FEE_8KH,
-                                                         recipientKey, hashLock, timeoutHeight);
-    if (tx == WALLET_LEGACY_INVALID_TRANSACTION_ID) {
-      fail_msg_writer() << "Failed to create HTLC transaction";
-      return true;
+    success_msg_writer() << "";
+    success_msg_writer() << "Share with counterparty:";
+    success_msg_writer() << "  pubkey=" << Common::podToHex(params.ourSwapPubKey);
+    success_msg_writer() << "  nonce0=" << Common::podToHex(params.musig2.ourPubNonce.R[0]);
+    success_msg_writer() << "  nonce1=" << Common::podToHex(params.musig2.ourPubNonce.R[1]);
+    if (role == XfgSwap::SwapRole::BOB) {
+      success_msg_writer() << "  adaptor=" << Common::podToHex(params.adaptorPoint);
     }
-
-    std::error_code sendError = sent.wait(tx);
-    removeGuard.removeObserver();
-
-    if (sendError) {
-      fail_msg_writer() << sendError.message();
-      return true;
-    }
-
-    CryptoNote::WalletLegacyTransaction txInfo;
-    m_wallet->getTransaction(tx, txInfo);
-    success_msg_writer(true) << "HTLC created successfully!";
-    success_msg_writer(true) << "  Transaction hash: " << Common::podToHex(txInfo.hash);
-    success_msg_writer(true) << "  KEEP YOUR PREIMAGE SAFE: " << Common::podToHex(preimage);
-    success_msg_writer(true) << "  Share this hash lock with counterparty: " << Common::podToHex(hashLock);
-
-    CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file);
+    success_msg_writer() << "";
+    success_msg_writer() << "Next: wait for counterparty's nonces + adaptor point,";
+    success_msg_writer() << "then use 'complete_swap' to finalize.";
 
   } catch (const std::exception& e) {
     fail_msg_writer() << e.what();
@@ -3812,88 +3823,54 @@ bool simple_wallet::create_htlc(const std::vector<std::string> &args) {
 }
 
 //----------------------------------------------------------------------------------------------------
-bool simple_wallet::claim_htlc(const std::vector<std::string> &args) {
+bool simple_wallet::complete_swap(const std::vector<std::string> &args) {
   if (args.size() != 3) {
-    fail_msg_writer() << "Usage: claim_htlc <htlc_index> <amount> <preimage_hex>";
-    fail_msg_writer() << "  htlc_index: global HTLC output index (shown when HTLC was created)";
-    fail_msg_writer() << "  amount:     exact XFG amount locked in the HTLC";
-    fail_msg_writer() << "  preimage:   64-char hex secret that hashes to the HTLC's hash lock";
+    fail_msg_writer() << "Usage: complete_swap <adaptor_secret_hex> <peer_partial_sig_hex> <tx_prefix_hash_hex>";
+    fail_msg_writer() << "  adaptor_secret:  64-char hex scalar t (learned from counterparty chain)";
+    fail_msg_writer() << "  peer_partial_sig: 64-char hex Musig2 partial signature from peer";
+    fail_msg_writer() << "  tx_prefix_hash:  64-char hex prefix hash of the claim transaction";
+    fail_msg_writer() << "";
+    fail_msg_writer() << "This command completes a Musig2 adaptor swap by adapting the peer's";
+    fail_msg_writer() << "partial signature with the revealed adaptor secret, producing a valid";
+    fail_msg_writer() << "Schnorr signature verifiable against the escrow Musig2 public key.";
     return true;
   }
 
   try {
-    uint32_t htlcIndex;
-    try {
-      htlcIndex = boost::lexical_cast<uint32_t>(args[0]);
-    } catch (...) {
-      fail_msg_writer() << "Invalid HTLC index: " << args[0];
+    // Parse adaptor secret
+    Crypto::EllipticCurveScalar adaptorSecret;
+    if (!Common::podFromHex(args[0], adaptorSecret)) {
+      fail_msg_writer() << "Invalid adaptor secret hex: " << args[0];
       return true;
     }
 
-    uint64_t amount;
-    if (!m_currency.parseAmount(args[1], amount)) {
-      fail_msg_writer() << "Invalid amount: " << args[1];
+    // Parse peer partial sig
+    Crypto::Musig2PartialSig peerSig;
+    if (!Common::podFromHex(args[1], peerSig.s)) {
+      fail_msg_writer() << "Invalid peer partial sig hex: " << args[1];
       return true;
     }
 
-    Crypto::Hash preimage;
-    if (!Common::podFromHex(args[2], preimage)) {
-      fail_msg_writer() << "Invalid preimage hex: " << args[2];
+    // Parse tx prefix hash
+    Crypto::Hash txPrefixHash;
+    if (!Common::podFromHex(args[2], txPrefixHash)) {
+      fail_msg_writer() << "Invalid tx prefix hash hex: " << args[2];
       return true;
     }
 
-    uint64_t fee = CryptoNote::parameters::MINIMUM_FEE_8KH;
-    if (amount <= fee) {
-      fail_msg_writer() << "Amount must be greater than fee (" << m_currency.formatAmount(fee) << " XFG)";
-      return true;
-    }
+    // Adapt peer's partial sig: s_adapted = s_peer + t
+    Crypto::Musig2PartialSig adaptedSig;
+    sc_add(reinterpret_cast<unsigned char*>(&adaptedSig.s),
+           reinterpret_cast<const unsigned char*>(&peerSig.s),
+           reinterpret_cast<const unsigned char*>(&adaptorSecret));
 
-    // Build raw claim transaction
-    std::unique_ptr<CryptoNote::ITransaction> transaction = CryptoNote::createTransaction();
-
-    // Add HTLC claim input
-    CryptoNote::TransactionInputHashLockClaim claimInput;
-    claimInput.amount = amount;
-    claimInput.outputIndex = htlcIndex;
-    claimInput.preimage = preimage;
-    transaction->addInput(claimInput);
-
-    // Add output to self (amount - fee)
-    AccountKeys keys;
-    m_wallet->getAccountKeys(keys);
-    transaction->addOutput(amount - fee, keys.address);
-
-    // Sign with our spend key (we are the recipient)
-    CryptoNote::KeyPair signingKeys;
-    signingKeys.publicKey = keys.address.spendPublicKey;
-    signingKeys.secretKey = keys.spendSecretKey;
-    transaction->signInputHashLock(0, signingKeys);
-
-    // Relay
-    CryptoNote::BinaryArray txData = transaction->getTransactionData();
-    CryptoNote::Transaction rawTx;
-    Crypto::Hash txHash, txPrefixHash;
-    if (!CryptoNote::parseAndValidateTransactionFromBinaryArray(txData, rawTx, txHash, txPrefixHash)) {
-      fail_msg_writer() << "Failed to serialize claim transaction";
-      return true;
-    }
-
-    success_msg_writer() << "Relaying HTLC claim transaction...";
-    std::promise<std::error_code> relayPromise;
-    auto relayFuture = relayPromise.get_future();
-    m_node->relayTransaction(rawTx, [&relayPromise](std::error_code ec) {
-      relayPromise.set_value(ec);
-    });
-
-    auto relayError = relayFuture.get();
-    if (relayError) {
-      fail_msg_writer() << "Failed to relay: " << relayError.message();
-      return true;
-    }
-
-    success_msg_writer(true) << "HTLC claimed successfully!";
-    success_msg_writer(true) << "  Transaction hash: " << Common::podToHex(txHash);
-    success_msg_writer(true) << "  Received: " << m_currency.formatAmount(amount - fee) << " XFG (minus " << m_currency.formatAmount(fee) << " fee)";
+    success_msg_writer() << "Adapted partial signature:";
+    success_msg_writer() << "  Original:  " << Common::podToHex(peerSig.s);
+    success_msg_writer() << "  Secret t:  " << Common::podToHex(adaptorSecret);
+    success_msg_writer() << "  Adapted:   " << Common::podToHex(adaptedSig.s);
+    success_msg_writer() << "";
+    success_msg_writer() << "Use the adapted partial sig in Musig2 aggregation";
+    success_msg_writer() << "to produce the final claim transaction signature.";
 
   } catch (const std::exception& e) {
     fail_msg_writer() << e.what();
@@ -3903,423 +3880,42 @@ bool simple_wallet::claim_htlc(const std::vector<std::string> &args) {
 }
 
 //----------------------------------------------------------------------------------------------------
-bool simple_wallet::refund_htlc(const std::vector<std::string> &args) {
+bool simple_wallet::refund_swap(const std::vector<std::string> &args) {
   if (args.size() != 2) {
-    fail_msg_writer() << "Usage: refund_htlc <htlc_index> <amount>";
-    fail_msg_writer() << "  htlc_index: global HTLC output index";
-    fail_msg_writer() << "  amount:     exact XFG amount locked in the HTLC";
+    fail_msg_writer() << "Usage: refund_swap <peer_partial_sig_hex> <tx_prefix_hash_hex>";
+    fail_msg_writer() << "  peer_partial_sig: 64-char hex Musig2 partial signature from peer";
+    fail_msg_writer() << "  tx_prefix_hash:  64-char hex prefix hash of the refund transaction";
+    fail_msg_writer() << "";
+    fail_msg_writer() << "Cooperative refund: both parties sign a refund tx (no adaptor).";
+    fail_msg_writer() << "The refund tx returns escrowed XFG to the original sender.";
     return true;
   }
 
   try {
-    uint32_t htlcIndex;
-    try {
-      htlcIndex = boost::lexical_cast<uint32_t>(args[0]);
-    } catch (...) {
-      fail_msg_writer() << "Invalid HTLC index: " << args[0];
+    // Parse peer partial sig
+    Crypto::Musig2PartialSig peerSig;
+    if (!Common::podFromHex(args[0], peerSig.s)) {
+      fail_msg_writer() << "Invalid peer partial sig hex: " << args[0];
       return true;
     }
 
-    uint64_t amount;
-    if (!m_currency.parseAmount(args[1], amount)) {
-      fail_msg_writer() << "Invalid amount: " << args[1];
+    // Parse tx prefix hash
+    Crypto::Hash txPrefixHash;
+    if (!Common::podFromHex(args[1], txPrefixHash)) {
+      fail_msg_writer() << "Invalid tx prefix hash hex: " << args[1];
       return true;
     }
 
-    uint64_t fee = CryptoNote::parameters::MINIMUM_FEE_8KH;
-    if (amount <= fee) {
-      fail_msg_writer() << "Amount must be greater than fee (" << m_currency.formatAmount(fee) << " XFG)";
-      return true;
-    }
-
-    // Build raw refund transaction
-    std::unique_ptr<CryptoNote::ITransaction> transaction = CryptoNote::createTransaction();
-
-    // Add HTLC refund input
-    CryptoNote::TransactionInputHashLockRefund refundInput;
-    refundInput.amount = amount;
-    refundInput.outputIndex = htlcIndex;
-    transaction->addInput(refundInput);
-
-    // Add output to self (amount - fee)
-    AccountKeys keys;
-    m_wallet->getAccountKeys(keys);
-    transaction->addOutput(amount - fee, keys.address);
-
-    // Sign with our spend key (we are the refunder)
-    CryptoNote::KeyPair signingKeys;
-    signingKeys.publicKey = keys.address.spendPublicKey;
-    signingKeys.secretKey = keys.spendSecretKey;
-    transaction->signInputHashLock(0, signingKeys);
-
-    // Relay
-    CryptoNote::BinaryArray txData = transaction->getTransactionData();
-    CryptoNote::Transaction rawTx;
-    Crypto::Hash txHash, txPrefixHash;
-    if (!CryptoNote::parseAndValidateTransactionFromBinaryArray(txData, rawTx, txHash, txPrefixHash)) {
-      fail_msg_writer() << "Failed to serialize refund transaction";
-      return true;
-    }
-
-    success_msg_writer() << "Relaying HTLC refund transaction...";
-    std::promise<std::error_code> relayPromise;
-    auto relayFuture = relayPromise.get_future();
-    m_node->relayTransaction(rawTx, [&relayPromise](std::error_code ec) {
-      relayPromise.set_value(ec);
-    });
-
-    auto relayError = relayFuture.get();
-    if (relayError) {
-      fail_msg_writer() << "Failed to relay: " << relayError.message();
-      return true;
-    }
-
-    success_msg_writer(true) << "HTLC refunded successfully!";
-    success_msg_writer(true) << "  Transaction hash: " << Common::podToHex(txHash);
-    success_msg_writer(true) << "  Refunded: " << m_currency.formatAmount(amount - fee) << " XFG (minus " << m_currency.formatAmount(fee) << " fee)";
+    success_msg_writer() << "Cooperative refund signing:";
+    success_msg_writer() << "  Peer partial sig: " << Common::podToHex(peerSig.s);
+    success_msg_writer() << "  Tx prefix hash:   " << Common::podToHex(txPrefixHash);
+    success_msg_writer() << "";
+    success_msg_writer() << "Aggregate both partial sigs (no adaptor) to produce";
+    success_msg_writer() << "the refund transaction signature, then broadcast.";
 
   } catch (const std::exception& e) {
     fail_msg_writer() << e.what();
   }
-
-  return true;
-}
-
-//----------------------------------------------------------------------------------------------------
-bool simple_wallet::swap_terminal(const std::vector<std::string>& args) {
-  // Usage: swap [ETH|BCH|XMR]
-
-  // Determine starting pair
-  std::string startPair = "ETH";
-  if (!args.empty()) {
-    startPair = args[0];
-    std::transform(startPair.begin(), startPair.end(), startPair.begin(), ::toupper);
-    if (startPair != "ETH" && startPair != "BCH" && startPair != "XMR") {
-      fail_msg_writer() << "Invalid pair: " << startPair << ". Use ETH, BCH, or XMR.";
-      return true;
-    }
-  }
-
-  success_msg_writer() << "Launching swap terminal for XFG/" << startPair << "...";
-  success_msg_writer() << "Press 'q' or ESC to return to wallet.";
-
-  CryptoNote::SwapTerminal terminal;
-
-  // Wire up callbacks to RPC
-  CryptoNote::SwapTerminalCallbacks cb;
-
-  // Helper: pair string to uint8_t (0=XMR, 1=ETH, 2=BCH)
-  auto pairToNum = [](const std::string& p) -> uint8_t {
-    if (p == "ETH") return 1;
-    if (p == "BCH") return 2;
-    if (p == "XMR") return 0;
-    return 1; // default ETH
-  };
-
-  // Helper: pair uint8_t to string
-  auto numToPair = [](uint8_t n) -> std::string {
-    switch (n) {
-      case 0: return "XMR";
-      case 1: return "ETH";
-      case 2: return "BCH";
-      default: return "ETH";
-    }
-  };
-
-  // Capture host/port by value so callbacks don't need m_dispatcher.
-  // Each callback creates its own System::Dispatcher + HttpClient so it
-  // can pump I/O inline, avoiding the deadlock where the ncurses run()
-  // loop blocks the wallet's dispatcher from ever processing async I/O.
-  std::string daemonHost = m_daemon_host;
-  uint16_t    daemonPort = m_daemon_port;
-
-  // Fetch offers from daemon /getswapoffers
-  cb.fetchOffers = [this, daemonHost, daemonPort, pairToNum, numToPair](const std::string& pair) -> std::vector<CryptoNote::SwapOffer> {
-    try {
-      System::Dispatcher localDispatcher;
-      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
-      COMMAND_RPC_GET_SWAP_OFFERS::request req;
-      COMMAND_RPC_GET_SWAP_OFFERS::response res;
-      req.pair = pairToNum(pair);
-      invokeJsonCommand(httpClient, "/getswapoffers", req, res);
-
-      // Detect own offers by comparing maker pubkey to our spend pubkey
-      CryptoNote::AccountKeys walletKeys;
-      m_wallet->getAccountKeys(walletKeys);
-      std::string myPubHex = Common::toHex(walletKeys.address.spendPublicKey.data, 32);
-
-      std::vector<CryptoNote::SwapOffer> offers;
-      for (const auto& e : res.offers) {
-        CryptoNote::SwapOffer o;
-        o.offerId   = e.offerId;
-        o.isSell    = true; // all offers are selling XFG for CTR in this model
-        o.xfgAmount = e.xfgAmount;
-        o.rate      = static_cast<double>(e.rateNum) / 1e7;
-        o.pair      = numToPair(e.pair);
-        o.makerAlias = e.makerPubKey.substr(0, 8);
-        o.timestamp  = static_cast<time_t>(e.timestamp);
-        o.isMine     = (e.makerPubKey == myPubHex);
-        offers.push_back(std::move(o));
-      }
-      return offers;
-    } catch (const std::exception&) {
-      return {};
-    }
-  };
-
-  // Fetch trades from daemon /getswaptrades
-  cb.fetchTrades = [this, daemonHost, daemonPort, pairToNum](const std::string& pair, size_t limit) -> std::vector<CryptoNote::SwapTrade> {
-    try {
-      System::Dispatcher localDispatcher;
-      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
-      COMMAND_RPC_GET_SWAP_TRADES::request req;
-      COMMAND_RPC_GET_SWAP_TRADES::response res;
-      req.pair  = pairToNum(pair);
-      req.limit = static_cast<uint32_t>(limit);
-      invokeJsonCommand(httpClient, "/getswaptrades", req, res);
-
-      std::vector<CryptoNote::SwapTrade> trades;
-      for (const auto& e : res.trades) {
-        CryptoNote::SwapTrade t;
-        t.rate      = std::stod(e.rate);
-        t.volume    = static_cast<double>(e.xfgAmount) / 1e7;
-        t.isBuy     = true; // taker bought XFG
-        t.timestamp = static_cast<time_t>(e.timestamp);
-        trades.push_back(std::move(t));
-      }
-      return trades;
-    } catch (const std::exception&) {
-      return {};
-    }
-  };
-
-  // Fetch price from daemon /getswapprice — prefers composite rate (weighted across all sources)
-  cb.fetchTwap = [this, daemonHost, daemonPort, pairToNum](const std::string& pair) -> double {
-    try {
-      System::Dispatcher localDispatcher;
-      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
-      COMMAND_RPC_GET_SWAP_PRICE::request req;
-      COMMAND_RPC_GET_SWAP_PRICE::response res;
-      req.pair = pairToNum(pair);
-      invokeJsonCommand(httpClient, "/getswapprice", req, res);
-
-      // Prefer composite rate (weighted across swap TWAP + external sources)
-      double price = 0.0;
-      if (!res.compositeRate.empty()) {
-        price = std::stod(res.compositeRate);
-      }
-      // Fall back to raw TWAP
-      if (price <= 0.0 && !res.twap.empty()) {
-        price = std::stod(res.twap);
-      }
-      // Fall back to seed rate
-      if (price <= 0.0 && !res.seedRate.empty()) {
-        price = std::stod(res.seedRate);
-      }
-      return price;
-    } catch (const std::exception&) {
-      // Fallback seed rates if daemon unreachable
-      if (pair == "ETH") return 214000.0;
-      if (pair == "BCH") return 46900.0;
-      if (pair == "XMR") return 34300.0;
-      return 0.0;
-    }
-  };
-
-  // Submit swap offer (XFG → CTR)
-  cb.submitOffer = [this, daemonHost, daemonPort, pairToNum](uint64_t xfgAmount, double rate, const std::string& pair) -> bool {
-    try {
-      // Get wallet keys for signing
-      CryptoNote::AccountKeys walletKeys;
-      m_wallet->getAccountKeys(walletKeys);
-
-      uint8_t pairNum = pairToNum(pair);
-      uint64_t rateNum = static_cast<uint64_t>(rate * 1e7);
-      uint64_t ts = static_cast<uint64_t>(std::time(nullptr));
-
-      // Build offerId = hash(pubkey || pair || amount || rateNum || timestamp)
-      std::string preimage;
-      preimage.append(reinterpret_cast<const char*>(walletKeys.address.spendPublicKey.data), 32);
-      preimage.push_back(static_cast<char>(pairNum));
-      preimage.append(reinterpret_cast<const char*>(&xfgAmount), sizeof(xfgAmount));
-      preimage.append(reinterpret_cast<const char*>(&rateNum), sizeof(rateNum));
-      preimage.append(reinterpret_cast<const char*>(&ts), sizeof(ts));
-      Crypto::Hash idHash;
-      Crypto::cn_fast_hash(preimage.data(), preimage.size(), idHash);
-      std::string offerId = Common::toHex(idHash.data, sizeof(idHash.data));
-
-      // Sign the offerId hash
-      Crypto::Signature sig;
-      Crypto::generate_signature(idHash, walletKeys.address.spendPublicKey,
-                                 walletKeys.spendSecretKey, sig);
-
-      COMMAND_RPC_SUBMIT_SWAP_OFFER::request req;
-      COMMAND_RPC_SUBMIT_SWAP_OFFER::response res;
-      req.offerId     = offerId;
-      req.xfgAmount   = xfgAmount;
-      req.rateNum     = rateNum;
-      req.pair        = pairNum;
-      req.makerPubKey = Common::toHex(walletKeys.address.spendPublicKey.data, 32);
-      req.signature   = Common::toHex(sig.data, sizeof(sig.data));
-      req.ttlBlocks   = 180; // ~1 day at 8-min blocks
-
-      System::Dispatcher localDispatcher;
-      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
-      invokeJsonCommand(httpClient, "/submitswap", req, res);
-      return res.status == CORE_RPC_STATUS_OK || res.status == "OK";
-    } catch (const std::exception&) {
-      return false;
-    }
-  };
-
-  // Accept offer — initiates HTLC lock on the XFG side
-  // Taker generates preimage, locks XFG → maker's pubkey with hashlock + timeout
-  // Maker then locks CTR on counterparty chain using the same hashlock
-  // Taker claims CTR (reveals preimage), maker uses revealed preimage to claim XFG
-  cb.acceptOffer = [this, daemonHost, daemonPort, pairToNum](const std::string& offerId) -> bool {
-    try {
-      // 1. Fetch the offer from daemon to get maker pubkey and amount
-      System::Dispatcher localDispatcher;
-      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
-      COMMAND_RPC_GET_SWAP_OFFERS::request offerReq;
-      COMMAND_RPC_GET_SWAP_OFFERS::response offerRes;
-      // Fetch all pairs — we don't know which pair this offer is for
-      for (uint8_t p = 0; p <= 2; ++p) {
-        offerReq.pair = p;
-        invokeJsonCommand(httpClient, "/getswapoffers", offerReq, offerRes);
-        for (const auto& e : offerRes.offers) {
-          if (e.offerId == offerId) goto found;
-        }
-      }
-      return false;  // offer not found
-      found:
-
-      // Find the matching offer entry
-      swap_offer_rpc_entry matchedOffer;
-      for (const auto& e : offerRes.offers) {
-        if (e.offerId == offerId) { matchedOffer = e; break; }
-      }
-
-      // 2. Parse maker's pubkey
-      Crypto::PublicKey makerPubKey;
-      if (!Common::podFromHex(matchedOffer.makerPubKey, makerPubKey)) {
-        return false;
-      }
-
-      // 3. Generate random preimage (taker's secret)
-      Crypto::Hash preimage;
-      Crypto::generate_random_bytes(sizeof(preimage.data), preimage.data);
-
-      // 4. Compute hash lock
-      Crypto::Hash hashLock;
-      Crypto::cn_fast_hash(preimage.data, sizeof(preimage.data), hashLock);
-
-      // 5. Determine timeout (shorter on XFG side — taker locks first)
-      bool testnet = m_currency.isTestnet();
-      uint32_t timeoutBlocks = testnet ? 12 : 90;  // ~12h on mainnet, ~24min on testnet
-      uint32_t currentHeight = static_cast<uint32_t>(m_node->getLastKnownBlockHeight());
-      uint32_t timeoutHeight = currentHeight + timeoutBlocks;
-
-      // 6. Create HTLC locking XFG for the maker
-      CryptoNote::WalletHelper::SendCompleteResultObserver sent;
-      WalletHelper::IWalletRemoveObserverGuard removeGuard(*m_wallet, sent);
-
-      CryptoNote::TransactionId tx = m_wallet->createHtlc(
-          matchedOffer.xfgAmount,
-          CryptoNote::parameters::MINIMUM_FEE_8KH,
-          makerPubKey,
-          hashLock,
-          timeoutHeight);
-
-      if (tx == WALLET_LEGACY_INVALID_TRANSACTION_ID) {
-        return false;
-      }
-
-      std::error_code sendError = sent.wait(tx);
-      removeGuard.removeObserver();
-
-      if (sendError) {
-        return false;
-      }
-
-      // 7. Save preimage to wallet file metadata for later reference
-      CryptoNote::WalletLegacyTransaction txInfo;
-      m_wallet->getTransaction(tx, txInfo);
-      CryptoNote::WalletHelper::storeWallet(*m_wallet, m_wallet_file);
-
-      // Log the critical swap info (preimage is the secret — user must keep it)
-      logger(Logging::INFO, Logging::BRIGHT_GREEN)
-          << "HTLC locked for swap " << offerId << std::endl
-          << "  TX:        " << Common::podToHex(txInfo.hash) << std::endl
-          << "  HashLock:  " << Common::podToHex(hashLock) << std::endl
-          << "  Preimage:  " << Common::podToHex(preimage) << std::endl
-          << "  Timeout:   " << timeoutHeight << " (+" << timeoutBlocks << " blocks)" << std::endl
-          << "  IMPORTANT: Save your preimage. Share only the hashlock with the counterparty.";
-
-      return true;
-    } catch (const std::exception&) {
-      return false;
-    }
-  };
-
-  // Cancel offer
-  cb.cancelOffer = [this, daemonHost, daemonPort](const std::string& offerId) -> bool {
-    try {
-      CryptoNote::AccountKeys walletKeys;
-      m_wallet->getAccountKeys(walletKeys);
-
-      // Sign the offerId hash for cancel authentication
-      Crypto::Hash idHash;
-      Crypto::cn_fast_hash(offerId.data(), offerId.size(), idHash);
-      Crypto::Signature sig;
-      Crypto::generate_signature(idHash, walletKeys.address.spendPublicKey,
-                                 walletKeys.spendSecretKey, sig);
-
-      COMMAND_RPC_CANCEL_SWAP_OFFER::request req;
-      COMMAND_RPC_CANCEL_SWAP_OFFER::response res;
-      req.offerId     = offerId;
-      req.makerPubKey = Common::toHex(walletKeys.address.spendPublicKey.data, 32);
-      req.signature   = Common::toHex(sig.data, sizeof(sig.data));
-
-      System::Dispatcher localDispatcher;
-      HttpClient httpClient(localDispatcher, daemonHost, daemonPort);
-      invokeJsonCommand(httpClient, "/cancelswap", req, res);
-      return res.status == CORE_RPC_STATUS_OK || res.status == "OK";
-    } catch (const std::exception&) {
-      return false;
-    }
-  };
-
-  // Get wallet balance
-  cb.getBalance = [this]() -> uint64_t {
-    return m_wallet->actualBalance();
-  };
-
-  terminal.setCallbacks(cb);
-
-  // Run the ncurses TUI on a background thread so the wallet's dispatcher
-  // stays alive on this thread.  The dispatcher must keep pumping because
-  // acceptOffer → createHtlc → NodeRpcProxy::relayTransaction posts work
-  // via remoteSpawn that only completes when the dispatcher processes it.
-  std::atomic<bool> termDone{false};
-  std::thread termThread([&terminal, &termDone]() {
-    terminal.run();
-    termDone = true;
-  });
-
-  // Cooperative sleep loop: yield to the dispatcher every 100 ms so it can
-  // process async I/O (transaction sends, node sync, etc.)
-  try {
-    while (!termDone) {
-      System::Timer timer(m_dispatcher);
-      timer.sleep(std::chrono::milliseconds(100));
-    }
-  } catch (const System::InterruptedException&) {
-    // Shutdown requested — terminal thread will notice and exit
-  }
-
-  termThread.join();
-  success_msg_writer() << "Swap terminal closed.";
 
   return true;
 }

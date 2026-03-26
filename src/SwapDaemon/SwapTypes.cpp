@@ -20,6 +20,7 @@ namespace XfgSwap {
 
 const char* swapStateToString(SwapState s) {
   switch (s) {
+    // Legacy HTLC states (kept for DB compat)
     case SwapState::INITIATED:    return "INITIATED";
     case SwapState::XFG_LOCKED:   return "XFG_LOCKED";
     case SwapState::CTR_LOCKED:   return "CTR_LOCKED";
@@ -28,14 +29,23 @@ const char* swapStateToString(SwapState s) {
     case SwapState::XFG_REFUNDED: return "XFG_REFUNDED";
     case SwapState::CTR_REFUNDED: return "CTR_REFUNDED";
     case SwapState::FAILED:       return "FAILED";
-    default:                      return "UNKNOWN";
+    // Adaptor signature flow
+    case SwapState::ADAPTOR_KEYS_EXCHANGED:  return "KEYS_EXCHANGED";
+    case SwapState::ADAPTOR_ESCROW_FUNDED:   return "ESCROW_FUNDED";
+    case SwapState::ADAPTOR_PRESIGS_READY:   return "PRESIGS_READY";
+    case SwapState::ADAPTOR_CTR_LOCKED:      return "CTR_LOCKED(adaptor)";
+    case SwapState::ADAPTOR_SECRET_REVEALED: return "SECRET_REVEALED";
+    case SwapState::ADAPTOR_XFG_SPENT:       return "XFG_SPENT";
+    case SwapState::ADAPTOR_REFUNDED:        return "REFUNDED(adaptor)";
+    default:                                 return "UNKNOWN";
   }
 }
 
 const char* swapPairToString(SwapPair p) {
   switch (p) {
-    case SwapPair::XMR: return "XMR";
+    case SwapPair::SOL: return "SOL";
     case SwapPair::ETH: return "ETH";
+    case SwapPair::XMR: return "XMR";
     case SwapPair::BCH: return "BCH";
     default:            return "UNKNOWN";
   }
@@ -44,8 +54,9 @@ const char* swapPairToString(SwapPair p) {
 SwapPair swapPairFromString(const std::string& s) {
   std::string upper = s;
   std::transform(upper.begin(), upper.end(), upper.begin(), ::toupper);
-  if (upper == "XMR") return SwapPair::XMR;
+  if (upper == "SOL") return SwapPair::SOL;
   if (upper == "ETH") return SwapPair::ETH;
+  if (upper == "XMR") return SwapPair::XMR;
   if (upper == "BCH") return SwapPair::BCH;
   throw std::runtime_error("Unknown swap pair: " + s);
 }

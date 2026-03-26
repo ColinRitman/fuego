@@ -383,14 +383,6 @@ double Currency::getBurnPercentage() const {
     {
       return boost::get<TransactionInputCommitmentTransfer>(in).amount;
     }
-    else if (in.type() == typeid(TransactionInputHashLockClaim))
-    {
-      return boost::get<TransactionInputHashLockClaim>(in).amount;
-    }
-    else if (in.type() == typeid(TransactionInputHashLockRefund))
-    {
-      return boost::get<TransactionInputHashLockRefund>(in).amount;
-    }
     else if (in.type() == typeid(BaseInput))
     {
       return 0;
@@ -425,18 +417,9 @@ double Currency::getBurnPercentage() const {
     //if (tx.inputs.size() == 0)// || tx.outputs.size() == 0) //0 outputs needed in TestGenerator::constructBlock
     //	  return false;
 
-    uint64_t swapFeeTotal = 0;
     for (const auto &in : tx.inputs)
     {
       amount_in += getTransactionInputAmount(in, height);
-      // Swap fee on HTLC inputs goes to fee pool, not miner
-      if (in.type() == typeid(TransactionInputHashLockClaim)) {
-        uint64_t amt = boost::get<TransactionInputHashLockClaim>(in).amount;
-        swapFeeTotal += (amt * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
-      } else if (in.type() == typeid(TransactionInputHashLockRefund)) {
-        uint64_t amt = boost::get<TransactionInputHashLockRefund>(in).amount;
-        swapFeeTotal += (amt * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
-      }
     }
 
     for (const auto &o : tx.outputs)
@@ -444,16 +427,13 @@ double Currency::getBurnPercentage() const {
       amount_out += o.amount;
     }
 
-    // For HTLC txs: effective_in = amount_in - swapFee (swap fee goes to pool, not miner)
-    uint64_t effective_in = amount_in > swapFeeTotal ? amount_in - swapFeeTotal : amount_in;
-
-    if (amount_out > effective_in)
+    if (amount_out > amount_in)
     {
       // interest shows up in the output of the W/D transactions and W/Ds always have min fee
       // Use versioned minimum fee based on block height
       uint8_t blockVersion = blockMajorVersionAtHeight(height);
       uint64_t versionedMinFee = minimumFee(blockVersion);
-      if (tx.inputs.size() > 0 && tx.outputs.size() > 0 && amount_out > effective_in + versionedMinFee)
+      if (tx.inputs.size() > 0 && tx.outputs.size() > 0 && amount_out > amount_in + versionedMinFee)
       {
         fee = versionedMinFee;
         logger(INFO) << "TRIGGERED: Currency.cpp getTransactionFee with versioned fee: " << versionedMinFee;
@@ -465,7 +445,7 @@ double Currency::getBurnPercentage() const {
     }
     else
     {
-      fee = effective_in - amount_out;
+      fee = amount_in - amount_out;
     }
 
     return true;

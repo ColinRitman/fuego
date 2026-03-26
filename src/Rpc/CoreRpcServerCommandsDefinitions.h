@@ -1569,52 +1569,6 @@ struct COMMAND_RPC_GET_EPOCH_REPORT {
   };
 };
 
-/** @brief Query HTLC outputs by index (for atomic swap claim/refund)
-  */
-struct COMMAND_RPC_GET_HTLC_OUTPUT {
-  struct request {
-    uint32_t index;
-
-    void serialize(ISerializer &s) {
-      KV_MEMBER(index)
-    }
-  };
-
-  struct response {
-    uint64_t amount;
-    std::string recipientKey;
-    std::string refundKey;
-    std::string hashLock;
-    uint32_t timeoutHeight;
-    bool isSpent;
-    std::string status;
-
-    void serialize(ISerializer &s) {
-      KV_MEMBER(amount)
-      KV_MEMBER(recipientKey)
-      KV_MEMBER(refundKey)
-      KV_MEMBER(hashLock)
-      KV_MEMBER(timeoutHeight)
-      KV_MEMBER(isSpent)
-      KV_MEMBER(status)
-    }
-  };
-};
-
-struct COMMAND_RPC_GET_HTLC_COUNT {
-  typedef EMPTY_STRUCT request;
-
-  struct response {
-    uint32_t count;
-    std::string status;
-
-    void serialize(ISerializer &s) {
-      KV_MEMBER(count)
-      KV_MEMBER(status)
-    }
-  };
-};
-
 // ============================================================================
 // SWAP ORDERBOOK RPC ENDPOINTS
 // ============================================================================

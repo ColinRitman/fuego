@@ -214,6 +214,14 @@ public:
       s(m_bs.m_feePoolBalance, "fee_pool_balance");
       s(m_bs.m_currentEpochSwapFees, "current_epoch_swap_fees");
       s(m_bs.m_totalCdLocked, "total_cd_locked");
+      s(m_bs.m_activeEfierCount, "active_efier_count");
+      s(m_bs.m_efierSwapRewardPerBlock, "efier_swap_reward_per_block");
+      s(m_bs.m_efierSwapRewardRemaining, "efier_swap_reward_remaining");
+      s(m_bs.m_treasuryBalance, "treasury_balance");
+      s(m_bs.m_totalSwapFeesCollected, "total_swap_fees_collected");
+      s(m_bs.m_totalCdInterestPaid, "total_cd_interest_paid");
+      s(m_bs.m_totalEfierSwapPaid, "total_efier_swap_paid");
+      s(m_bs.m_totalTreasuryAccrued, "total_treasury_accrued");
 
     auto dur = std::chrono::steady_clock::now() - start;
 
@@ -775,20 +783,6 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
           {
             m_spent_keys.insert(std::make_pair(::boost::get<TransactionInputCommitmentSpend>(i).keyImage, b));
           }
-          else if (i.type() == typeid(TransactionInputHashLockClaim))
-          {
-            const auto& claim = ::boost::get<TransactionInputHashLockClaim>(i);
-            if (claim.outputIndex < m_htlcOutputs.size()) {
-              m_htlcOutputs[claim.outputIndex].isSpent = true;
-            }
-          }
-          else if (i.type() == typeid(TransactionInputHashLockRefund))
-          {
-            const auto& refund = ::boost::get<TransactionInputHashLockRefund>(i);
-            if (refund.outputIndex < m_htlcOutputs.size()) {
-              m_htlcOutputs[refund.outputIndex].isSpent = true;
-            }
-          }
         }
 
         // process outputs
@@ -807,27 +801,6 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
             ref.commitKey            = commitOut.commitKey;
             ref.term                 = commitOut.term;
             m_commitmentOutputs[out.amount].push_back(ref);
-          } else if (out.target.type() == typeid(TransactionOutputHashLock)) {
-            const auto& htlcOut = ::boost::get<TransactionOutputHashLock>(out.target);
-            HashLockOutputUsage htlcUsage;
-            htlcUsage.blockIndex          = transactionIndex.block;
-            htlcUsage.txInBlock           = transactionIndex.transaction;
-            htlcUsage.outputInTransaction = o;
-            htlcUsage.amount              = out.amount;
-            htlcUsage.recipientKey        = htlcOut.recipientKey;
-            htlcUsage.refundKey           = htlcOut.refundKey;
-            htlcUsage.hashLock            = htlcOut.hashLock;
-            htlcUsage.timeoutHeight       = htlcOut.timeoutHeight;
-            htlcUsage.isSpent             = false;
-            m_htlcOutputs.push_back(htlcUsage);
-            // Unified ring pool: HTLC outputs share the per-amount commitment pool
-            // so they serve as decoys for deposit ring sigs and vice versa.
-            CommitmentOutputRef htlcRef;
-            htlcRef.transactionIndex    = transactionIndex;
-            htlcRef.outputInTransaction = o;
-            htlcRef.commitKey           = htlcOut.recipientKey; // claim key used for ring membership
-            htlcRef.term                = 0;  // no deposit term
-            m_commitmentOutputs[out.amount].push_back(htlcRef);
           }
         }
         interest += m_currency.calculateTotalTransactionInterest(transaction.tx, b);
@@ -1462,19 +1435,25 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
   if (blockMajorVersion >= CryptoNote::BLOCK_MAJOR_VERSION_10) {
     // V10+: Banking fees from deposits are split per-block among active EFiers.
     // Recompute deterministically from block transactions.
-    uint64_t bankingFeesInBlock = computeBankingFeesFromTransactions(blockTransactions);
+    uint64_t bankingFeesInBlock = computeBankingFeesFromTransactions(blockTransactions, m_activeEfierCount);
+
+    // Swap fee share: per-block drip from 20% of last epoch's swap fees (funded from fee pool)
+    uint64_t efierSwapReward = m_efierSwapRewardPerBlock;
+
+    // Total EFier input = banking fees (from miner) + swap reward (from fee pool)
+    uint64_t totalEfierInput = bankingFeesInBlock + efierSwapReward;
 
     // Compute expected EFier distribution (deterministic — same result on all nodes)
-    auto expectedEfierRewards = m_commitmentIndex.computePerBlockEfierRewards(bankingFeesInBlock, b.previousBlockHash);
+    auto expectedEfierRewards = m_commitmentIndex.computePerBlockEfierRewards(totalEfierInput, b.previousBlockHash);
     uint64_t efierTotal = 0;
     for (const auto& r : expectedEfierRewards) {
       efierTotal += r.second;
     }
 
-    // coinbaseTotal must equal: (reward - bankingFees) + efierTotal
-    // Banking fees deducted from miner, redistributed to EFiers — no inflation.
-    // If no active EFiers, efierTotal=0 and miner keeps full reward (bankingFees=0 effective).
-    uint64_t effectiveBankingFees = std::min(efierTotal, reward);  // Can't deduct more than reward
+    // coinbaseTotal = (reward - bankingFees) + efierTotal
+    // bankingFees deducted from miner reward, swap reward funded from fee pool.
+    // Net: miner loses bankingFees, fee pool loses efierSwapReward, EFiers gain efierTotal.
+    uint64_t effectiveBankingFees = std::min(bankingFeesInBlock, reward);  // Can't deduct more than reward
     uint64_t expectedCoinbase = reward - effectiveBankingFees + efierTotal;
 
     if (coinbaseTotal != expectedCoinbase) {
@@ -2192,78 +2171,6 @@ bool Blockchain::checkTransactionInputs(const Transaction& tx, const Crypto::Has
 
         ++inputIndex;
       }
-      else if (txin.type() == typeid(TransactionInputHashLockClaim))
-      {
-        const TransactionInputHashLockClaim& claim = boost::get<TransactionInputHashLockClaim>(txin);
-
-        if (claim.outputIndex >= m_htlcOutputs.size()) {
-          logger(ERROR, BRIGHT_RED) << "HTLC claim references non-existent output " << claim.outputIndex << " in tx " << transactionHash;
-          return false;
-        }
-        const auto& htlc = m_htlcOutputs[claim.outputIndex];
-        if (htlc.isSpent) {
-          logger(DEBUGGING) << "HTLC output " << claim.outputIndex << " already spent in tx " << transactionHash;
-          return false;
-        }
-        if (claim.amount != htlc.amount) {
-          logger(ERROR, BRIGHT_RED) << "HTLC claim amount mismatch in tx " << transactionHash;
-          return false;
-        }
-        // Verify preimage: cn_fast_hash(preimage) == hashLock
-        Crypto::Hash computedHash;
-        Crypto::cn_fast_hash(claim.preimage.data, sizeof(claim.preimage.data), computedHash);
-        if (computedHash != htlc.hashLock) {
-          logger(INFO, BRIGHT_WHITE) << "HTLC claim preimage invalid in tx " << transactionHash;
-          return false;
-        }
-        // Verify signature with recipientKey
-        if (!isInCheckpointZone(getCurrentBlockchainHeight())) {
-          if (tx.signatures[inputIndex].size() != 1) {
-            logger(ERROR, BRIGHT_RED) << "HTLC claim expects 1 signature in tx " << transactionHash;
-            return false;
-          }
-          if (!Crypto::check_signature(tx_prefix_hash, htlc.recipientKey, tx.signatures[inputIndex][0])) {
-            logger(INFO, BRIGHT_WHITE) << "HTLC claim signature failed in tx " << transactionHash;
-            return false;
-          }
-        }
-        ++inputIndex;
-      }
-      else if (txin.type() == typeid(TransactionInputHashLockRefund))
-      {
-        const TransactionInputHashLockRefund& refund = boost::get<TransactionInputHashLockRefund>(txin);
-
-        if (refund.outputIndex >= m_htlcOutputs.size()) {
-          logger(ERROR, BRIGHT_RED) << "HTLC refund references non-existent output " << refund.outputIndex << " in tx " << transactionHash;
-          return false;
-        }
-        const auto& htlc = m_htlcOutputs[refund.outputIndex];
-        if (htlc.isSpent) {
-          logger(DEBUGGING) << "HTLC output " << refund.outputIndex << " already spent in tx " << transactionHash;
-          return false;
-        }
-        if (refund.amount != htlc.amount) {
-          logger(ERROR, BRIGHT_RED) << "HTLC refund amount mismatch in tx " << transactionHash;
-          return false;
-        }
-        // Timeout must have expired
-        if (getCurrentBlockchainHeight() < htlc.timeoutHeight) {
-          logger(INFO, BRIGHT_WHITE) << "HTLC refund before timeout in tx " << transactionHash;
-          return false;
-        }
-        // Verify signature with refundKey
-        if (!isInCheckpointZone(getCurrentBlockchainHeight())) {
-          if (tx.signatures[inputIndex].size() != 1) {
-            logger(ERROR, BRIGHT_RED) << "HTLC refund expects 1 signature in tx " << transactionHash;
-            return false;
-          }
-          if (!Crypto::check_signature(tx_prefix_hash, htlc.refundKey, tx.signatures[inputIndex][0])) {
-            logger(INFO, BRIGHT_WHITE) << "HTLC refund signature failed in tx " << transactionHash;
-            return false;
-          }
-        }
-        ++inputIndex;
-      }
       else if (txin.type() == typeid(TransactionInputCommitmentTransfer))
       {
         const TransactionInputCommitmentTransfer& xfer = boost::get<TransactionInputCommitmentTransfer>(txin);
@@ -2625,30 +2532,6 @@ bool Blockchain::check_tx_outputs(const Transaction& tx, uint32_t height) const 
           }
         }
       }
-    } else if (out.target.type() == typeid(TransactionOutputHashLock)) {
-      if (tx.version < CryptoNote::TRANSACTION_VERSION_2) {
-        logger(INFO, BRIGHT_WHITE) << getObjectHash(tx) << " contains HTLC output but has version " << tx.version;
-        return false;
-      }
-      const auto& htlc = ::boost::get<TransactionOutputHashLock>(out.target);
-      uint32_t minTimeout = m_currency.isTestnet() ?
-        CryptoNote::TESTNET_HTLC_MIN_TIMEOUT :
-        CryptoNote::HTLC_MIN_TIMEOUT;
-      uint32_t maxTimeout = m_currency.isTestnet() ?
-        CryptoNote::TESTNET_HTLC_MAX_TIMEOUT :
-        CryptoNote::HTLC_MAX_TIMEOUT;
-      if (htlc.timeoutHeight < height + minTimeout) {
-        logger(INFO, BRIGHT_WHITE) << getObjectHash(tx) << " HTLC timeout too short: " << htlc.timeoutHeight;
-        return false;
-      }
-      if (htlc.timeoutHeight > height + maxTimeout) {
-        logger(INFO, BRIGHT_WHITE) << getObjectHash(tx) << " HTLC timeout too far: " << htlc.timeoutHeight;
-        return false;
-      }
-      if (out.amount == 0) {
-        logger(INFO, BRIGHT_WHITE) << getObjectHash(tx) << " HTLC output with zero amount";
-        return false;
-      }
     }
   }
 
@@ -2957,19 +2840,7 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
     uint64_t in_amount = m_currency.getTransactionAllInputsAmount(transactions[i], block.height);
 	  uint64_t out_amount = getOutputAmount(transactions[i]);
 
-    // Compute swap fee for HTLC inputs — goes to fee pool, NOT miner
-    uint64_t txSwapFee = 0;
-    for (const auto& inp : transactions[i].inputs) {
-      if (inp.type() == typeid(TransactionInputHashLockClaim)) {
-        uint64_t amt = boost::get<TransactionInputHashLockClaim>(inp).amount;
-        txSwapFee += (amt * CryptoNote::parameters::SWAP_FEE_RATE_BPS) / CryptoNote::parameters::SWAP_FEE_RATE_DIVISOR;
-      } else if (inp.type() == typeid(TransactionInputHashLockRefund)) {
-        uint64_t amt = boost::get<TransactionInputHashLockRefund>(inp).amount;
-        txSwapFee += (amt * CryptoNote::parameters::SWAP_FEE_RATE_BPS) / CryptoNote::parameters::SWAP_FEE_RATE_DIVISOR;
-      }
-    }
-
-    uint64_t fee = in_amount < out_amount ? m_currency.minimumFee(blockData.majorVersion) : in_amount - out_amount - txSwapFee;
+    uint64_t fee = in_amount < out_amount ? m_currency.minimumFee(blockData.majorVersion) : in_amount - out_amount;
 
     bool isTransactionValid = true;
     if (block.bl.majorVersion < BLOCK_MAJOR_VERSION_8 && transactions[i].version > TRANSACTION_VERSION_1) {
@@ -3038,9 +2909,15 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
     for (size_t i = 1; i < block.transactions.size(); ++i) {
       blockTxs.push_back(block.transactions[i].tx);
     }
-    uint64_t blockBankingFee = computeBankingFeesFromTransactions(blockTxs);
+    uint64_t blockBankingFee = computeBankingFeesFromTransactions(blockTxs, m_activeEfierCount);
     if (blockBankingFee > 0) {
       m_commitmentIndex.addBlockBankingFee(blockHeight, blockBankingFee);
+    }
+
+    // Track EFier swap reward drip: decrement remaining, accumulate paid
+    if (m_efierSwapRewardPerBlock > 0 && m_efierSwapRewardRemaining >= m_efierSwapRewardPerBlock) {
+      m_efierSwapRewardRemaining -= m_efierSwapRewardPerBlock;
+      m_totalEfierSwapPaid += m_efierSwapRewardPerBlock;
     }
   }
 
@@ -3091,20 +2968,6 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
   {
     std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
     return m_bankingIndex.getBurnedXfgAtHeight(static_cast<BankingIndex::DepositHeight>(height));
-  }
-
-  // --- HTLC Output Accessors ---
-
-  size_t Blockchain::getHtlcOutputCount() const {
-    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-    return m_htlcOutputs.size();
-  }
-
-  bool Blockchain::getHtlcOutput(uint32_t index, HashLockOutputUsage& out) const {
-    std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-    if (index >= m_htlcOutputs.size()) return false;
-    out = m_htlcOutputs[index];
-    return true;
   }
 
   // --- Commitment Index Accessors ---
@@ -3164,21 +3027,23 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
     return m_commitmentIndex.highestBlock();
   }
 
-  uint64_t Blockchain::computeBankingFeesFromTransactions(const std::vector<Transaction>& txs) {
+  uint64_t Blockchain::computeBankingFeesFromTransactions(const std::vector<Transaction>& txs, uint32_t activeEfierCount) {
+    if (activeEfierCount == 0) return 0;  // no active EFiers → no banking fees
     uint64_t totalBankingFees = 0;
+    // 0.1% per active EFier = (amount * activeCount) / 1000
     for (const auto& tx : txs) {
       std::vector<TransactionExtraField> extraFields;
       if (!parseTransactionExtra(tx.extra, extraFields)) continue;
       for (const auto& field : extraFields) {
         if (field.type() == typeid(TransactionExtraHeatCommitment)) {
           const auto& heat = boost::get<TransactionExtraHeatCommitment>(field);
-          totalBankingFees += (heat.amount * 1) / 1000;  // 0.1%
+          totalBankingFees += (heat.amount * activeEfierCount) / 1000;
         } else if (field.type() == typeid(TransactionExtraColdCommitment)) {
           const auto& cold = boost::get<TransactionExtraColdCommitment>(field);
-          totalBankingFees += (cold.amount * 1) / 1000;  // 0.1%
+          totalBankingFees += (cold.amount * activeEfierCount) / 1000;
         } else if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
           const auto& ef = boost::get<TransactionExtraElderfierDeposit>(field);
-          totalBankingFees += (ef.depositAmount * 1) / 1000;  // 0.1%
+          totalBankingFees += (ef.depositAmount * activeEfierCount) / 1000;
         }
       }
     }
@@ -3608,20 +3473,45 @@ bool Blockchain::pushBlock(BlockEntry &block) {
     uint64_t epochNumber = newHeight / epochDuration;
     uint64_t epochStart = (epochNumber - 1) * epochDuration;
     uint64_t epochEnd = epochStart + epochDuration - 1;
-    // Compute fee rate for this epoch: (swapFees * PRECISION) / totalCdLocked
-    uint64_t epochFeeRate = 0;
+    // Split swap fees: 80% CD yield / 10% EFiers / 10% Treasury
     uint64_t epochSwapFees = m_currentEpochSwapFees;
     uint64_t epochCdLocked = m_totalCdLocked;
-    if (epochCdLocked > 0 && epochSwapFees > 0) {
-      epochFeeRate = (epochSwapFees * CryptoNote::parameters::FEE_POOL_RATE_PRECISION) / epochCdLocked;
+    uint64_t efierSwapShare = (epochSwapFees * CryptoNote::parameters::SWAP_FEE_EFIER_SHARE_PCT) / 100;
+    uint64_t treasuryShare = (epochSwapFees * CryptoNote::parameters::SWAP_FEE_TREASURY_SHARE_PCT) / 100;
+    uint64_t cdSwapShare = epochSwapFees - efierSwapShare - treasuryShare;
+
+    // Compute fee rate for this epoch on CD's 80% share only
+    uint64_t epochFeeRate = 0;
+    if (epochCdLocked > 0 && cdSwapShare > 0) {
+      epochFeeRate = (cdSwapShare * CryptoNote::parameters::FEE_POOL_RATE_PRECISION) / epochCdLocked;
     }
-    m_commitmentIndex.recordEpochFeeRate(epochNumber, epochFeeRate, epochSwapFees, epochCdLocked);
+    m_commitmentIndex.recordEpochFeeRate(epochNumber, epochFeeRate, cdSwapShare, epochCdLocked);
+
+    // Cumulative accounting: track lifetime swap fees entering the pool
+    m_totalSwapFeesCollected += epochSwapFees;
+
+    // Deduct EFier + Treasury share from fee pool and spread EFier across next epoch
+    uint64_t totalNonCdShare = efierSwapShare + treasuryShare;
+    if (totalNonCdShare > 0 && m_feePoolBalance >= totalNonCdShare) {
+      m_feePoolBalance -= totalNonCdShare;
+      m_efierSwapRewardPerBlock = efierSwapShare / epochDuration;
+      m_efierSwapRewardRemaining = efierSwapShare;  // drips to 0 over next epoch
+      m_treasuryBalance += treasuryShare;
+      m_totalTreasuryAccrued += treasuryShare;
+    } else {
+      m_efierSwapRewardPerBlock = 0;
+      m_efierSwapRewardRemaining = 0;
+    }
 
     // Reset epoch accumulator for next epoch
     m_currentEpochSwapFees = 0;
 
     EpochReport report = m_commitmentIndex.generateEpochReport(
         epochNumber, epochStart, epochEnd, newHeight);
+
+    // Snapshot active EFier count for next epoch's banking fee calculation
+    m_activeEfierCount = report.activeEfierCount;
+
     // Fill in fee pool fields
     report.swapFeesCollected = epochSwapFees;
     report.totalCdLockedAtStart = epochCdLocked;
@@ -3635,8 +3525,14 @@ bool Blockchain::pushBlock(BlockEntry &block) {
                  << " double_signs=" << report.doubleSignEvents.size()
                  << " recommendations=" << report.slash_advisory.size()
                  << " swapFees=" << epochSwapFees
+                 << " cdShare=" << cdSwapShare
+                 << " efierShare=" << efierSwapShare
+                 << " treasuryShare=" << treasuryShare
+                 << " efierSwapPerBlk=" << m_efierSwapRewardPerBlock
+                 << " treasuryBal=" << m_treasuryBalance
                  << " cdLocked=" << epochCdLocked
-                 << " feeRate=" << epochFeeRate;
+                 << " feeRate=" << epochFeeRate
+                 << " activeEFs=" << m_activeEfierCount;
     for (auto& rec : report.slash_advisory) {
       logger(WARNING) << "elder_council ADVISORY (use `propose_slash` to act): " << rec;
     }
@@ -3747,6 +3643,7 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
       m_totalCdLocked -= cin.amount;
       if (cin.claimedInterest > 0 && cin.claimedInterest <= m_feePoolBalance) {
         m_feePoolBalance -= cin.claimedInterest;
+        m_totalCdInterestPaid += cin.claimedInterest;
       }
     } else if (inv.type() == typeid(TransactionInputCommitmentTransfer)) {
       const auto& xfer = ::boost::get<TransactionInputCommitmentTransfer>(inv);
@@ -3757,30 +3654,6 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
         return false;
       }
       // Transfer doesn't change locked supply (old CD consumed, new CD produced — net zero)
-    } else if (inv.type() == typeid(TransactionInputHashLockClaim)) {
-      const auto& claim = ::boost::get<TransactionInputHashLockClaim>(inv);
-      if (claim.outputIndex >= m_htlcOutputs.size() || m_htlcOutputs[claim.outputIndex].isSpent) {
-        logger(ERROR, BRIGHT_RED) << "HTLC claim references invalid or spent output in pushTransaction.";
-        m_transactionMap.erase(transactionHash);
-        return false;
-      }
-      m_htlcOutputs[claim.outputIndex].isSpent = true;
-      // Accumulate swap fee into fee pool (1% of claim amount)
-      uint64_t swapFee = (claim.amount * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
-      m_feePoolBalance += swapFee;
-      m_currentEpochSwapFees += swapFee;
-    } else if (inv.type() == typeid(TransactionInputHashLockRefund)) {
-      const auto& refund = ::boost::get<TransactionInputHashLockRefund>(inv);
-      if (refund.outputIndex >= m_htlcOutputs.size() || m_htlcOutputs[refund.outputIndex].isSpent) {
-        logger(ERROR, BRIGHT_RED) << "HTLC refund references invalid or spent output in pushTransaction.";
-        m_transactionMap.erase(transactionHash);
-        return false;
-      }
-      m_htlcOutputs[refund.outputIndex].isSpent = true;
-      // Accumulate swap fee into fee pool (1% of refund amount)
-      uint64_t swapFee = (refund.amount * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
-      m_feePoolBalance += swapFee;
-      m_currentEpochSwapFees += swapFee;
     }
   }
 
@@ -3807,27 +3680,6 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
       amountOutputs.push_back(ref);
       // Track total XFG locked in CDs
       m_totalCdLocked += transaction.tx.outputs[output].amount;
-    } else if (transaction.tx.outputs[output].target.type() == typeid(TransactionOutputHashLock)) {
-      const auto& htlcOut = ::boost::get<TransactionOutputHashLock>(transaction.tx.outputs[output].target);
-      transaction.m_global_output_indexes[output] = static_cast<uint32_t>(m_htlcOutputs.size());
-      HashLockOutputUsage htlcUsage;
-      htlcUsage.blockIndex          = transactionIndex.block;
-      htlcUsage.txInBlock           = transactionIndex.transaction;
-      htlcUsage.outputInTransaction = output;
-      htlcUsage.amount              = transaction.tx.outputs[output].amount;
-      htlcUsage.recipientKey        = htlcOut.recipientKey;
-      htlcUsage.refundKey           = htlcOut.refundKey;
-      htlcUsage.hashLock            = htlcOut.hashLock;
-      htlcUsage.timeoutHeight       = htlcOut.timeoutHeight;
-      htlcUsage.isSpent             = false;
-      m_htlcOutputs.push_back(htlcUsage);
-      // Unified ring pool: also add to commitment outputs for decoy selection
-      CommitmentOutputRef htlcRef;
-      htlcRef.transactionIndex    = transactionIndex;
-      htlcRef.outputInTransaction = output;
-      htlcRef.commitKey           = htlcOut.recipientKey;
-      htlcRef.term                = 0;
-      m_commitmentOutputs[transaction.tx.outputs[output].amount].push_back(htlcRef);
     }
   }
 
@@ -3928,21 +3780,6 @@ void Blockchain::popTransaction(const Transaction& transaction, const Crypto::Ha
       if (m_totalCdLocked >= output.amount) {
         m_totalCdLocked -= output.amount;
       }
-    } else if (output.target.type() == typeid(TransactionOutputHashLock)) {
-      if (m_htlcOutputs.empty()) {
-        logger(ERROR, BRIGHT_RED) <<
-          "Blockchain consistency broken - HTLC output array is empty during pop.";
-        continue;
-      }
-      m_htlcOutputs.pop_back();
-      // Pop from unified commitment ring pool
-      auto amountOutputs = m_commitmentOutputs.find(output.amount);
-      if (amountOutputs != m_commitmentOutputs.end() && !amountOutputs->second.empty()) {
-        amountOutputs->second.pop_back();
-        if (amountOutputs->second.empty()) {
-          m_commitmentOutputs.erase(amountOutputs);
-        }
-      }
     }
   }
 
@@ -3973,6 +3810,9 @@ void Blockchain::popTransaction(const Transaction& transaction, const Crypto::Ha
       m_totalCdLocked += cin.amount;
       if (cin.claimedInterest > 0) {
         m_feePoolBalance += cin.claimedInterest;
+        if (m_totalCdInterestPaid >= cin.claimedInterest) {
+          m_totalCdInterestPaid -= cin.claimedInterest;
+        }
       }
     } else if (input.type() == typeid(TransactionInputCommitmentTransfer)) {
       const auto& xfer = ::boost::get<TransactionInputCommitmentTransfer>(input);
@@ -3981,24 +3821,6 @@ void Blockchain::popTransaction(const Transaction& transaction, const Crypto::Ha
         logger(ERROR, BRIGHT_RED) <<
           "Blockchain consistency broken - cannot find spent commitment transfer key.";
       }
-    } else if (input.type() == typeid(TransactionInputHashLockClaim)) {
-      const auto& claim = ::boost::get<TransactionInputHashLockClaim>(input);
-      if (claim.outputIndex < m_htlcOutputs.size()) {
-        m_htlcOutputs[claim.outputIndex].isSpent = false;
-      }
-      // Reverse swap fee from fee pool
-      uint64_t swapFee = (claim.amount * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
-      if (m_feePoolBalance >= swapFee) m_feePoolBalance -= swapFee;
-      if (m_currentEpochSwapFees >= swapFee) m_currentEpochSwapFees -= swapFee;
-    } else if (input.type() == typeid(TransactionInputHashLockRefund)) {
-      const auto& refund = ::boost::get<TransactionInputHashLockRefund>(input);
-      if (refund.outputIndex < m_htlcOutputs.size()) {
-        m_htlcOutputs[refund.outputIndex].isSpent = false;
-      }
-      // Reverse swap fee from fee pool
-      uint64_t swapFee = (refund.amount * parameters::SWAP_FEE_RATE_BPS) / parameters::SWAP_FEE_RATE_DIVISOR;
-      if (m_feePoolBalance >= swapFee) m_feePoolBalance -= swapFee;
-      if (m_currentEpochSwapFees >= swapFee) m_currentEpochSwapFees -= swapFee;
     }
   }
 

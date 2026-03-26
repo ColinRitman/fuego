@@ -20,18 +20,42 @@
 #include <functional>
 #include "crypto/hash.h"
 #include "crypto/crypto.h"
+#include "crypto/adaptor.h"
+#include "crypto/dleq.h"
+#include "crypto/musig2.h"
 
 namespace XfgSwap {
 
 enum class SwapState : uint8_t {
+  // ── Legacy HTLC flow (inactive) ──
   INITIATED = 0,
   XFG_LOCKED = 1,       // Bob created HTLC on Fuego
-  CTR_LOCKED = 2,       // Alice locked on counterparty chain (XMR/ETH/BCH)
+  CTR_LOCKED = 2,       // Alice locked on counterparty chain (SOL/ETH/XMR/BCH)
   XFG_CLAIMED = 3,      // Alice claimed XFG (preimage revealed)
   CTR_CLAIMED = 4,      // Bob claimed on counterparty chain
   XFG_REFUNDED = 5,     // Bob refunded XFG (timeout)
   CTR_REFUNDED = 6,     // Alice refunded counterparty chain (timeout)
-  FAILED = 7
+  FAILED = 7,
+
+  // ── Adaptor signature flow ──
+  //
+  // Protocol (Alice sells XFG, Bob buys XFG):
+  //   1. Both exchange pubkeys → Musig2 joint key P
+  //   2. Bob picks adaptor secret t, publishes T = t*G + DLEQ proof
+  //   3. Alice funds escrow: XFG → P (standard KeyOutput)
+  //   4. Both exchange nonces + adaptor pre-sigs
+  //   5. Bob locks counterparty coins (ETH/BCH HTLC or XMR adaptor)
+  //   6. Alice claims counterparty → reveals t
+  //   7. Bob adapts pre-sig → valid Musig2 sig → spends P → Bob
+  //   8. Alice extracts t from on-chain tx
+  //
+  ADAPTOR_KEYS_EXCHANGED = 10,   // pubkeys shared, Musig2 key aggregated
+  ADAPTOR_ESCROW_FUNDED  = 11,   // XFG sent to Musig2 joint address
+  ADAPTOR_PRESIGS_READY  = 12,   // nonces exchanged, partial sigs created
+  ADAPTOR_CTR_LOCKED     = 13,   // counterparty chain locked
+  ADAPTOR_SECRET_REVEALED = 14,  // adaptor secret learned (from ctr chain claim)
+  ADAPTOR_XFG_SPENT      = 15,   // adapted sig broadcast, escrow spent
+  ADAPTOR_REFUNDED       = 16    // cooperative refund completed
 };
 
 enum class SwapRole : uint8_t {
@@ -40,9 +64,24 @@ enum class SwapRole : uint8_t {
 };
 
 enum class SwapPair : uint8_t {
-  XMR = 0,
+  SOL = 0,
   ETH = 1,
-  BCH = 2
+  XMR = 2,
+  BCH = 3
+};
+
+// Musig2 session state persisted across swap steps.
+struct Musig2State {
+  Crypto::Musig2KeyAgg keyAgg;
+  Crypto::Musig2SecNonce ourSecNonce;
+  Crypto::Musig2PubNonce ourPubNonce;
+  Crypto::Musig2PubNonce peerPubNonce;
+  Crypto::Musig2AggNonce aggNonce;
+  Crypto::Musig2Session  session;
+  Crypto::Musig2PartialSig ourPartialSig;
+  Crypto::Musig2PartialSig peerPartialSig;
+  bool nonceGenerated = false;
+  bool sessionInitialized = false;
 };
 
 struct SwapParams {
@@ -56,7 +95,25 @@ struct SwapParams {
   Crypto::PublicKey aliceXfgPubKey;
   Crypto::PublicKey bobXfgPubKey;
 
-  // HTLC params
+  // ── Adaptor signature fields ──
+  Crypto::SecretKey ourSwapSecKey;     // our secret key for this swap
+  Crypto::PublicKey ourSwapPubKey;     // our public key
+  Crypto::PublicKey peerSwapPubKey;    // counterparty's public key
+  Crypto::PublicKey escrowPubKey;      // Musig2 aggregated key (joint address)
+
+  // Adaptor point: T = t*G (Bob generates, Alice verifies)
+  Crypto::PublicKey adaptorPoint;
+  Crypto::SecretKey adaptorSecret;     // t — known by Bob, revealed via ctr chain
+  Crypto::DLEQProof adaptorDleqProof; // proves T is well-formed
+
+  // Musig2 session state
+  Musig2State musig2;
+
+  // Escrow tx on XFG chain
+  Crypto::Hash escrowTxHash;
+  uint32_t escrowOutputIndex = 0;      // global output index of escrow
+
+  // ── Legacy HTLC fields (kept for backward compat) ──
   Crypto::Hash hashLock;
   Crypto::Hash preimage;        // known only by initiator until claim
   uint32_t xfgTimeoutHeight;
@@ -67,7 +124,7 @@ struct SwapParams {
   std::string ctrLockTxId;      // counterparty lock tx hash
 
   // Counterparty-specific
-  std::string ctrAddress;       // counterparty chain address (XMR/ETH/BCH)
+  std::string ctrAddress;       // counterparty chain address (SOL/ETH/XMR/BCH)
   std::string peerEndpoint;     // swap counterparty's network address
 };
 

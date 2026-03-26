@@ -35,6 +35,12 @@ file(GLOB_RECURSE SimpleWallet SimpleWallet/*)
 # Remove duplicate glob definition and explicitly define library sources
 list(REMOVE_ITEM SimpleWallet SimpleWallet/main.cpp)
 
+# Adaptor swap protocol helpers needed by wallet commands
+list(APPEND SimpleWallet
+    SwapDaemon/AdaptorSwap.cpp
+    SwapDaemon/SwapTypes.cpp
+)
+
 file(GLOB_RECURSE Optimizer Optimizer/*)
 
 # Tor integration
@@ -268,16 +274,19 @@ add_executable(SwapDaemon
     SwapDaemon/main.cpp
     SwapDaemon/SwapTypes.cpp
     SwapDaemon/SwapStateMachine.cpp
+    SwapDaemon/AdaptorSwap.cpp
     SwapDaemon/FuegoRpcClient.cpp
     SwapDaemon/PriceOracle.cpp
     SwapDaemon/SwapDatabase.cpp
     SwapDaemon/SwapDaemon.cpp
+    SwapDaemon/SwapP2P.cpp
     SwapDaemon/Monero/MoneroRpcClient.cpp
     SwapDaemon/Monero/AdaptorSignature.cpp
     SwapDaemon/Ethereum/EthRpcClient.cpp
     SwapDaemon/Ethereum/ContractAbi.cpp
     SwapDaemon/BitcoinCash/BchRpcClient.cpp
     SwapDaemon/BitcoinCash/HtlcScript.cpp
+    SwapDaemon/Solana/SolRpcClient.cpp
 )
 
 # Add TestnetWallet executable (extends simple_wallet with testnet-specific commands)

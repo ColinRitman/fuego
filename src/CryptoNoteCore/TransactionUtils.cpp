@@ -60,9 +60,6 @@ size_t getRequiredSignaturesCount(const TransactionInput& in) {
   if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
     return boost::get<TransactionInputCommitmentTransfer>(in).outputIndexes.size();
   }
-  if (in.type() == typeid(TransactionInputHashLockClaim) || in.type() == typeid(TransactionInputHashLockRefund)) {
-    return 1;
-  }
   return 0;
 }
 
@@ -79,12 +76,6 @@ uint64_t getTransactionInputAmount(const TransactionInput& in) {
   }
   if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
     return boost::get<TransactionInputCommitmentTransfer>(in).amount;
-  }
-  if (in.type() == typeid(TransactionInputHashLockClaim)) {
-    return boost::get<TransactionInputHashLockClaim>(in).amount;
-  }
-  if (in.type() == typeid(TransactionInputHashLockRefund)) {
-    return boost::get<TransactionInputHashLockRefund>(in).amount;
   }
   return 0;
 }
@@ -104,12 +95,6 @@ TransactionTypes::InputType getTransactionInputType(const TransactionInput& in) 
   }
   if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
     return TransactionTypes::InputType::CommitmentTransfer;
-  }
-  if (in.type() == typeid(TransactionInputHashLockClaim)) {
-    return TransactionTypes::InputType::HashLockClaim;
-  }
-  if (in.type() == typeid(TransactionInputHashLockRefund)) {
-    return TransactionTypes::InputType::HashLockRefund;
   }
   return TransactionTypes::InputType::Invalid;
 }
@@ -140,9 +125,6 @@ TransactionTypes::OutputType getTransactionOutputType(const TransactionOutputTar
   }
   if (out.type() == typeid(TransactionOutputCommitment)) {
     return TransactionTypes::OutputType::Commitment;
-  }
-  if (out.type() == typeid(TransactionOutputHashLock)) {
-    return TransactionTypes::OutputType::HashLock;
   }
   return TransactionTypes::OutputType::Invalid;
 }
@@ -186,7 +168,7 @@ bool findOutputsToAccount(const CryptoNote::TransactionPrefix& transaction, cons
 
   for (const TransactionOutput& o : transaction.outputs) {
     assert(o.target.type() == typeid(KeyOutput) || o.target.type() == typeid(MultisignatureOutput) ||
-           o.target.type() == typeid(TransactionOutputCommitment) || o.target.type() == typeid(TransactionOutputHashLock));
+           o.target.type() == typeid(TransactionOutputCommitment));
     if (o.target.type() == typeid(KeyOutput)) {
       if (is_out_to_acc(keys, boost::get<KeyOutput>(o.target), derivation, keyIndex)) {
         out.push_back(outputIndex);

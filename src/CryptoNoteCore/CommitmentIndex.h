@@ -157,7 +157,7 @@ struct EpochReport {
   uint64_t participatingEfierCount = 0;
 
   // Fee pool: swap fee data for this epoch
-  uint64_t swapFeesCollected = 0;       // total swap fees from HTLC claims this epoch
+  uint64_t swapFeesCollected = 0;       // total swap fees from adaptor-sig claims this epoch
   uint64_t totalCdLockedAtStart = 0;    // total XFG in CDs at epoch start
   uint64_t feeRateFixedPoint = 0;       // (swapFeesCollected * RATE_PRECISION) / totalCdLockedAtStart
 

@@ -23,6 +23,7 @@ namespace XfgSwap {
 // =============================================================================
 //
 // Counterparty prices (March 2026):
+//   SOL = $170    →  1 SOL =  17,000 XFG
 //   ETH = $2,140  →  1 ETH = 214,000 XFG
 //   BCH = $469    →  1 BCH =  46,900 XFG
 //   XMR = $343    →  1 XMR =  34,300 XFG
@@ -32,6 +33,7 @@ namespace XfgSwap {
 // =============================================================================
 
 static const double SEED_XFG_USD = 0.01;
+static const double SEED_SOL_USD = 170.0;
 static const double SEED_ETH_USD = 2140.0;
 static const double SEED_BCH_USD = 469.0;
 static const double SEED_XMR_USD = 343.0;
@@ -60,6 +62,7 @@ double PriceOracle::getSeedXfgUsd() {
 double PriceOracle::getSeedRate(SwapPair pair) {
   // Returns: how many XFG per 1 whole counterparty coin
   switch (pair) {
+    case SwapPair::SOL: return SEED_SOL_USD / SEED_XFG_USD;  //  17,000
     case SwapPair::ETH: return SEED_ETH_USD / SEED_XFG_USD;  // 214,000
     case SwapPair::BCH: return SEED_BCH_USD / SEED_XFG_USD;  //  46,900
     case SwapPair::XMR: return SEED_XMR_USD / SEED_XFG_USD;  //  34,300
@@ -73,6 +76,7 @@ double PriceOracle::getSeedRate(SwapPair pair) {
 
 double PriceOracle::ctrDivisor(SwapPair pair) {
   switch (pair) {
+    case SwapPair::SOL: return 1e9;   // lamports (1 SOL = 1e9 lamports)
     case SwapPair::ETH: return 1e18;  // wei
     case SwapPair::BCH: return 1e8;   // satoshi
     case SwapPair::XMR: return 1e12;  // piconero

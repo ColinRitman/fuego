@@ -52,11 +52,6 @@ struct SendTransactionContext
   bool dynamicRingSize = false; // true: select optimal ring size from actual daemon-returned outs
   std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry> commitmentOuts; // ring decoys for CommitmentSpend
 
-  // HTLC parameters (only used when isHtlc == true)
-  bool isHtlc = false;
-  Crypto::PublicKey htlcRecipientKey;
-  Crypto::Hash htlcHashLock;
-  uint32_t htlcTimeoutHeight = 0;
 };
 
 } //namespace CryptoNote

@@ -48,11 +48,11 @@ void printUsage() {
     "  --testnet               Use testnet ports (fuegod: 28280)\n"
     "  --help                  Show this help message\n"
     "\n"
-    "Pairs: XMR, ETH, BCH\n"
+    "Pairs: SOL, ETH, XMR, BCH\n"
     "Amounts are in atomic units (1 XFG = 10,000,000 atomic)\n"
     "\n"
     "Examples:\n"
-    "  xfg-swap initiate XMR 10000000 1000000000000 192.168.1.100:9999\n"
+    "  xfg-swap initiate SOL 10000000 1000000000 192.168.1.100:9999\n"
     "  xfg-swap status a1b2c3d4e5f6\n"
     "  xfg-swap list\n"
     "  xfg-swap --testnet list\n"
@@ -158,10 +158,18 @@ int main(int argc, char* argv[]) {
     // Zero-init crypto fields
     std::memset(&params.aliceXfgPubKey, 0, sizeof(params.aliceXfgPubKey));
     std::memset(&params.bobXfgPubKey, 0, sizeof(params.bobXfgPubKey));
+    std::memset(&params.ourSwapSecKey, 0, sizeof(params.ourSwapSecKey));
+    std::memset(&params.ourSwapPubKey, 0, sizeof(params.ourSwapPubKey));
+    std::memset(&params.peerSwapPubKey, 0, sizeof(params.peerSwapPubKey));
+    std::memset(&params.escrowPubKey, 0, sizeof(params.escrowPubKey));
+    std::memset(&params.adaptorPoint, 0, sizeof(params.adaptorPoint));
+    std::memset(&params.adaptorSecret, 0, sizeof(params.adaptorSecret));
+    std::memset(&params.escrowTxHash, 0, sizeof(params.escrowTxHash));
     std::memset(&params.hashLock, 0, sizeof(params.hashLock));
     std::memset(&params.preimage, 0, sizeof(params.preimage));
     params.xfgTimeoutHeight = 0;  // will be set by daemon
     params.ctrTimeoutBlock = 0;
+    params.escrowOutputIndex = 0;
     params.htlcOutputIndex = 0;
 
     if (!daemon.initiate(params)) {
