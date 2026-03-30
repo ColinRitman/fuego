@@ -1,71 +1,33 @@
-// Copyright (c) 2017-2026 Fuego Developers
-// Copyright (c) 2020-2026 Elderfire Privacy Group
-//
-//  D. Chaum and T.P. Pedersen, 1992
-//  D.J. Bernstein et al.
-//
-// This file is part of Fuego.
-//
-// Fuego is free & open source software distributed in the hope
-// it will be useful, but WITHOUT ANY WARRANTY; without even an
-// implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR
-// PURPOSE. You may redistribute it and/or modify it under the terms
-// of the GNU General Public License v3 or later versions as published
-// by the Free Software Foundation. Fuego includes elements written
-// by third parties. See file labeled LICENSE for more details.
-// You should have received a copy of the GNU General Public License
-// along with Fuego. If not, see <https://www.gnu.org/licenses/>.
-//
-// Discrete Log Equality (DLEQ) proofs.
-//
-// Proves knowledge of a scalar x such that A = x*G AND B = x*P
-// simultaneously, without revealing x. Standard Chaum-Pedersen
-// proof applied to Ed25519.
-//
-// Used in swaps to prove that adaptor point T = t*G is
-// well-formed and prover actually knows the discrete log t.
-
+// DLEQ proof: 64 bytes (challenge + response).
+// The proof allows verifying that log_G(P1) == log_G(P2) without revealing
+// the secret scalar that relates P1 and P2. This is crucial for adaptor signatures
+// where the secret is only revealed through a specific mechanism (e.g., HTLC preimage).
 #pragma once
 
-#include <cstdint>
-#include "../../include/CryptoTypes.h"
-
-extern "C" {
-#include "crypto-ops.h"
-}
+#include <vector>
+#include "crypto.h" // For PublicKey, Scalar
 
 namespace Crypto {
 
-// DLEQ proof: 64 bytes (challenge + response).
-// Proves: "I know x such that A = x*G and B = x*P"
-struct DLEQProof {
-  EllipticCurveScalar challenge;  // e = Hs(domain || G || P || A || B || R1 || R2)
-  EllipticCurveScalar response;   // s = k - e*x
+// Represents a Discrete Logarithm Equality (DLEQ) proof.
+// It consists of a challenge and a response, typically using Schnorr-like protocol.
+struct DleqProof {
+    Scalar challenge;
+    Scalar response;
+
+    // TODO: Add serialization/deserialization methods
 };
 
-// Generate a DLEQ proof.
-//
-// Proves knowledge of secret x such that:
-//   point_G = x * G  (base point G is the Ed25519 generator)
-//   point_P = x * base_point
-//
-// All points must be valid compressed Ed25519 points.
-// Returns false if any point fails to decode.
-bool generate_dleq_proof(
-    const PublicKey &base_point,   // P (second generator)
-    const PublicKey &point_G,      // A = x*G
-    const PublicKey &point_P,      // B = x*P
-    const SecretKey &secret,       // x
-    DLEQProof &proof);
+// Generates a DLEQ proof for two points P1 and P2, given a generator G and a secret scalar s,
+// such that P1 = s*G and P2 = s*G.
+// This function is used to prove that an adaptor point T is derived from a secret scalar t
+// without revealing t.
+bool generateDleqProof(const Scalar& secretScalar, const PublicKey& point, const PublicKey& basePoint, DleqProof& proof);
 
-// Verify a DLEQ proof.
-//
-// Checks that there exists some x (unknown to verifier) such that
-// point_G = x*G and point_P = x*base_point.
-bool check_dleq_proof(
-    const PublicKey &base_point,   // P
-    const PublicKey &point_G,      // A = x*G
-    const PublicKey &point_P,      // B = x*P
-    const DLEQProof &proof);
+// Verifies a DLEQ proof.
+// Checks if log_G(P1) == log_G(P2) using the provided proof.
+// This is used to verify that the adaptor point is well-formed or that a secret
+// was correctly derived.
+bool verifyDleqProof(const PublicKey& point1, const PublicKey& point2, const PublicKey& basePoint, const DleqProof& proof);
 
 } // namespace Crypto

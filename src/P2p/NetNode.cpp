@@ -359,6 +359,14 @@ namespace CryptoNote
   }
 
   //-----------------------------------------------------------------------------------
+  void NodeServer::externalRelayNotifyToStem(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection)
+  {
+    m_dispatcher.remoteSpawn([this, command, data_buff, excludeConnection] {
+      relay_notify_stem(command, data_buff, excludeConnection);
+    });
+  }
+
+  //-----------------------------------------------------------------------------------
   void NodeServer::externalRelayNotifyToList(int command, const BinaryArray &data_buff, const std::list<boost::uuids::uuid> relayList)
   {
     m_dispatcher.remoteSpawn([this, command, data_buff, relayList] {
@@ -1282,6 +1290,38 @@ namespace CryptoNote
         conn.pushMessage(P2pMessage(P2pMessage::NOTIFY, command, data_buff));
       }
     });
+  }
+
+  void NodeServer::relay_notify_stem(int command, const BinaryArray& data_buff, const net_connection_id* excludeConnection) {
+    net_connection_id excludeId = excludeConnection ? *excludeConnection : boost::value_initialized<net_connection_id>();
+
+    std::vector<boost::uuids::uuid> outbound_peers;
+    forEachConnection([&](P2pConnectionContext& conn) {
+      if (!conn.m_is_income && conn.peerId && conn.m_connection_id != excludeId &&
+          (conn.m_state == CryptoNoteConnectionContext::state_normal ||
+           conn.m_state == CryptoNoteConnectionContext::state_synchronizing)) {
+        outbound_peers.push_back(conn.m_connection_id);
+      }
+    });
+
+    if (outbound_peers.empty()) {
+      // Fallback to any peer if no outbound peers available
+      forEachConnection([&](P2pConnectionContext& conn) {
+        if (conn.peerId && conn.m_connection_id != excludeId &&
+            (conn.m_state == CryptoNoteConnectionContext::state_normal ||
+             conn.m_state == CryptoNoteConnectionContext::state_synchronizing)) {
+          outbound_peers.push_back(conn.m_connection_id);
+        }
+      });
+    }
+
+    if (!outbound_peers.empty()) {
+      size_t index = Crypto::rand<size_t>() % outbound_peers.size();
+      auto it = m_connections.find(outbound_peers[index]);
+      if (it != m_connections.end()) {
+        it->second.pushMessage(P2pMessage(P2pMessage::NOTIFY, command, data_buff));
+      }
+    }
   }
 
   //-----------------------------------------------------------------------------------

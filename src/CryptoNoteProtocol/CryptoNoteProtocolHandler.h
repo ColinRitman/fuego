@@ -65,6 +65,7 @@ namespace CryptoNote
     virtual bool removeObserver(ICryptoNoteProtocolObserver* observer) override;
 
     void set_p2p_endpoint(IP2pEndpoint* p2p);
+    void set_swap_relay(SwapOfferRelay* relay);
     ICore& get_core() { return m_core; }
     virtual bool isSynchronized() const override { return m_synchronized; }
     void log_connections();
@@ -95,6 +96,8 @@ namespace CryptoNote
     int handle_request_tx_pool(int command, NOTIFY_REQUEST_TX_POOL::request &arg, CryptoNoteConnectionContext &context);
     int handle_notify_new_lite_block(int command, NOTIFY_NEW_LITE_BLOCK::request &arg, CryptoNoteConnectionContext &context);
     int handle_notify_missing_txs(int command, NOTIFY_MISSING_TXS::request &arg, CryptoNoteConnectionContext &context);
+    int handle_swap_offer(int command, COMMAND_SWAP_OFFER::request& arg, CryptoNoteConnectionContext& context);
+    int handle_swap_cancel(int command, COMMAND_SWAP_CANCEL::request& arg, CryptoNoteConnectionContext& context);
 
 
     //----------------- i_cryptonote_protocol ----------------------------------
@@ -110,12 +113,21 @@ namespace CryptoNote
     int processObjects(CryptoNoteConnectionContext& context, const std::vector<parsed_block_entry>& blocks);
     Logging::LoggerRef logger;
 
+    struct StemTransaction {
+      NOTIFY_NEW_TRANSACTIONS::request request;
+      time_t time_added;
+    };
+    std::map<Crypto::Hash, StemTransaction> m_stem_transactions;
+    std::mutex m_stem_mutex;
+
   private:
     int doPushLiteBlock(NOTIFY_NEW_LITE_BLOCK::request block, CryptoNoteConnectionContext &context, std::vector<BinaryArray> missingTxs);
 
     System::Dispatcher& m_dispatcher;
     ICore& m_core;
     const Currency& m_currency;
+
+    SwapOfferRelay* m_swap_relay = nullptr;
 
     p2p_endpoint_stub m_p2p_stub;
     IP2pEndpoint* m_p2p;

@@ -109,6 +109,14 @@ std::unordered_map<std::string, RpcServer::RpcHandler<RpcServer::HandlerFunction
   { "/getethereal", { jsonMethod<COMMAND_RPC_GET_ETHERNAL_FLAME>(&RpcServer::on_get_ethereal_flame), true } },
   { "/paymentid", { jsonMethod<COMMAND_RPC_GEN_PAYMENT_ID>(&RpcServer::on_get_payment_id), true } },
 
+  // CD fee pool endpoints
+  { "/getfeepool", { jsonMethod<COMMAND_RPC_GET_FEE_POOL>(&RpcServer::on_get_fee_pool), true } },
+  { "/getcdinfo", { jsonMethod<COMMAND_RPC_GET_CD_INFO>(&RpcServer::on_get_cd_info), true } },
+  { "/getcdinterest", { jsonMethod<COMMAND_RPC_GET_CD_INTEREST>(&RpcServer::on_get_cd_interest), true } },
+
+  // output index lookup (JSON mirror of /get_o_indexes.bin)
+  { "/get_o_indexes", { jsonMethod<COMMAND_RPC_GET_TX_GLOBAL_OUTPUTS_INDEXES>(&RpcServer::on_get_indexes), true } },
+
   // swap orderbook endpoints
   { "/getswapoffers", { jsonMethod<COMMAND_RPC_GET_SWAP_OFFERS>(&RpcServer::on_get_swap_offers), true } },
   { "/getswapprice", { jsonMethod<COMMAND_RPC_GET_SWAP_PRICE>(&RpcServer::on_get_swap_price), true } },
@@ -999,6 +1007,11 @@ bool RpcServer::on_send_raw_tx(const COMMAND_RPC_SEND_RAW_TX::request& req, COMM
 
   NOTIFY_NEW_TRANSACTIONS::request r;
   r.txs.push_back(asString(tx_blob));
+
+  if (m_core.getCurrentBlockMajorVersion() >= BLOCK_MAJOR_VERSION_10) {
+      r.dandelion_stem = true; // Enable Dandelion for versions >= 10
+  }
+
   m_core.get_protocol()->relay_transactions(r);
   res.status = CORE_RPC_STATUS_OK;
   return true;
@@ -2203,6 +2216,78 @@ bool RpcServer::on_get_epoch_report(const COMMAND_RPC_GET_EPOCH_REPORT::request&
     res.status = CORE_RPC_STATUS_OK;
     return true;
   }
+}
+
+bool RpcServer::on_get_fee_pool(const COMMAND_RPC_GET_FEE_POOL::request& req,
+                                 COMMAND_RPC_GET_FEE_POOL::response& res) {
+  auto& bc = m_core.get_blockchain_storage();
+
+  res.fee_pool_balance = bc.getFeePoolBalance();
+  res.current_epoch_swap_fees = bc.getCurrentEpochSwapFees();
+  res.total_cd_locked = bc.getTotalCdLocked();
+
+  // Current epoch fee rate from CommitmentIndex
+  uint64_t epochCount = m_core.getCommitmentIndex().getEpochCount();
+  res.current_epoch_fee_rate = (epochCount > 0)
+    ? m_core.getCommitmentIndex().getEpochFeeRate(epochCount - 1)
+    : 0;
+
+  res.active_efier_count = bc.getActiveEfierCount();
+  res.banking_fee_rate_bps = bc.getBankingFeeRateBps();
+
+  res.efier_swap_reward_per_block = bc.getEfierSwapRewardPerBlock();
+  res.efier_swap_reward_remaining = bc.getEfierSwapRewardRemaining();
+
+  res.treasury_balance = bc.getTreasuryBalance();
+
+  // Lifetime audit counters
+  res.total_swap_fees_collected = bc.getTotalSwapFeesCollected();
+  res.total_cd_interest_paid = bc.getTotalCdInterestPaid();
+  res.total_efier_swap_paid = bc.getTotalEfierSwapPaid();
+  res.total_treasury_accrued = bc.getTotalTreasuryAccrued();
+
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_cd_interest(const COMMAND_RPC_GET_CD_INTEREST::request& req,
+                                    COMMAND_RPC_GET_CD_INTEREST::response& res) {
+  auto& bc = m_core.get_blockchain_storage();
+  uint32_t currentHeight = bc.getCurrentBlockchainHeight();
+
+  uint64_t interest = m_core.currency().calculateCdInterest(
+      req.amount, req.creation_height, currentHeight, m_core.getCommitmentIndex());
+
+  // Cap to fee pool balance
+  uint64_t poolBalance = bc.getFeePoolBalance();
+  if (interest > poolBalance) {
+    interest = poolBalance;
+  }
+
+  res.interest = interest;
+  res.fee_pool_balance = poolBalance;
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_cd_info(const COMMAND_RPC_GET_CD_INFO::request& req,
+                                COMMAND_RPC_GET_CD_INFO::response& res) {
+  auto& bc = m_core.get_blockchain_storage();
+
+  res.total_cd_locked = bc.getTotalCdLocked();
+  res.fee_pool_balance = bc.getFeePoolBalance();
+
+  uint64_t epochCount = m_core.getCommitmentIndex().getEpochCount();
+  res.current_epoch_fee_rate = (epochCount > 0)
+    ? m_core.getCommitmentIndex().getEpochFeeRate(epochCount - 1)
+    : 0;
+  res.epoch_count = epochCount;
+
+  res.active_efier_count = bc.getActiveEfierCount();
+  res.banking_fee_rate_bps = bc.getBankingFeeRateBps();
+
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
 }
 
 }

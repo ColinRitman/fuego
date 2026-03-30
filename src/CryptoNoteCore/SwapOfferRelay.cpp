@@ -228,13 +228,21 @@ bool SwapOfferRelay::submitOffer(const SwapOfferMsg& offer) {
     msg.ttlBlocks = offer.ttlBlocks;
     msg.postedHeight = offer.postedHeight;
 
+    // Enable Dandelion for block major version 10 and above
+    if (m_core.getCurrentBlockMajorVersion() >= BLOCK_MAJOR_VERSION_10) {
+      msg.dandelion_stem = true;
+    }
+
     auto buf = LevinProtocol::encode(msg);
-    m_p2pEndpoint->externalRelayNotifyToAll(COMMAND_SWAP_OFFER::ID, buf, nullptr);
+    if (msg.dandelion_stem) {
+      m_p2pEndpoint->externalRelayNotifyToStem(COMMAND_SWAP_OFFER::ID, buf, nullptr);
+    } else {
+      m_p2pEndpoint->externalRelayNotifyToAll(COMMAND_SWAP_OFFER::ID, buf, nullptr);
+    }
   }
 
   return true;
-}
-
+  }
 bool SwapOfferRelay::cancelOffer(const std::string& offerId,
                                   const Crypto::PublicKey& pubkey,
                                   const Crypto::Signature& sig) {
