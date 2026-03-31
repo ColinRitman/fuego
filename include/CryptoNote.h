@@ -77,17 +77,6 @@ struct TransactionInputCommitmentSpend {
   uint64_t claimedInterest = 0;         // declared interest from fee pool (0 for pre-activation)
 };
 
-// v11+ commitment deposit transfer — transfers CD ownership without redeeming.
-// Ring signature proves spend authority, key image prevents double-transfer.
-// Does NOT require maturity — the CD stays locked with remaining term.
-// Must produce exactly one TransactionOutputCommitment at the same amount.
-struct TransactionInputCommitmentTransfer {
-  uint64_t amount;                      // must match referenced CD amount
-  std::vector<uint32_t> outputIndexes;  // ring: global commitment output indices (relative offsets)
-  Crypto::KeyImage keyImage;            // H_p(commitKey) * keyScalar
-  uint32_t newTerm;                     // new CD's term (spender-declared, >= 1)
-};
-
 // v11+ unified output — replaces KeyOutput + TransactionOutputCommitment.
 // ALL v11 transaction outputs (transfers, deposits, burns) use this type.
 // Amount hidden in Pedersen commitment; denomination proved by 1-of-N membership proof.
@@ -113,7 +102,7 @@ struct TransactionInputUnified {
   Crypto::EllipticCurveScalar sigC0;                 // MLSAG initial challenge scalar
 };
 
-typedef boost::variant<BaseInput, KeyInput, MultisignatureInput, TransactionInputCommitmentSpend, TransactionInputCommitmentTransfer, TransactionInputUnified> TransactionInput;
+typedef boost::variant<BaseInput, KeyInput, MultisignatureInput, TransactionInputCommitmentSpend, TransactionInputUnified> TransactionInput;
 
 typedef boost::variant<KeyOutput, MultisignatureOutput, TransactionOutputCommitment, TransactionOutputUnified> TransactionOutputTarget;
 

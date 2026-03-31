@@ -341,7 +341,7 @@ bool SwapP2P::parseMessage(const std::vector<uint8_t>& data, SwapMessage& msg) {
   uint8_t rawType = *p++;
   remaining--;
 
-  if (rawType > static_cast<uint8_t>(SwapMsgType::SECRET_REVEAL) &&
+  if (rawType > static_cast<uint8_t>(SwapMsgType::ADAPTOR_INFO) &&
       rawType != static_cast<uint8_t>(SwapMsgType::ERROR)) {
     return false;
   }

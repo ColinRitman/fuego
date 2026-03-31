@@ -36,6 +36,7 @@ void printUsage() {
     "Commands:\n"
     "  initiate <pair> <xfg_amount> <ctr_amount> <peer>  -- start a swap\n"
     "  accept <swap_id>                                    -- accept incoming swap\n"
+    "  process <swap_id>                                   -- advance swap to next state\n"
     "  status [swap_id]                                    -- show swap(s) status\n"
     "  refund <swap_id>                                    -- force refund (if timeout elapsed)\n"
     "  list                                                -- list all swaps\n"
@@ -44,6 +45,14 @@ void printUsage() {
     "Options:\n"
     "  --fuegod-host <host>    Fuegod RPC host (default: 127.0.0.1)\n"
     "  --fuegod-port <port>    Fuegod RPC port (default: 18180)\n"
+    "  --wallet-rpc <port>     Wallet RPC port for escrow funding\n"
+    "  --listen-port <port>    P2P listen port for swap message exchange\n"
+    "  --sol-rpc <url>         Solana RPC endpoint (default: 127.0.0.1:8899)\n"
+    "  --sol-program <id>      Solana HTLC program ID (base58)\n"
+    "  --eth-rpc <host:port>   Ethereum RPC endpoint (default: 127.0.0.1:8545)\n"
+    "  --eth-contract <addr>   HashedTimelock contract address (0x...)\n"
+    "  --eth-sender <addr>     Our Ethereum address (0x...)\n"
+    "  --role <alice|bob>      Swap role (bob=sell XFG, alice=buy XFG)\n"
     "  --data-dir <dir>        Data directory (default: ~/.xfg-swap)\n"
     "  --testnet               Use testnet ports (fuegod: 28280)\n"
     "  --help                  Show this help message\n"
@@ -73,7 +82,17 @@ int main(int argc, char* argv[]) {
   std::string host = DEFAULT_HOST;
   uint16_t port = DEFAULT_MAINNET_PORT;
   std::string dataDir = getDefaultDataDir();
+  uint16_t walletRpcPort = 0;
+  uint16_t listenPort = 0;
+  std::string solRpcUrl = "127.0.0.1";
+  uint16_t solRpcPort = 8899;
+  std::string solProgramId;
+  std::string ethRpcUrl = "127.0.0.1";
+  uint16_t ethRpcPort = 8545;
+  std::string ethContractAddr;
+  std::string ethSenderAddr;
   bool testnet = false;
+  std::string roleStr = "bob";
 
   // Parse options (before the command)
   int argIdx = 1;
@@ -95,6 +114,72 @@ int main(int argc, char* argv[]) {
         return 1;
       }
       port = static_cast<uint16_t>(std::atoi(argv[argIdx]));
+    } else if (opt == "--wallet-rpc") {
+      if (++argIdx >= argc) {
+        std::cerr << "Error: --wallet-rpc requires a port" << std::endl;
+        return 1;
+      }
+      walletRpcPort = static_cast<uint16_t>(std::atoi(argv[argIdx]));
+    } else if (opt == "--listen-port") {
+      if (++argIdx >= argc) {
+        std::cerr << "Error: --listen-port requires a port" << std::endl;
+        return 1;
+      }
+      listenPort = static_cast<uint16_t>(std::atoi(argv[argIdx]));
+    } else if (opt == "--sol-rpc") {
+      if (++argIdx >= argc) {
+        std::cerr << "Error: --sol-rpc requires a host:port" << std::endl;
+        return 1;
+      }
+      std::string endpoint = argv[argIdx];
+      auto colon = endpoint.rfind(':');
+      if (colon != std::string::npos) {
+        solRpcUrl = endpoint.substr(0, colon);
+        solRpcPort = static_cast<uint16_t>(std::atoi(endpoint.substr(colon + 1).c_str()));
+      } else {
+        solRpcUrl = endpoint;
+      }
+    } else if (opt == "--sol-program") {
+      if (++argIdx >= argc) {
+        std::cerr << "Error: --sol-program requires a program ID" << std::endl;
+        return 1;
+      }
+      solProgramId = argv[argIdx];
+    } else if (opt == "--eth-rpc") {
+      if (++argIdx >= argc) {
+        std::cerr << "Error: --eth-rpc requires a host:port" << std::endl;
+        return 1;
+      }
+      std::string endpoint = argv[argIdx];
+      auto colon = endpoint.rfind(':');
+      if (colon != std::string::npos) {
+        ethRpcUrl = endpoint.substr(0, colon);
+        ethRpcPort = static_cast<uint16_t>(std::atoi(endpoint.substr(colon + 1).c_str()));
+      } else {
+        ethRpcUrl = endpoint;
+      }
+    } else if (opt == "--eth-contract") {
+      if (++argIdx >= argc) {
+        std::cerr << "Error: --eth-contract requires a contract address" << std::endl;
+        return 1;
+      }
+      ethContractAddr = argv[argIdx];
+    } else if (opt == "--eth-sender") {
+      if (++argIdx >= argc) {
+        std::cerr << "Error: --eth-sender requires an Ethereum address" << std::endl;
+        return 1;
+      }
+      ethSenderAddr = argv[argIdx];
+    } else if (opt == "--role") {
+      if (++argIdx >= argc) {
+        std::cerr << "Error: --role requires alice or bob" << std::endl;
+        return 1;
+      }
+      roleStr = argv[argIdx];
+      if (roleStr != "alice" && roleStr != "bob") {
+        std::cerr << "Error: --role must be 'alice' or 'bob'" << std::endl;
+        return 1;
+      }
     } else if (opt == "--data-dir") {
       if (++argIdx >= argc) {
         std::cerr << "Error: --data-dir requires an argument" << std::endl;
@@ -130,6 +215,20 @@ int main(int argc, char* argv[]) {
   // Create swap daemon
   XfgSwap::SwapDaemon daemon(host, port, dataDir, consoleLogger);
 
+  // Configure optional RPC endpoints
+  if (walletRpcPort > 0) {
+    daemon.setWalletRpc(host, walletRpcPort);
+  }
+  if (!solProgramId.empty()) {
+    daemon.setSolanaRpc(solRpcUrl, solRpcPort, solProgramId);
+  }
+  if (!ethContractAddr.empty()) {
+    daemon.setEthereumRpc(ethRpcUrl, ethRpcPort, ethContractAddr);
+  }
+  if (listenPort > 0) {
+    daemon.startP2P(listenPort);
+  }
+
   // Dispatch command
   if (command == "initiate") {
     if (argIdx + 3 >= argc) {
@@ -150,7 +249,7 @@ int main(int argc, char* argv[]) {
       return 1;
     }
 
-    params.role = XfgSwap::SwapRole::BOB;
+    params.role = (roleStr == "alice") ? XfgSwap::SwapRole::ALICE : XfgSwap::SwapRole::BOB;
     params.xfgAmount = std::strtoull(xfgAmountStr.c_str(), nullptr, 10);
     params.ctrAmount = std::strtoull(ctrAmountStr.c_str(), nullptr, 10);
     params.peerEndpoint = peer;
@@ -164,13 +263,18 @@ int main(int argc, char* argv[]) {
     std::memset(&params.escrowPubKey, 0, sizeof(params.escrowPubKey));
     std::memset(&params.adaptorPoint, 0, sizeof(params.adaptorPoint));
     std::memset(&params.adaptorSecret, 0, sizeof(params.adaptorSecret));
+    std::memset(&params.peerEncryptedKeyShare, 0, sizeof(params.peerEncryptedKeyShare));
     std::memset(&params.escrowTxHash, 0, sizeof(params.escrowTxHash));
+    std::memset(&params.escrowTxPubKey, 0, sizeof(params.escrowTxPubKey));
     std::memset(&params.hashLock, 0, sizeof(params.hashLock));
     std::memset(&params.preimage, 0, sizeof(params.preimage));
     params.xfgTimeoutHeight = 0;  // will be set by daemon
     params.ctrTimeoutBlock = 0;
     params.escrowOutputIndex = 0;
     params.htlcOutputIndex = 0;
+
+    // Set chain-specific addresses from CLI options
+    params.ethSenderAddr = ethSenderAddr;
 
     if (!daemon.initiate(params)) {
       return 1;
@@ -183,6 +287,16 @@ int main(int argc, char* argv[]) {
     }
     std::string swapId = argv[argIdx++];
     if (!daemon.accept(swapId)) {
+      return 1;
+    }
+
+  } else if (command == "process") {
+    if (argIdx >= argc) {
+      std::cerr << "Usage: xfg-swap process <swap_id>" << std::endl;
+      return 1;
+    }
+    std::string swapId = argv[argIdx++];
+    if (!daemon.processSwap(swapId)) {
       return 1;
     }
 

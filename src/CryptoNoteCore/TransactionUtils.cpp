@@ -37,9 +37,6 @@ bool checkInputsKeyimagesDiff(const CryptoNote::TransactionPrefix& tx) {
     } else if (in.type() == typeid(TransactionInputCommitmentSpend)) {
       if (!ki.insert(boost::get<TransactionInputCommitmentSpend>(in).keyImage).second)
         return false;
-    } else if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
-      if (!ki.insert(boost::get<TransactionInputCommitmentTransfer>(in).keyImage).second)
-        return false;
     }
   }
   return true;
@@ -57,9 +54,6 @@ size_t getRequiredSignaturesCount(const TransactionInput& in) {
   if (in.type() == typeid(TransactionInputCommitmentSpend)) {
     return boost::get<TransactionInputCommitmentSpend>(in).outputIndexes.size();
   }
-  if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
-    return boost::get<TransactionInputCommitmentTransfer>(in).outputIndexes.size();
-  }
   return 0;
 }
 
@@ -73,9 +67,6 @@ uint64_t getTransactionInputAmount(const TransactionInput& in) {
   }
   if (in.type() == typeid(TransactionInputCommitmentSpend)) {
     return boost::get<TransactionInputCommitmentSpend>(in).amount;
-  }
-  if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
-    return boost::get<TransactionInputCommitmentTransfer>(in).amount;
   }
   return 0;
 }
@@ -92,9 +83,6 @@ TransactionTypes::InputType getTransactionInputType(const TransactionInput& in) 
   }
   if (in.type() == typeid(TransactionInputCommitmentSpend)) {
     return TransactionTypes::InputType::CommitmentSpend;
-  }
-  if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
-    return TransactionTypes::InputType::CommitmentTransfer;
   }
   return TransactionTypes::InputType::Invalid;
 }

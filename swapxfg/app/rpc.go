@@ -28,6 +28,7 @@ func NewFuegoClient(endpoint string) *FuegoClient {
 
 type SwapOffer struct {
 	OfferID      string `json:"offerId"`
+	IsSell       bool   `json:"isSell"`
 	XfgAmount    uint64 `json:"xfgAmount"`
 	RateNum      uint64 `json:"rateNum"`
 	Pair         uint8  `json:"pair"`
@@ -35,6 +36,17 @@ type SwapOffer struct {
 	Timestamp    uint64 `json:"timestamp"`
 	TTLBlocks    uint32 `json:"ttlBlocks"`
 	PostedHeight uint32 `json:"postedHeight"`
+}
+
+type SubmitSwapOfferRequest struct {
+	OfferID     string `json:"offerId"`
+	IsSell      bool   `json:"isSell"`
+	XfgAmount   uint64 `json:"xfgAmount"`
+	RateNum     uint64 `json:"rateNum"`
+	Pair        uint8  `json:"pair"`
+	MakerPubKey string `json:"makerPubKey"`
+	Signature   string `json:"signature"`
+	TTLBlocks   uint32 `json:"ttlBlocks"`
 }
 
 type SwapTrade struct {
@@ -111,6 +123,20 @@ type NodeInfo struct {
 	Status        string `json:"status"`
 }
 
+type FeePoolInfo struct {
+	FeePoolBalance       uint64 `json:"fee_pool_balance"`
+	CurrentEpochSwapFees uint64 `json:"current_epoch_swap_fees"`
+	TotalCdLocked        uint64 `json:"total_cd_locked"`
+	CurrentEpochFeeRate  uint64 `json:"current_epoch_fee_rate"`
+	ActiveEfierCount     uint32 `json:"active_efier_count"`
+	BankingFeeRateBps    uint64 `json:"banking_fee_rate_bps"`
+	EfierSwapRewardPerBlock uint64 `json:"efier_swap_reward_per_block"`
+	TreasuryBalance      uint64 `json:"treasury_balance"`
+	TotalSwapFeesCollected uint64 `json:"total_swap_fees_collected"`
+	TotalCdInterestPaid  uint64 `json:"total_cd_interest_paid"`
+	Status               string `json:"status"`
+}
+
 // --- Per-pair fetch methods ---
 
 func (c *FuegoClient) GetOffers(pair uint8) ([]SwapOffer, error) {
@@ -175,14 +201,54 @@ func (c *FuegoClient) GetInfo() (*NodeInfo, error) {
 	return &resp, nil
 }
 
+func (c *FuegoClient) GetFeePool() (*FeePoolInfo, error) {
+	var resp FeePoolInfo
+	if err := c.post("/getfeepool", nil, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+func (c *FuegoClient) SubmitSwapOffer(req SubmitSwapOfferRequest) error {
+	var resp struct {
+		Status string `json:"status"`
+	}
+	if err := c.post("/submitswap", req, &resp); err != nil {
+		return err
+	}
+	if resp.Status != "OK" {
+		return fmt.Errorf("daemon: %s", resp.Status)
+	}
+	return nil
+}
+
+func (c *FuegoClient) CancelSwapOffer(offerID, makerPubKey, signature string) error {
+	req := map[string]interface{}{
+		"offerId":     offerID,
+		"makerPubKey": makerPubKey,
+		"signature":   signature,
+	}
+	var resp struct {
+		Status string `json:"status"`
+	}
+	if err := c.post("/cancelswap", req, &resp); err != nil {
+		return err
+	}
+	if resp.Status != "OK" {
+		return fmt.Errorf("daemon: %s", resp.Status)
+	}
+	return nil
+}
+
 // --- Multi-pair parallel fetch ---
 
 // AllPairData holds fetched data for all active pairs.
 type AllPairData struct {
-	Offers map[uint8][]SwapOffer
-	Prices map[uint8]*SwapPriceResponse
-	Trades map[uint8][]SwapTrade
-	Height uint64
+	Offers  map[uint8][]SwapOffer
+	Prices  map[uint8]*SwapPriceResponse
+	Trades  map[uint8][]SwapTrade
+	Height  uint64
+	FeePool *FeePoolInfo
 }
 
 // FetchAll fetches offers, prices, and trades for the given pairs in parallel.
@@ -197,8 +263,8 @@ func (c *FuegoClient) FetchAll(pairs []uint8) (*AllPairData, error) {
 	var wg sync.WaitGroup
 	var firstErr error
 
-	// Fetch info (block height)
-	wg.Add(1)
+	// Fetch info (block height) + fee pool in parallel
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		info, err := c.GetInfo()
@@ -212,6 +278,17 @@ func (c *FuegoClient) FetchAll(pairs []uint8) (*AllPairData, error) {
 		}
 		mu.Lock()
 		data.Height = info.Height
+		mu.Unlock()
+	}()
+	go func() {
+		defer wg.Done()
+		fp, err := c.GetFeePool()
+		if err != nil {
+			// Non-fatal: fee pool display is optional
+			return
+		}
+		mu.Lock()
+		data.FeePool = fp
 		mu.Unlock()
 	}()
 

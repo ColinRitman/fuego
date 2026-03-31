@@ -1,4 +1,4 @@
-# SwapHub Design Spec
+# SwapXFG Design Spec
 
 **Date:** 2026-03-22
 **Status:** Draft
@@ -6,15 +6,15 @@
 
 ## Overview
 
-SwapHub is Fuego's unified cross-chain atomic swap trading terminal. It replaces the three separate Go TUI clients (`xfg-eth-swap`, `xfg-xmr-swap`, `xfg-bch-swap`) and the broken C++ ncurses `SwapTerminal` with a single, polished multi-pair trading interface. The XMR pair has been replaced by SOL (Solana) — Solana's smart contract runtime supports native HTLCs, avoiding the adaptor signature complexity that blocked XMR swaps.
+SwapXFG is Fuego's unified cross-chain atomic swap trading terminal. It replaces the three separate Go TUI clients (`xfg-eth-swap`, `xfg-xmr-swap`, `xfg-bch-swap`) and the broken C++ ncurses `SwapTerminal` with a single, polished multi-pair trading interface. All swap pairs use **adaptor signatures** on the XFG side — swap transactions are indistinguishable from normal ring-sig spends, preserving privacy. Counterparty chains use their native HTLC mechanisms (Solidity contracts, Solana Programs), except XMR which uses adaptor sigs on both sides (COMIT protocol). BCH has been dropped in favor of XMR — since adaptor sigs are built for all pairs anyway, XMR support comes at no additional crypto cost.
 
-SwapHub has two surfaces:
-1. **`swaphub` Go TUI binary** — full-featured terminal trading client for all pairs
+SwapXFG has two surfaces:
+1. **`swapxfg` Go TUI binary** — full-featured terminal trading client for all pairs
 2. **EFier-hosted web UI** — read-only swap explorer embedded in `fuegod`
 
 ## Design Principles
 
-- **All pairs in one view.** ETH, SOL, BCH, HEAT, LUSD visible simultaneously.
+- **All pairs in one view.** ( SOL, ETH, XMR )  incl erc20 HEAT & LUSD tokens via ETH; all visible simultaneously.
 - **Privacy by default.** Swaps go P2P. EFiers relay gossip, never see user data.
 - **Standalone + wallet-connected.** Read-only explorer mode without a wallet, full trading with one.
 - **EFiers are the only public infra.** Free community service funded by consensus rewards.
@@ -25,16 +25,20 @@ SwapHub has two surfaces:
 - COLD3 rail / Ethereum settlement contracts (separate spec)
 - Swap fee pool design (separate spec)
 - Dandelion++ P2P privacy (v11 priority, separate spec)
-- Solana HTLC Program (Rust) — standard HTLC with SHA-256 hashlock, separate deliverable
+- Solana HTLC Program (Rust) — Keccak-256 hashlock, separate deliverable
+- Ed25519 adaptor signature + DLEQ proof implementation — separate crypto spec
+- XMR COMIT protocol state machine — separate spec
 
-## Prerequisites (daemon-side work before swaphub)
+## Prerequisites (daemon-side work before swapxfg)
 
-- **Extend pair validation to support HEAT (3), LUSD (4), and SOL (5).** `SwapOfferRelay::validateOffer()` currently rejects `pair > 2`. The P2P serialization, wallet pair mapping, seed rates, and price sources all need to be extended for pairs 3-5.
-- **Add wallet RPC endpoints:** `create_htlc`, `claim_htlc`, `refund_htlc`, `sign_offer`, `getaddress` — none of these exist in `WalletRpcServer` today.
+- **Ed25519 adaptor signatures + DLEQ proofs (~2000 LoC).** All XFG-side swap operations use adaptor sigs instead of on-chain HTLCs. Swap outputs are normal `KeyOutput` to Musig2 joint addresses — indistinguishable from regular transactions.
+- **Extend pair validation to support HEAT (3), LUSD (4).** `SwapOfferRelay::validateOffer()` currently rejects `pair > 2`. Pair 2 (XMR, replacing BCH) already passes validation. Pairs 3-4 need P2P serialization, wallet pair mapping, seed rates, and price sources.
+- **Add wallet RPC endpoints:** `initiate_swap`, `complete_swap`, `refund_swap`, `sign_offer`, `getaddress` — adaptor sig swap lifecycle replaces the HTLC-based `create_htlc`/`claim_htlc`/`refund_htlc` endpoints.
+- **Counterparty-chain contracts:** Solana Program (Anchor, Keccak-256), Ethereum HashedTimelock.sol (exists). XMR pair uses COMIT adaptor sigs on both sides (no HTLC needed on either chain).
 
 ---
 
-## 1. SwapHub TUI (`swaphub` binary)
+## 1. SwapXFG TUI (`swapxfg` binary)
 
 ### 1.1 Tech Stack
 
@@ -56,27 +60,27 @@ SwapHub has two surfaces:
 ### 1.2 Layout
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│ ◆ SWAPHUB    ETH/XFG ▲0.46  SOL/XFG ▲1.82  BCH/XFG ▲21.3  HEAT 1:10M│
-│              LUSD $0.01     BLK 184209                                │
-├─────────────────────────────────────────┬───────────────────────────────┤
+┌────────────────────────────────────────────────────────────────────────┐
+│ ◆ SWAPHUB    SOL/XFG ▲0.46  ETH/XFG ▲1.82  XMR/XFG ▲21.3  HEAT 1:10M   │ 
+│              LUSD $0.01     BLK 184209                                 │
+├─────────────────────────────────────────┬──────────────────────────────┤
 │                                         │         ORDER BOOK           │
 │          CANDLESTICK CHART              │  ─────────────────────────── │
-│          (selected pair)                │  ASK  0.00047   800.0 XFG   │
-│                                         │  ASK  0.00046    80.0 XFG   │
-│    ╻                                    │  ASK  0.00045     8.0 XFG   │
-│    ┃  ╻                                │  ━━━ spread 0.00001 ━━━━━━  │
-│   ╺┫  ┃ ╻                              │  BID  0.00044   800.0 XFG   │
-│    ┃ ╺┫ ┃                               │  BID  0.00043    80.0 XFG   │
-│    ╹  ┃╺┫                               │  BID  0.00042     0.8 XFG   │
+│          (selected pair)                │  ASK  0.00047   800.0 XFG    │
+│                                         │  ASK  0.00046    80.0 XFG    │
+│    ╻                                    │  ASK  0.00045     8.0 XFG    │
+│    ┃  ╻                                 │  ━━━ spread 0.00001 ━━━━━━   │
+│   ╺┫  ┃ ╻                               │  BID  0.00044   800.0 XFG    │
+│    ┃ ╺┫ ┃                               │  BID  0.00043    80.0 XFG    │
+│    ╹  ┃╺┫                               │  BID  0.00042     0.8 XFG    │
 │       ╹ ┃                               ├───────────────────────────── │
 │         ╹                               │         TRADE TAPE           │
-│                                         │  0.00046  80 XFG  BUY  2m   │
-│   TWAP: 0.00045  Composite: 0.00045    │  0.00045   8 XFG  SELL 5m   │
-│                                         │  0.00044 800 XFG  BUY  11m  │
-├─────────────────────────────────────────┴───────────────────────────────┤
-│ > _                                     BAL 4200.00 XFG  ■ :18180     │
-└─────────────────────────────────────────────────────────────────────────┘
+│                                         │  0.00046  80 XFG  BUY  2m    │
+│   TWAP: 0.00045  Composite: 0.00045    │  0.00045   8 XFG  SELL 5m     │
+│                                         │  0.00044 800 XFG  BUY  11m   │
+├─────────────────────────────────────────┴──────────────────────────────┤
+│ > _                                     BAL 420.00 XFG  ■  :18180      │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
 **Market ticker bar (top):** All 5 active pairs with live prices and directional arrows. HEAT conversion rate and LUSD price always visible. Current block height. Updates every tick.
@@ -93,11 +97,11 @@ SwapHub has two surfaces:
 
 | Key | Action |
 |-----|--------|
+| `0` | Select SOL/XFG pair |
 | `1` | Select ETH/XFG pair |
-| `2` | Select SOL/XFG pair |
-| `3` | Select BCH/XFG pair |
+| `2` | Select XMR/XFG pair |
+| `3` | Select LUSD/XFG pair |
 | `4` | Select HEAT/XFG pair |
-| `5` | Select LUSD/XFG pair |
 | `Tab` | Cycle through pairs |
 | `b` | Open buy order entry |
 | `s` | Open sell order entry |
@@ -113,26 +117,28 @@ SwapHub has two surfaces:
 accept <offer_id>       Accept a swap offer for the selected pair (see Accept Flow below)
 cancel <offer_id>       Cancel own offer (wallet signs cancellation)
 offer <amount> <rate>   Submit a new offer for the selected pair (wallet signs offer)
-htlc                    Show active HTLC status
-htlc <index>            Query specific HTLC by on-chain index
-pair <name>             Switch active pair (eth, sol, bch, heat, lusd)
+swap                    Show active swap status (adaptor sig state machine)
+swap <id>               Query specific swap by ID
+pair <name>             Switch active pair (sol, eth, xmr, heat, lusd)
 connect wallet          Open wallet connection prompt
 connect metamask        Open MetaMask bridge
 connect phantom         Open Phantom bridge (Solana)
 help                    Show command help
 ```
 
-**Accept flow (end-to-end):**
-1. User types `accept <offer_id>` — swaphub fetches offer details from daemon RPC
-2. Swaphub generates a random 32-byte preimage locally (taker's secret)
-3. Swaphub computes hashlock = SHA-256(preimage)
-4. Swaphub calls wallet RPC `create_htlc` with: amount, recipient (maker pubkey), hashlock, timeout
-5. Wallet signs and broadcasts the HTLC transaction, returns tx hash
-6. Swaphub displays: tx hash, hashlock (share with counterparty), preimage (KEEP SECRET)
-7. Swaphub enters HTLC monitor mode — polls `/gethtlc` for status
+**Accept flow (end-to-end, adaptor sig protocol):**
+1. User types `accept <offer_id>` — swapxfg fetches offer details from daemon RPC
+2. Swaphub calls wallet RPC `initiate_swap` with: offerId, pair, amount, maker pubkey
+3. Wallet generates adaptor sig components: secret scalar `t`, Musig2 joint address, DLEQ proof
+4. Swaphub exchanges adaptor parameters with counterparty via P2P (key exchange + nonce commitment)
+5. Maker locks counterparty-side funds (HTLC on ETH/SOL, or adaptor lock on XMR)
+6. Taker locks XFG to Musig2 joint address — **looks like a normal transaction on-chain**
+7. Maker claims counterparty HTLC (reveals preimage) or completes XMR adaptor
+8. Taker extracts secret scalar from published signature, completes XFG spend
+9. Swaphub monitors swap state machine — displays progress, timeout warnings
 
 **Offer submission flow:**
-1. User types `offer <amount> <rate>` — swaphub constructs offer payload (pair from selected tab)
+1. User types `offer <amount> <rate>` — swapxfg constructs offer payload (pair from selected tab)
 2. Swaphub calls wallet RPC `sign_offer` with: xfgAmount, rateNum, pair, ttlBlocks
 3. Wallet constructs offerId hash, signs with spend key, returns: offerId, makerPubKey, signature
 4. Swaphub submits to daemon `/submitswap` with the signed payload
@@ -140,7 +146,7 @@ help                    Show command help
 ### 1.5 Connection Architecture
 
 ```
-swaphub
+swapxfg
 ├── Fuego daemon RPC (:18180 mainnet / :28280 testnet)
 │   ├── /getswapoffers   → orderbook data (read)
 │   ├── /getswapprice    → TWAP + composite pricing (read)
@@ -154,35 +160,35 @@ swaphub
 ├── Fuego wallet RPC (:18182 mainnet / :28282 testnet)  [optional]
 │   ├── getbalance       → XFG balance
 │   ├── getaddress       → receive address
-│   ├── create_htlc      → lock XFG for swap
-│   ├── claim_htlc       → claim with preimage
-│   ├── refund_htlc      → reclaim after timeout
+│   ├── initiate_swap    → start adaptor sig swap (generate joint address, DLEQ proof)
+│   ├── complete_swap    → extract secret, complete XFG spend
+│   ├── refund_swap      → reclaim after timeout (cooperative or unilateral)
 │   └── sign_offer       → sign offer with wallet keys
 │
 ├── MetaMask bridge (localhost:random)  [optional]
-│   ├── WebSocket ←→ swaphub TUI
+│   ├── WebSocket ←→ swapxfg TUI
 │   ├── Serves bridge.html (tiny page with ethers.js)
 │   ├── ETH/HEAT/LUSD balance queries
-│   ├── ERC-20 HTLC contract interactions
+│   ├── ERC-20 HTLC contract interactions (counterparty side)
 │   └── Transaction signing via MetaMask popup
 │
 ├── Phantom bridge (localhost:random)  [optional]
-│   ├── WebSocket ←→ swaphub TUI
+│   ├── WebSocket ←→ swapxfg TUI
 │   ├── Serves sol-bridge.html (tiny page with @solana/web3.js)
 │   ├── SOL balance queries
-│   ├── Solana HTLC Program interactions
+│   ├── Solana HTLC Program interactions (counterparty side)
 │   └── Transaction signing via Phantom popup
 │
-└── Electron Cash RPC (:7773)  [optional]
-    ├── BCH balance
-    ├── BCH HTLC script operations
-    └── CashToken queries
+└── Monero wallet RPC (:18081)  [optional]
+    ├── XMR balance + transfer
+    ├── COMIT adaptor sig operations (both sides use adaptor sigs)
+    └── Key exchange for 2-of-2 joint address
 ```
 
 ### 1.6 CLI Flags
 
 ```
-swaphub [flags]
+swapxfg [flags]
 
 Connection:
   --daemon, -d      Fuego daemon RPC endpoint (default: http://127.0.0.1:18180)
@@ -191,10 +197,10 @@ Connection:
   --testnet         Use testnet defaults (:20808 / :28280)
   --eth-rpc         Ethereum RPC endpoint (optional, for ETH/HEAT/LUSD)
   --sol-rpc         Solana RPC endpoint (optional, for SOL pair)
-  --bch-rpc         Bitcoin Cash RPC endpoint (optional)
+  --xmr-rpc         Monero wallet RPC endpoint (optional, for XMR pair)
 
 Display:
-  --pair, -p        Starting pair (eth, sol, bch, heat, lusd; default: eth)
+  --pair, -p        Starting pair (sol, eth, xmr, heat, lusd; default: sol)
   --no-splash       Skip splash screen
   --compact         Compact layout for small terminals
 
@@ -209,7 +215,7 @@ MetaMask bridge:
 
 ### 1.7 Splash Screen
 
-Single unified splash with Fuego fire animation (doom fire algorithm from existing clients). No per-pair logo — SwapHub is the brand.
+Single unified splash with Fuego fire animation (doom fire algorithm from existing clients). No per-pair logo — SwapXFG is the brand.
 
 ```
         ◆
@@ -234,12 +240,12 @@ Auto-advances after 3 seconds or on any keypress.
 
 ### 1.8 Data Flow
 
-**Refresh cycle:** Every 5 seconds (configurable), swaphub fetches:
+**Refresh cycle:** Every 5 seconds (configurable), swapxfg fetches:
 1. Offers for active pairs (5 parallel calls to `/getswapoffers` — pairs 0-4)
 2. Trades for the selected pair (`/getswaptrades`)
 3. Prices for active pairs (5 parallel calls to `/getswapprice`)
 4. Wallet balance (if connected)
-5. HTLC status (if active swap in progress)
+5. Swap state (if active adaptor sig swap in progress)
 
 Offer and price fetches are parallelized via goroutines to avoid sequential latency on the daemon's RPC. Total: ~13 requests per tick, but only 3-4 sequential round-trips due to parallelism. If this proves too heavy, a future daemon-side `/getallswapoffers` batch endpoint can reduce it to 1 call.
 
@@ -252,21 +258,21 @@ Offer and price fetches are parallelized via goroutines to avoid sequential late
 
 ### 1.9 MetaMask Bridge Detail
 
-The bridge is a minimal localhost HTTP server that swaphub starts when `--eth-rpc` is not provided and Ethereum pairs are active. A separate bridge page handles Solana via Phantom.
+The bridge is a minimal localhost HTTP server that swapxfg starts when `--eth-rpc` is not provided and Ethereum pairs are active. A separate bridge page handles Solana via Phantom.
 
 **bridge.html** (~50 lines, Ethereum):
 - Loads ethers.js from bundled JS (no CDN — works offline)
 - Connects to `window.ethereum` (MetaMask/Rabby/Frame)
-- Opens WebSocket back to swaphub on the same port
+- Opens WebSocket back to swapxfg on the same port
 - Handles messages: `getBalance`, `getNetwork`, `sendTransaction`, `callContract`
-- Shows minimal status: "Connected to SwapHub" + chain ID
+- Shows minimal status: "Connected to SwapXFG" + chain ID
 
 **sol-bridge.html** (~50 lines, Solana):
 - Loads @solana/web3.js from bundled JS (no CDN — works offline)
 - Connects to `window.solana` (Phantom/Solflare)
-- Opens WebSocket back to swaphub on the same port
+- Opens WebSocket back to swapxfg on the same port
 - Handles messages: `getBalance`, `getSlot`, `sendTransaction`, `callProgram`
-- Shows minimal status: "Connected to SwapHub" + cluster
+- Shows minimal status: "Connected to SwapXFG" + cluster
 
 **Security:**
 - Binds to `127.0.0.1` only (not `0.0.0.0`)
@@ -279,9 +285,9 @@ The bridge is a minimal localhost HTTP server that swaphub starts when `--eth-rp
 | Missing connection | Effect |
 |-------------------|--------|
 | No wallet RPC | Orderbook visible, order submission disabled ("connect wallet to trade") |
-| No MetaMask | ETH/HEAT/LUSD offers visible, can create XFG-side HTLC, can't claim ETH side |
-| No Phantom | SOL offers visible, can create XFG-side HTLC, can't claim SOL side |
-| No BCH RPC | BCH offers visible, can create XFG-side HTLC, can't claim BCH side |
+| No MetaMask | ETH/HEAT/LUSD offers visible, can't complete counterparty-side HTLC claim |
+| No Phantom | SOL offers visible, can't complete counterparty-side HTLC claim |
+| No XMR wallet | XMR offers visible, can't initiate XMR-side adaptor sig lock |
 | No daemon RPC | Nothing works — show connection error with retry |
 
 ---
@@ -336,22 +342,22 @@ Every `fuegod` instance serves the web UI. EFiers automatically host it. Regular
 
 ### 3.1 `fire_wallet` / `test_wallet` `swap` Command
 
-The wallet's `swap` command launches `swaphub` as a child process instead of the ncurses SwapTerminal:
+The wallet's `swap` command launches `swapxfg` as a child process instead of the ncurses SwapTerminal:
 
-The wallet constructs argv and launches `swaphub` via `fork()/execvp()` (not `system()` — avoids shell injection). It passes:
+The wallet constructs argv and launches `swapxfg` via `fork()/execvp()` (not `system()` — avoids shell injection). It passes:
 - `--efier http://<daemon_host>:<daemon_port>` from the wallet's existing connection
 - `--wallet http://127.0.0.1:<wallet_rpc_port>` (requires plumbing the wallet RPC port through to simple_wallet)
 - `--wallet-user` / `--wallet-password` if wallet RPC auth is configured
 - `--testnet` if on testnet
 - `--pair <pair>` if user passed a pair argument to the `swap` command
 
-The wallet blocks on `waitpid()` until swaphub exits, then resumes the command prompt.
+The wallet blocks on `waitpid()` until swapxfg exits, then resumes the command prompt.
 
 This completely replaces the ncurses SwapTerminal and its dispatcher deadlock issues.
 
 ### 3.2 Wallet RPC Requirements
 
-The wallet RPC server (`WalletRpcServer`) needs these endpoints for swaphub:
+The wallet RPC server (`WalletRpcServer`) needs these endpoints for swapxfg:
 
 | Endpoint | Status | Notes |
 |----------|--------|-------|
@@ -373,8 +379,8 @@ The wallet RPC server (`WalletRpcServer`) needs these endpoints for swaphub:
 |------|------|--------|------|
 | EFier | `fuegod --elderfier-key` | Web UI + JSON-RPC + P2P relay | Free (funded by consensus rewards) |
 | Personal node | `fuegod` | JSON-RPC + P2P relay + web UI (for personal use) | Self-hosted |
-| User (standalone) | `swaphub --efier <efier>` | Nothing — consumes data | Free |
-| User (wallet) | `fire_wallet` → `swaphub` | Nothing — consumes data | Free |
+| User (standalone) | `swapxfg --efier <efier>` | Nothing — consumes data | Free |
+| User (wallet) | `fire_wallet` → `swapxfg` | Nothing — consumes data | Free |
 
 ### 4.2 Privacy Model
 
@@ -397,28 +403,28 @@ See separate v11 spec when available.
 
 ## 5. Pair Configuration
 
-| Pair ID | Display | Assets | Settlement | Status |
-|---------|---------|--------|------------|--------|
-| 0 | SOL/XFG | SOL ↔ XFG | HTLC Solana Program | Active |
-| 1 | ETH/XFG | ETH ↔ XFG | HTLC + ETH contract | Active |
-| 2 | BCH/XFG | BCH ↔ XFG | HTLC + BCH script | Active |
-| 3 | HEAT/XFG | HEAT ↔ XFG | ERC-20 HTLC contract | Active |
-| 4 | LUSD/XFG | LUSD ↔ XFG | ERC-20 HTLC contract | Active |
+| Pair ID | Display | Assets | XFG side | Counterparty side | Status |
+|---------|---------|--------|----------|-------------------|--------|
+| 0 | SOL/XFG | SOL ↔ XFG | Adaptor sig (normal KeyOutput) | Solana HTLC Program (Keccak-256) | Active |
+| 1 | ETH/XFG | ETH ↔ XFG | Adaptor sig (normal KeyOutput) | HashedTimelock.sol (Keccak-256) | Active |
+| 2 | XMR/XFG | XMR ↔ XFG | Adaptor sig (normal KeyOutput) | Adaptor sig (COMIT, both sides) | Active |
+| 3 | HEAT/XFG | HEAT ↔ XFG | Adaptor sig (normal KeyOutput) | ERC-20 HTLC (Keccak-256) | Active |
+| 4 | LUSD/XFG | LUSD ↔ XFG | Adaptor sig (normal KeyOutput) | ERC-20 HTLC (Keccak-256) | Active |
 
-HEAT and LUSD share the same ERC-20 HTLC contract on Ethereum — different token address, same mechanism. SOL uses a dedicated Solana Program (Rust) with SHA-256 hashlock + slot-based timelock. Both Fuego and Solana use Ed25519 keys.
+All XFG-side swap operations use Ed25519 adaptor signatures. Swap outputs are normal `KeyOutput` to Musig2 joint addresses — indistinguishable from regular transactions on-chain. HEAT and LUSD share the same ERC-20 HTLC contract on Ethereum. SOL uses a dedicated Anchor Program with Keccak-256 hashlock. XMR uses the COMIT protocol with adaptor sigs on both sides (no HTLC on either chain). Both Fuego and Solana use Ed25519 keys. BCH support (pair 2 slot, `HtlcScript.h/cpp`) preserved in codebase for potential future activation.
 
 ---
 
 ## 6. Project Structure
 
 ```
-swaphub/
+swapxfg/
 ├── main.go                 CLI entry, flag parsing
 ├── go.mod
 ├── app/
 │   ├── config.go           Config struct, defaults, flag mapping
 │   ├── app.go              Run() orchestrator: splash → TUI
-│   ├── splash.go           Doom fire + SwapHub ASCII art
+│   ├── splash.go           Doom fire + SwapXFG ASCII art
 │   ├── tui.go              Main TUI model (bubbletea)
 │   ├── layout.go           Layout calculations, responsive sizing
 │   ├── chart.go            Candlestick chart rendering
@@ -426,14 +432,14 @@ swaphub/
 │   ├── tape.go             Trade tape component
 │   ├── ticker.go           Top market ticker bar
 │   ├── input.go            Command input + processing
-│   ├── htlc.go             HTLC monitor view
+│   ├── swap_monitor.go     Adaptor sig swap state monitor view
 │   ├── styles.go           lipgloss styles, color palette
 │   ├── rpc.go              Fuego daemon RPC client
 │   ├── wallet_rpc.go       Fuego wallet RPC client
 │   ├── eth_bridge.go       MetaMask WebSocket bridge
 │   ├── sol_bridge.go       Phantom WebSocket bridge (Solana)
 │   ├── sol_rpc.go          Solana RPC client
-│   └── bch_rpc.go          Bitcoin Cash RPC client
+│   └── xmr_rpc.go          Monero wallet RPC client
 ├── bridge/
 │   ├── bridge.html         MetaMask bridge page (embedded)
 │   └── sol-bridge.html     Phantom bridge page (embedded)
@@ -457,7 +463,7 @@ Fuego-branded, consistent across all pairs:
 | Active pair tab | White on orange | `#FFFFFF` on `#FF5500` |
 | Inactive pair tab | Gray | `#777777` |
 | Own offer marker | Cyan | `#00CCCC` |
-| HTLC active | Pulsing yellow | `#FFDD00` |
+| Swap active | Pulsing yellow | `#FFDD00` |
 | Connection OK | Green dot | `#00FF00` |
 | Connection lost | Red dot | `#FF0000` |
 
@@ -472,29 +478,32 @@ Fuego-branded, consistent across all pairs:
 - Orderbook + trade tape
 - Splash screen with fire animation
 
-### M2: Wallet integration
+### M2: Wallet integration + adaptor sig swaps
 - Connect to wallet RPC
 - Submit/cancel offers
-- Create/claim/refund HTLCs on XFG side
+- Initiate/complete/refund adaptor sig swaps on XFG side
 - Balance display
+- Swap state machine monitor (key exchange → lock → claim → complete)
 
 ### M3: MetaMask + Phantom bridges
 - Localhost bridge servers (MetaMask for ETH/HEAT/LUSD, Phantom for SOL)
-- ETH/HEAT/LUSD balance queries + ERC-20 HTLC contract interaction
-- SOL balance queries + Solana HTLC Program interaction
-- Claim counterparty-side swaps from TUI
+- ETH/HEAT/LUSD balance queries + ERC-20 HTLC contract interaction (counterparty side)
+- SOL balance queries + Solana HTLC Program interaction (counterparty side)
+- Complete counterparty-side swaps from TUI
 
-### M4: BCH connection
-- Electron Cash RPC integration
-- BCH HTLC script operations
+### M4: XMR connection (COMIT protocol)
+- Monero wallet RPC integration
+- COMIT adaptor sig protocol (adaptor sigs on both XFG and XMR sides)
+- XMR balance + transfer operations
+- 2-of-2 joint address key exchange
 
 ### M5: EFier web UI
 - Static SPA embedded in fuegod
 - Charts, orderbook, trades, prices
-- HTLC explorer
+- Swap explorer (active/completed swaps, anonymity set stats)
 - Served by all EFier nodes automatically
 
 ### M6: Wallet `swap` command update
-- Replace ncurses SwapTerminal with swaphub subprocess
+- Replace ncurses SwapTerminal with swapxfg subprocess
 - Pass connection flags automatically
 - Works for both fire_wallet and test_wallet

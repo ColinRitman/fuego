@@ -133,6 +133,9 @@ namespace CryptoNote
     bool propose_slash(const std::vector<std::string> &args);
     bool get_report(const std::vector<std::string> &args);
 
+    // xfgCD — Certificate of Deposit commands (on-chain yield from swap fee pool)
+    bool xfgCD(const std::vector<std::string> &args);
+
     // Adaptor signature swap commands
     bool initiate_swap(const std::vector<std::string> &args);
     bool complete_swap(const std::vector<std::string> &args);

@@ -131,8 +131,7 @@ void ElderfierSignatureDaemon::onNewBlock(uint32_t blockHeight, const Crypto::Ha
 }
 
 bool ElderfierSignatureDaemon::shouldSign(uint8_t elderfier_id, uint32_t blockHeight) const {
-  // Elderfier should sign if registered and not recently signed
-  // Can add more sophisticated logic here (e.g., random selection, rotation)
+  // Elderfier should sign if registered and not already signed
   return true;
 }
 

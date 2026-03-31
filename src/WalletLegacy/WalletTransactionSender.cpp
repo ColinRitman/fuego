@@ -379,11 +379,13 @@ namespace CryptoNote
   std::unique_ptr<WalletRequest> WalletTransactionSender::makeWithdrawDepositRequest(TransactionId &transactionId,
                                                                                      std::deque<std::unique_ptr<WalletLegacyEvent>> &events,
                                                                                      const std::vector<DepositId> &depositIds,
-                                                                                     uint64_t fee)
+                                                                                     uint64_t fee,
+                                                                                     uint64_t claimedInterest)
   {
 
     std::shared_ptr<SendTransactionContext> context = std::make_shared<SendTransactionContext>();
     context->dustPolicy.dustThreshold = m_currency.defaultDustThreshold();
+    context->claimedInterest = claimedInterest;
 
     context->foundMoney = selectDepositTransfers(depositIds, context->selectedTransfers);
     throwIf(context->foundMoney < fee, error::WRONG_AMOUNT);
@@ -770,6 +772,8 @@ namespace CryptoNote
           isColdDeposit = true;
         } else if (tag == TX_EXTRA_ELDERFIER_DEPOSIT) {
           detectedType = Deposit::Type::ELDERFIER;
+        } else if (tag == TX_EXTRA_XFG_CD) {
+          detectedType = Deposit::Type::CD;
         }
       } else {
         // No wallet-provided commitment — generate one based on deposit term
@@ -964,9 +968,10 @@ namespace CryptoNote
       WalletLegacyTransaction& transactionInfo = m_transactionsCache.getTransaction(context->transactionId);
       std::unique_ptr<ITransaction> transaction = createTransaction();
 
-      // Split withdrawal proceeds to wallet address.
+      // Split withdrawal proceeds to wallet address (principal + claimed interest - fee).
+      uint64_t totalProceeds = context->foundMoney + context->claimedInterest - transactionInfo.fee;
       std::vector<uint64_t> outputAmounts = splitAmount(
-          context->foundMoney - transactionInfo.fee, context->dustPolicy.dustThreshold);
+          totalProceeds, context->dustPolicy.dustThreshold);
       for (auto amount : outputAmounts) {
         transaction->addOutput(amount, m_keys.address);
       }
@@ -1065,6 +1070,7 @@ namespace CryptoNote
         csInput.amount        = transfer.amount;
         csInput.outputIndexes = relOffsets;
         csInput.keyImage      = commitKeys.keyImage;
+        csInput.claimedInterest = context->claimedInterest;
         transaction->addInput(csInput);
 
         // Sign the input.

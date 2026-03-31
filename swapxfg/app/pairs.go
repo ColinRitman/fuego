@@ -2,14 +2,15 @@ package app
 
 // Pair IDs match fuegod's SwapPair enum (SwapTypes.h).
 const (
-	PairSOL uint8 = 0
-	PairETH uint8 = 1
-	PairXMR uint8 = 2
-	PairBCH uint8 = 3
+	PairSOL  uint8 = 0
+	PairETH  uint8 = 1
+	PairXMR  uint8 = 2
+	PairHEAT uint8 = 3
+	PairLUSD uint8 = 4
 )
 
-// ActivePairs lists all supported pairs in display order (SOL first).
-var ActivePairs = []uint8{PairSOL, PairETH, PairXMR, PairBCH}
+// ActivePairs lists all supported pairs in display order.
+var ActivePairs = []uint8{PairSOL, PairETH, PairXMR, PairHEAT, PairLUSD}
 
 // PairName returns the display name for a pair (e.g. "ETH/XFG").
 func PairName(pair uint8) string {
@@ -20,8 +21,10 @@ func PairName(pair uint8) string {
 		return "ETH/XFG"
 	case PairXMR:
 		return "XMR/XFG"
-	case PairBCH:
-		return "BCH/XFG"
+	case PairHEAT:
+		return "HEAT/XFG"
+	case PairLUSD:
+		return "LUSD/XFG"
 	default:
 		return "?/XFG"
 	}
@@ -36,8 +39,10 @@ func PairShort(pair uint8) string {
 		return "ETH"
 	case PairXMR:
 		return "XMR"
-	case PairBCH:
-		return "BCH"
+	case PairHEAT:
+		return "HEAT"
+	case PairLUSD:
+		return "LUSD"
 	default:
 		return "?"
 	}
@@ -52,8 +57,10 @@ func PairFromString(s string) uint8 {
 		return PairETH
 	case "xmr", "XMR":
 		return PairXMR
-	case "bch", "BCH":
-		return PairBCH
+	case "heat", "HEAT":
+		return PairHEAT
+	case "lusd", "LUSD":
+		return PairLUSD
 	default:
 		return 255
 	}
@@ -69,7 +76,9 @@ func HotkeyPair(r rune) uint8 {
 	case '2':
 		return PairXMR
 	case '3':
-		return PairBCH
+		return PairHEAT
+	case '4':
+		return PairLUSD
 	default:
 		return 255
 	}

@@ -165,11 +165,14 @@ public:
   virtual TransactionId deposit(uint32_t term, uint64_t amount, uint64_t fee, uint64_t mixIn = 0) = 0;
   virtual TransactionId deposit(uint32_t term, uint64_t amount, uint64_t fee, const std::string& extra, uint64_t mixIn = 0) = 0;
   virtual TransactionId withdrawDeposits(const std::vector<DepositId>& depositIds, uint64_t fee) = 0;
+  virtual TransactionId withdrawDepositsWithInterest(const std::vector<DepositId>& depositIds, uint64_t fee, uint64_t claimedInterest) = 0;
   virtual std::error_code cancelTransaction(size_t transferId) = 0;
 
   // Sub-address support: subscribe the wallet scanner to this (major, minor) index.
   // Returns the encoded sub-address string. Idempotent.
   virtual std::string registerSubAddress(uint32_t major, uint32_t minor) = 0;
+
+  virtual void sign_hash(const Crypto::Hash& hash, Crypto::Signature& sig) = 0;
 
 };
 

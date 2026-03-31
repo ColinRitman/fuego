@@ -30,7 +30,6 @@
 #include <System/Event.h>
 #include "Transfers/TransfersSynchronizer.h"
 #include "Transfers/BlockchainSynchronizer.h"
-#include "EldernodeIndexManager.h"  // For elderfier auto-registration
 #include "crypto/subaddress.h"
 
 namespace CryptoNote

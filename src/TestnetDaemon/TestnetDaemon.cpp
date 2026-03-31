@@ -385,6 +385,7 @@ int main(int argc, char* argv[])
     auto swapRelay = std::make_unique<CryptoNote::SwapOfferRelay>(ccore, p2psrv, &p2psrv);
     swapRelay->start();
     rpcServer.setSwapRelay(swapRelay.get());
+    p2psrv.get_payload_object().set_swap_relay(swapRelay.get());
     logger(INFO) << "Swap offer relay started";
 
     // start components

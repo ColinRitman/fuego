@@ -41,6 +41,12 @@ struct TxOutputInfo {
   Crypto::PublicKey targetKey;  // KeyOutput target public key
 };
 
+// Random output for ring signature construction.
+struct RandomOutput {
+  uint64_t globalIndex;
+  Crypto::PublicKey key;
+};
+
 class FuegoRpcClient {
 public:
   FuegoRpcClient(const std::string& host, uint16_t port);
@@ -72,6 +78,16 @@ public:
   // txHashHex: 64-char hex hash. Returns false if tx not found.
   bool getTransactionOutputs(const std::string& txHashHex,
                              std::vector<TxOutputInfo>& outputs);
+
+  // Fetch random outputs at a given amount for ring signature construction.
+  // Returns false on RPC failure or if the daemon returns non-OK status.
+  bool getRandomOutputs(uint64_t amount, uint32_t count,
+                        std::vector<RandomOutput>& outputs);
+
+  // Fetch global output indices for all outputs in a transaction.
+  // txHashHex: 64-char hex hash. Returns false if tx not found.
+  bool getGlobalOutputIndexes(const std::string& txHashHex,
+                              std::vector<uint64_t>& indexes);
 
 private:
   // Synchronous HTTP POST to an arbitrary host:port

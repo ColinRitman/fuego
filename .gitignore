@@ -10,3 +10,8 @@ build-ubuntu/
 
 # OpenMemory - IDE/Assistant specific rules
 .cursor/rules/openmemory.mdc
+.aider*
+.env
+
+.gemini/
+gha-creds-*.json

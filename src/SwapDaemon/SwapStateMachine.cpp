@@ -33,7 +33,9 @@ SwapStateMachine::SwapStateMachine()
   std::memset(&m_params.escrowPubKey, 0, sizeof(m_params.escrowPubKey));
   std::memset(&m_params.adaptorPoint, 0, sizeof(m_params.adaptorPoint));
   std::memset(&m_params.adaptorSecret, 0, sizeof(m_params.adaptorSecret));
+  std::memset(&m_params.peerEncryptedKeyShare, 0, sizeof(m_params.peerEncryptedKeyShare));
   std::memset(&m_params.escrowTxHash, 0, sizeof(m_params.escrowTxHash));
+  std::memset(&m_params.escrowTxPubKey, 0, sizeof(m_params.escrowTxPubKey));
   std::memset(&m_params.hashLock, 0, sizeof(m_params.hashLock));
   std::memset(&m_params.preimage, 0, sizeof(m_params.preimage));
   m_params.pair = SwapPair::SOL;
@@ -144,8 +146,38 @@ std::string SwapStateMachine::serialize() const {
   root.insert("peerSwapPubKey", Common::podToHex(m_params.peerSwapPubKey));
   root.insert("escrowPubKey", Common::podToHex(m_params.escrowPubKey));
   root.insert("adaptorPoint", Common::podToHex(m_params.adaptorPoint));
+  root.insert("adaptorSecret", Common::podToHex(m_params.adaptorSecret));
+  root.insert("adaptorDleqProof", Common::podToHex(m_params.adaptorDleqProof));
+  root.insert("ourSwapSecKey", Common::podToHex(m_params.ourSwapSecKey));
+  root.insert("peerEncryptedKeyShare", Common::podToHex(m_params.peerEncryptedKeyShare));
   root.insert("escrowTxHash", Common::podToHex(m_params.escrowTxHash));
+  root.insert("escrowTxPubKey", Common::podToHex(m_params.escrowTxPubKey));
   root.insert("escrowOutputIndex", static_cast<int64_t>(m_params.escrowOutputIndex));
+  root.insert("escrowGlobalIndex", static_cast<int64_t>(m_params.escrowGlobalIndex));
+  root.insert("hashLock", Common::podToHex(m_params.hashLock));
+  root.insert("preimage", Common::podToHex(m_params.preimage));
+  root.insert("htlcOutputIndex", static_cast<int64_t>(m_params.htlcOutputIndex));
+
+  // Musig2 session state
+  root.insert("musig2_keyAgg", Common::podToHex(m_params.musig2.keyAgg));
+  root.insert("musig2_ourSecNonce", Common::podToHex(m_params.musig2.ourSecNonce));
+  root.insert("musig2_ourPubNonce", Common::podToHex(m_params.musig2.ourPubNonce));
+  root.insert("musig2_peerPubNonce", Common::podToHex(m_params.musig2.peerPubNonce));
+  root.insert("musig2_aggNonce", Common::podToHex(m_params.musig2.aggNonce));
+  root.insert("musig2_session", Common::podToHex(m_params.musig2.session));
+  root.insert("musig2_ourPartialSig", Common::podToHex(m_params.musig2.ourPartialSig));
+  root.insert("musig2_peerPartialSig", Common::podToHex(m_params.musig2.peerPartialSig));
+  root.insert("musig2_nonceGenerated", static_cast<int64_t>(m_params.musig2.nonceGenerated ? 1 : 0));
+  root.insert("musig2_sessionInitialized", static_cast<int64_t>(m_params.musig2.sessionInitialized ? 1 : 0));
+
+  // Solana-specific
+  root.insert("solSenderPubkey", m_params.solSenderPubkey);
+  root.insert("solRecipientPubkey", m_params.solRecipientPubkey);
+
+  // Ethereum-specific
+  root.insert("ethSenderAddr", m_params.ethSenderAddr);
+  root.insert("ethRecipientAddr", m_params.ethRecipientAddr);
+  root.insert("ethContractId", m_params.ethContractId);
 
   // Legacy fields (kept for backward compat in DB)
   root.insert("aliceXfgPubKey", Common::podToHex(m_params.aliceXfgPubKey));
@@ -183,10 +215,64 @@ SwapStateMachine SwapStateMachine::deserialize(const std::string& json) {
     Common::podFromHex(root("escrowPubKey").getString(), params.escrowPubKey);
   if (root.contains("adaptorPoint"))
     Common::podFromHex(root("adaptorPoint").getString(), params.adaptorPoint);
+  if (root.contains("adaptorSecret"))
+    Common::podFromHex(root("adaptorSecret").getString(), params.adaptorSecret);
+  if (root.contains("adaptorDleqProof"))
+    Common::podFromHex(root("adaptorDleqProof").getString(), params.adaptorDleqProof);
+  if (root.contains("ourSwapSecKey"))
+    Common::podFromHex(root("ourSwapSecKey").getString(), params.ourSwapSecKey);
+  if (root.contains("peerEncryptedKeyShare"))
+    Common::podFromHex(root("peerEncryptedKeyShare").getString(), params.peerEncryptedKeyShare);
   if (root.contains("escrowTxHash"))
     Common::podFromHex(root("escrowTxHash").getString(), params.escrowTxHash);
+  if (root.contains("escrowTxPubKey"))
+    Common::podFromHex(root("escrowTxPubKey").getString(), params.escrowTxPubKey);
   if (root.contains("escrowOutputIndex"))
     params.escrowOutputIndex = static_cast<uint32_t>(root("escrowOutputIndex").getInteger());
+  if (root.contains("escrowGlobalIndex"))
+    params.escrowGlobalIndex = static_cast<uint64_t>(root("escrowGlobalIndex").getInteger());
+  if (root.contains("hashLock"))
+    Common::podFromHex(root("hashLock").getString(), params.hashLock);
+  if (root.contains("preimage"))
+    Common::podFromHex(root("preimage").getString(), params.preimage);
+  if (root.contains("htlcOutputIndex"))
+    params.htlcOutputIndex = static_cast<uint32_t>(root("htlcOutputIndex").getInteger());
+
+  // Musig2 session state
+  if (root.contains("musig2_keyAgg"))
+    Common::podFromHex(root("musig2_keyAgg").getString(), params.musig2.keyAgg);
+  if (root.contains("musig2_ourSecNonce"))
+    Common::podFromHex(root("musig2_ourSecNonce").getString(), params.musig2.ourSecNonce);
+  if (root.contains("musig2_ourPubNonce"))
+    Common::podFromHex(root("musig2_ourPubNonce").getString(), params.musig2.ourPubNonce);
+  if (root.contains("musig2_peerPubNonce"))
+    Common::podFromHex(root("musig2_peerPubNonce").getString(), params.musig2.peerPubNonce);
+  if (root.contains("musig2_aggNonce"))
+    Common::podFromHex(root("musig2_aggNonce").getString(), params.musig2.aggNonce);
+  if (root.contains("musig2_session"))
+    Common::podFromHex(root("musig2_session").getString(), params.musig2.session);
+  if (root.contains("musig2_ourPartialSig"))
+    Common::podFromHex(root("musig2_ourPartialSig").getString(), params.musig2.ourPartialSig);
+  if (root.contains("musig2_peerPartialSig"))
+    Common::podFromHex(root("musig2_peerPartialSig").getString(), params.musig2.peerPartialSig);
+  if (root.contains("musig2_nonceGenerated"))
+    params.musig2.nonceGenerated = root("musig2_nonceGenerated").getInteger() != 0;
+  if (root.contains("musig2_sessionInitialized"))
+    params.musig2.sessionInitialized = root("musig2_sessionInitialized").getInteger() != 0;
+
+  // Solana-specific
+  if (root.contains("solSenderPubkey"))
+    params.solSenderPubkey = root("solSenderPubkey").getString();
+  if (root.contains("solRecipientPubkey"))
+    params.solRecipientPubkey = root("solRecipientPubkey").getString();
+
+  // Ethereum-specific
+  if (root.contains("ethSenderAddr"))
+    params.ethSenderAddr = root("ethSenderAddr").getString();
+  if (root.contains("ethRecipientAddr"))
+    params.ethRecipientAddr = root("ethRecipientAddr").getString();
+  if (root.contains("ethContractId"))
+    params.ethContractId = root("ethContractId").getString();
 
   // Legacy fields
   if (root.contains("aliceXfgPubKey"))

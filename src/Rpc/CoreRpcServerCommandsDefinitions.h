@@ -1575,6 +1575,7 @@ struct COMMAND_RPC_GET_EPOCH_REPORT {
 
 struct swap_offer_rpc_entry {
   std::string offerId;
+  bool isSell;
   uint64_t xfgAmount;
   uint64_t rateNum;
   uint8_t pair;
@@ -1585,6 +1586,7 @@ struct swap_offer_rpc_entry {
 
   void serialize(ISerializer& s) {
     KV_MEMBER(offerId)
+    KV_MEMBER(isSell)
     KV_MEMBER(xfgAmount)
     KV_MEMBER(rateNum)
     KV_MEMBER(pair)
@@ -1727,6 +1729,7 @@ struct COMMAND_RPC_GET_SWAP_TRADES {
 struct COMMAND_RPC_SUBMIT_SWAP_OFFER {
   struct request {
     std::string offerId;
+    bool isSell;
     uint64_t xfgAmount;
     uint64_t rateNum;
     uint8_t pair;
@@ -1736,6 +1739,7 @@ struct COMMAND_RPC_SUBMIT_SWAP_OFFER {
 
     void serialize(ISerializer& s) {
       KV_MEMBER(offerId)
+      KV_MEMBER(isSell)
       KV_MEMBER(xfgAmount)
       KV_MEMBER(rateNum)
       KV_MEMBER(pair)
@@ -1771,6 +1775,106 @@ struct COMMAND_RPC_CANCEL_SWAP_OFFER {
     std::string status;
 
     void serialize(ISerializer& s) {
+      KV_MEMBER(status)
+    }
+  };
+};
+
+// ============================================================================
+// CD FEE POOL RPC ENDPOINTS
+// ============================================================================
+
+struct COMMAND_RPC_GET_FEE_POOL {
+  typedef EMPTY_STRUCT request;
+
+  struct response {
+    // Current pool state
+    uint64_t fee_pool_balance;          // XFG available for CD interest payouts
+    uint64_t current_epoch_swap_fees;   // swap fees accumulated so far this epoch
+    uint64_t total_cd_locked;           // total XFG locked in active CDs
+
+    // Current epoch yield info
+    uint64_t current_epoch_fee_rate;    // fixed-point (÷1e6) yield rate for current epoch
+    uint32_t active_efier_count;        // EFier snapshot for current epoch
+    uint64_t banking_fee_rate_bps;      // dynamic banking fee (activeEfiers × 10 BPS)
+
+    // EFier swap reward state
+    uint64_t efier_swap_reward_per_block;  // per-block drip rate
+    uint64_t efier_swap_reward_remaining;  // undistributed remaining this epoch
+
+    // Treasury
+    uint64_t treasury_balance;          // accumulated treasury funds
+
+    // Lifetime counters (never reset, for auditing)
+    uint64_t total_swap_fees_collected;  // all swap fees ever
+    uint64_t total_cd_interest_paid;     // all CD interest paid out
+    uint64_t total_efier_swap_paid;      // all EFier 10% distributions
+    uint64_t total_treasury_accrued;     // all treasury 10% accruals
+
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(fee_pool_balance)
+      KV_MEMBER(current_epoch_swap_fees)
+      KV_MEMBER(total_cd_locked)
+      KV_MEMBER(current_epoch_fee_rate)
+      KV_MEMBER(active_efier_count)
+      KV_MEMBER(banking_fee_rate_bps)
+      KV_MEMBER(efier_swap_reward_per_block)
+      KV_MEMBER(efier_swap_reward_remaining)
+      KV_MEMBER(treasury_balance)
+      KV_MEMBER(total_swap_fees_collected)
+      KV_MEMBER(total_cd_interest_paid)
+      KV_MEMBER(total_efier_swap_paid)
+      KV_MEMBER(total_treasury_accrued)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_CD_INFO {
+  typedef EMPTY_STRUCT request;
+
+  struct response {
+    uint64_t total_cd_locked;           // total XFG locked in active CDs
+    uint64_t fee_pool_balance;          // available for interest
+    uint64_t current_epoch_fee_rate;    // fixed-point yield rate (÷1e6)
+    uint64_t epoch_count;               // number of completed epochs
+    uint32_t active_efier_count;        // EFier count (for banking fee display)
+    uint64_t banking_fee_rate_bps;      // dynamic banking fee in basis points
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(total_cd_locked)
+      KV_MEMBER(fee_pool_balance)
+      KV_MEMBER(current_epoch_fee_rate)
+      KV_MEMBER(epoch_count)
+      KV_MEMBER(active_efier_count)
+      KV_MEMBER(banking_fee_rate_bps)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_CD_INTEREST {
+  struct request {
+    uint64_t amount;           // deposit amount in atomic units
+    uint32_t creation_height;  // block height when deposit was created
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(amount)
+      KV_MEMBER(creation_height)
+    }
+  };
+
+  struct response {
+    uint64_t interest;          // claimable interest in atomic units
+    uint64_t fee_pool_balance;  // current pool balance (interest capped to this)
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(interest)
+      KV_MEMBER(fee_pool_balance)
       KV_MEMBER(status)
     }
   };

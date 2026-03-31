@@ -54,6 +54,7 @@ struct SwapTradeRecord {
   double      rate;
   uint32_t    blockHeight;
   uint64_t    timestamp;
+  Crypto::PublicKey makerPubKey;
 };
 
 // ============================================================================
@@ -153,6 +154,10 @@ public:
   bool cancelOffer(const std::string& offerId, const Crypto::PublicKey& pubkey,
                    const Crypto::Signature& sig);
 
+  // Maker Rewards & Stats
+  uint64_t getMakerRewards(const Crypto::PublicKey& pubkey) const;
+  bool claimMakerRewards(const Crypto::PublicKey& pubkey, const Crypto::Signature& sig, uint64_t& amount);
+
   // Seed rates: XFG per 1 whole CTR coin (1 XFG = $0.01 USD)
   static double getSeedRate(uint8_t pair);
 
@@ -176,6 +181,16 @@ private:
   // Completed trades for TWAP (bounded deque, newest at back)
   std::deque<SwapTradeRecord> m_trades;
   static const size_t MAX_TRADE_HISTORY = 200;
+
+  // Spam prevention limits
+  static const size_t MAX_OFFERS_PER_MAKER = 5;
+  static const uint64_t OFFER_RATE_LIMIT_SEC = 10;
+  std::map<Crypto::PublicKey, size_t> m_makerOfferCount;
+  std::map<Crypto::PublicKey, uint64_t> m_lastOfferTime;
+
+  // Maker Rewards data
+  std::map<Crypto::PublicKey, uint64_t> m_makerSuccessfulSwaps;
+  std::map<Crypto::PublicKey, uint64_t> m_makerRewards; // Accumulated rewards in atomic units
 
   // TWAP parameters
   static const size_t TWAP_WINDOW = 20;

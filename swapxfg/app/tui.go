@@ -2,6 +2,7 @@
 package app
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -16,6 +17,7 @@ const refreshInterval = 5 * time.Second
 type tuiModel struct {
 	cfg    Config
 	client *FuegoClient
+	wallet *WalletClient
 
 	// Terminal dimensions
 	width, height int
@@ -25,8 +27,13 @@ type tuiModel struct {
 	data       *AllPairData
 	connected  bool
 
+	// Wallet state
+	walletBalance uint64
+	walletLocked  uint64
+	afkMode       bool
+
 	// Input
-	cmdBuf    string
+...
 	cmdFocus  bool
 	cursorOn  bool
 	blinkTick int
@@ -58,7 +65,7 @@ func cursorBlink() tea.Cmd {
 }
 
 func newTuiModel(cfg Config) tuiModel {
-	return tuiModel{
+	m := tuiModel{
 		cfg:        cfg,
 		client:     NewFuegoClient(cfg.DaemonRPC),
 		activePair: cfg.StartPair,
@@ -69,14 +76,28 @@ func newTuiModel(cfg Config) tuiModel {
 		},
 		cursorOn: true,
 	}
+	if cfg.WalletRPC != "" {
+		m.wallet = NewWalletClient(cfg.WalletRPC)
+	}
+	return m
+}
+
+type walletBalanceMsg struct {
+	available uint64
+	locked    uint64
+	err       error
 }
 
 func (m tuiModel) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.fetchData(),
 		refreshTick(),
 		cursorBlink(),
-	)
+	}
+	if m.wallet != nil {
+		cmds = append(cmds, m.fetchWallet())
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m tuiModel) fetchData() tea.Cmd {
@@ -85,6 +106,22 @@ func (m tuiModel) fetchData() tea.Cmd {
 		data, err := client.FetchAll(ActivePairs)
 		return refreshMsg{data: data, err: err}
 	}
+}
+
+func (m tuiModel) fetchWallet() tea.Cmd {
+	if m.wallet == nil {
+		return nil
+	}
+	w := m.wallet
+	return func() tea.Msg {
+		avail, locked, err := w.GetBalance()
+		return walletBalanceMsg{available: avail, locked: locked, err: err}
+	}
+}
+
+type commandResultMsg struct {
+	msg string
+	err error
 }
 
 func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -107,8 +144,25 @@ func (m tuiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.data = msg.data
 		}
 
+	case walletBalanceMsg:
+		if msg.err == nil {
+			m.walletBalance = msg.available
+			m.walletLocked = msg.locked
+		}
+
+	case commandResultMsg:
+		if msg.err != nil {
+			m.statusMsg = "Error: " + msg.err.Error()
+		} else {
+			m.statusMsg = msg.msg
+		}
+
 	case refreshTickMsg:
-		return m, tea.Batch(m.fetchData(), refreshTick())
+		cmds := []tea.Cmd{m.fetchData(), refreshTick()}
+		if m.wallet != nil {
+			cmds = append(cmds, m.fetchWallet())
+		}
+		return m, tea.Batch(cmds...)
 
 	case cursorBlinkMsg:
 		m.blinkTick++
@@ -142,9 +196,10 @@ func (m tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.cmdFocus {
 		switch k {
 		case "enter":
-			m.handleCommand(m.cmdBuf)
+			cmd := m.handleCommand(m.cmdBuf)
 			m.cmdBuf = ""
 			m.cmdFocus = false
+			return m, cmd
 		case "backspace":
 			if len(m.cmdBuf) > 0 {
 				m.cmdBuf = m.cmdBuf[:len(m.cmdBuf)-1]
@@ -180,10 +235,10 @@ func (m tuiModel) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *tuiModel) handleCommand(cmd string) {
+func (m *tuiModel) handleCommand(cmd string) tea.Cmd {
 	cmd = strings.TrimSpace(cmd)
 	if cmd == "" {
-		return
+		return nil
 	}
 	parts := strings.Fields(cmd)
 	switch parts[0] {
@@ -196,11 +251,121 @@ func (m *tuiModel) handleCommand(cmd string) {
 				m.statusMsg = "unknown pair: " + parts[1]
 			}
 		}
+	case "pool":
+		if m.data.FeePool != nil {
+			fp := m.data.FeePool
+			m.statusMsg = fmt.Sprintf("Pool: %s XFG | CD Locked: %s XFG | Epoch Fees: %s XFG | EFiers: %d",
+				FormatXfg(fp.FeePoolBalance), FormatXfg(fp.TotalCdLocked),
+				FormatXfg(fp.CurrentEpochSwapFees), fp.ActiveEfierCount)
+		} else {
+			m.statusMsg = "fee pool data unavailable"
+		}
+	case "offer":
+		if m.wallet == nil {
+			m.statusMsg = "connect wallet to create offers"
+			return nil
+		}
+		if len(parts) < 3 {
+			m.statusMsg = "usage: offer <amount> <rate> [buy|sell]"
+			return nil
+		}
+		amt, _ := strconv.ParseFloat(parts[1], 64)
+		rate, _ := strconv.ParseFloat(parts[2], 64)
+		isSell := true
+		if len(parts) > 3 && parts[3] == "buy" {
+			isSell = false
+		}
+		
+		xfgAmt := uint64(amt * 1e7)
+		rateNum := uint64(rate * 1e7)
+		
+		w := m.wallet
+		c := m.client
+		pair := m.activePair
+		
+		return func() tea.Msg {
+			sigResp, err := w.SignOffer(SignOfferRequest{
+				XfgAmount: xfgAmt,
+				RateNum:   rateNum,
+				Pair:      pair,
+				TTLBlocks: 180, // ~24h
+			})
+			if err != nil {
+				return commandResultMsg{err: err}
+			}
+			
+			err = c.SubmitSwapOffer(SubmitSwapOfferRequest{
+				OfferID:     sigResp.OfferID,
+				IsSell:      isSell,
+				XfgAmount:   xfgAmt,
+				RateNum:     rateNum,
+				Pair:        pair,
+				MakerPubKey: sigResp.MakerPubKey,
+				Signature:   sigResp.Signature,
+				TTLBlocks:   180,
+			})
+			if err != nil {
+				return commandResultMsg{err: err}
+			}
+			return commandResultMsg{msg: "offer submitted successfully"}
+		}
+
+	case "accept":
+		if m.wallet == nil {
+			m.statusMsg = "connect wallet to accept swaps"
+			return nil
+		}
+		if len(parts) < 2 {
+			m.statusMsg = "usage: accept <offer_id>"
+			return nil
+		}
+		offerID := parts[1]
+		var found bool
+		var offer SwapOffer
+		for _, o := range m.data.Offers[m.activePair] {
+			if strings.HasPrefix(o.OfferID, offerID) {
+				offer = o
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.statusMsg = "offer not found: " + offerID
+			return nil
+		}
+
+		w := m.wallet
+		return func() tea.Msg {
+			_, err := w.InitiateSwap(InitiateSwapRequest{
+				OfferID:     offer.OfferID,
+				Pair:        offer.Pair,
+				Amount:      offer.XfgAmount,
+				MakerPubKey: offer.MakerPubKey,
+			})
+			if err != nil {
+				return commandResultMsg{err: err}
+			}
+			return commandResultMsg{msg: "swap initiated"}
+		}
+
+	case "afk":
+		if len(parts) > 1 {
+			if parts[1] == "on" {
+				m.afkMode = true
+			} else if parts[1] == "off" {
+				m.afkMode = false
+			}
+		} else {
+			m.afkMode = !m.afkMode
+		}
+		m.statusMsg = fmt.Sprintf("AFK Mode: %v", m.afkMode)
+
 	case "help":
-		m.statusMsg = "pair <name> | 0-3: switch pair | r: refresh | q: quit"
+		m.statusMsg = "pair <n> | offer <amt> <rate> [buy|sell] | accept <id> | afk [on|off] | pool | q: quit"
 	default:
 		m.statusMsg = "unknown: " + cmd + " (type help)"
 	}
+	return nil
 }
 
 func nextPair(cur uint8) uint8 {
@@ -232,7 +397,7 @@ func (m tuiModel) View() string {
 	}
 
 	// ── Ticker ──
-	ticker := RenderTicker(m.activePair, m.data.Prices, m.data.Height, w, m.connected)
+	ticker := RenderTicker(m.activePair, m.data.Prices, m.data.Height, m.data.FeePool, w, m.connected, m.afkMode)
 
 	// ── Main area: chart (left 60%) | orderbook+tape (right 40%) ──
 	rightW := w * 38 / 100
@@ -275,7 +440,11 @@ func (m tuiModel) View() string {
 	mainArea := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, sep, rightPanel)
 
 	// ── Input bar ──
-	inputBar := RenderInputBar(m.cmdBuf, m.cursorOn && m.cmdFocus, "", m.cfg.DaemonRPC, m.connected, w)
+	balStr := ""
+	if m.wallet != nil {
+		balStr = FormatXfg(m.walletBalance)
+	}
+	inputBar := RenderInputBar(m.cmdBuf, m.cursorOn && m.cmdFocus, balStr, m.cfg.DaemonRPC, m.connected, w)
 
 	// ── Status ──
 	status := ""

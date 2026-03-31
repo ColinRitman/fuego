@@ -874,6 +874,34 @@ TransactionId WalletLegacy::withdrawDeposits(const std::vector<DepositId>& depos
   return txId;
 }
 
+TransactionId WalletLegacy::withdrawDepositsWithInterest(const std::vector<DepositId>& depositIds, uint64_t fee, uint64_t claimedInterest) {
+  throwIfNotInitialised();
+
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+
+  fee = m_currency.minimumFee();
+
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeWithdrawDepositRequest(txId, events, depositIds, fee, claimedInterest);
+
+    if (request != nullptr) {
+      pushBalanceUpdatedEvents(events);
+    }
+  }
+
+  notifyClients(events);
+
+  if (request != nullptr) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+
+  return txId;
+}
+
 /* go through all unlocked outputs and return a total of
   everything below the dust threshold */
 uint64_t WalletLegacy::dustBalance()
@@ -1317,6 +1345,15 @@ bool WalletLegacy::isTrackingWallet() {
   AccountKeys keys;
   getAccountKeys(keys);
   return keys.spendSecretKey == boost::value_initialized<Crypto::SecretKey>();
+}
+
+void WalletLegacy::sign_hash(const Crypto::Hash& hash, Crypto::Signature& sig) {
+  throwIfNotInitialised();
+  if (isTrackingWallet()) {
+    throw std::runtime_error("Can't sign: this is a tracking-only wallet");
+  }
+  
+  Crypto::generate_signature(hash, m_account.getAccountKeys().address.spendPublicKey, m_account.getAccountKeys().spendSecretKey, sig);
 }
 
 

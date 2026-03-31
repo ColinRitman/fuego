@@ -39,15 +39,15 @@ enum class SwapState : uint8_t {
 
   // ── Adaptor signature flow ──
   //
-  // Protocol (Alice sells XFG, Bob buys XFG):
-  //   1. Both exchange pubkeys → Musig2 joint key P
-  //   2. Bob picks adaptor secret t, publishes T = t*G + DLEQ proof
-  //   3. Alice funds escrow: XFG → P (standard KeyOutput)
-  //   4. Both exchange nonces + adaptor pre-sigs
-  //   5. Bob locks counterparty coins (ETH/BCH HTLC or XMR adaptor)
-  //   6. Alice claims counterparty → reveals t
-  //   7. Bob adapts pre-sig → valid Musig2 sig → spends P → Bob
-  //   8. Alice extracts t from on-chain tx
+  // Protocol (Bob sells XFG, Alice buys XFG):
+  //   1. Both exchange pubkeys + encrypted key share → Musig2 joint key P
+  //   2. Bob picks adaptor secret t, publishes T = t*G, hashLock = H(t)
+  //      Bob sends encrypted key share: b_enc = b + t (mod l)
+  //   3. Bob funds escrow: XFG → P (standard KeyOutput)
+  //   4. Alice locks counterparty (ETH/SOL HTLC with hashLock)
+  //   5. Bob claims counterparty → reveals t
+  //   6. Alice learns t from chain, reconstructs full escrow key
+  //   7. Alice spends escrow → Alice (ring sig with full key)
   //
   ADAPTOR_KEYS_EXCHANGED = 10,   // pubkeys shared, Musig2 key aggregated
   ADAPTOR_ESCROW_FUNDED  = 11,   // XFG sent to Musig2 joint address
@@ -67,7 +67,8 @@ enum class SwapPair : uint8_t {
   SOL = 0,
   ETH = 1,
   XMR = 2,
-  BCH = 3
+  HEAT = 3,
+  LUSD = 4
 };
 
 // Musig2 session state persisted across swap steps.
@@ -106,12 +107,19 @@ struct SwapParams {
   Crypto::SecretKey adaptorSecret;     // t — known by Bob, revealed via ctr chain
   Crypto::DLEQProof adaptorDleqProof; // proves T is well-formed
 
+  // Encrypted key share: b_enc = b + t (mod l)
+  // Bob sends this to Alice. Alice verifies b_enc*G == B + T.
+  // After learning t, Alice computes: b = b_enc - t, full_key = c_a*a + c_b*b.
+  Crypto::SecretKey peerEncryptedKeyShare;
+
   // Musig2 session state
   Musig2State musig2;
 
   // Escrow tx on XFG chain
   Crypto::Hash escrowTxHash;
-  uint32_t escrowOutputIndex = 0;      // global output index of escrow
+  Crypto::PublicKey escrowTxPubKey;    // tx public key R from the funding tx
+  uint32_t escrowOutputIndex = 0;      // output index within the funding tx
+  uint64_t escrowGlobalIndex = 0;      // global output index for ring construction
 
   // ── Legacy HTLC fields (kept for backward compat) ──
   Crypto::Hash hashLock;
@@ -122,6 +130,15 @@ struct SwapParams {
   // Chain state
   uint32_t htlcOutputIndex;     // global HTLC output index on Fuego
   std::string ctrLockTxId;      // counterparty lock tx hash
+
+  // Solana-specific
+  std::string solSenderPubkey;    // our Solana pubkey (base58) for this swap
+  std::string solRecipientPubkey; // counterparty's Solana pubkey (base58)
+
+  // Ethereum-specific
+  std::string ethSenderAddr;      // our ETH address (0x...) for this swap
+  std::string ethRecipientAddr;   // counterparty's ETH address (0x...)
+  std::string ethContractId;      // HTLC contractId (bytes32 hex, from lock event)
 
   // Counterparty-specific
   std::string ctrAddress;       // counterparty chain address (SOL/ETH/XMR/BCH)

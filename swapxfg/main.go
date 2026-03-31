@@ -25,13 +25,18 @@ func main() {
 		switch arg {
 		case "--daemon", "-d", "--efier", "-e":
 			cfg.DaemonRPC = next()
+		case "--wallet", "-w":
+			cfg.WalletRPC = next()
 		case "--testnet":
 			cfg.DaemonRPC = "http://127.0.0.1:28280"
+			cfg.WalletRPC = "http://127.0.0.1:28282"
 			cfg.Testnet = true
+		case "--start-afk":
+			cfg.StartAFK = true
 		case "--pair", "-p":
 			p := app.PairFromString(strings.ToLower(next()))
 			if p == 255 {
-				fmt.Fprintf(os.Stderr, "unknown pair (use: sol, eth, xmr, bch)\n")
+				fmt.Fprintf(os.Stderr, "unknown pair (use: sol, eth, xmr, heat, lusd)\n")
 				os.Exit(1)
 			}
 			cfg.StartPair = p

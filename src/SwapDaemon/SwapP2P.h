@@ -33,6 +33,7 @@ enum class SwapMsgType : uint8_t {
   NONCE_EXCHANGE = 1,
   PRESIG_EXCHANGE = 2,
   SECRET_REVEAL  = 3,
+  ADAPTOR_INFO   = 4,   // Bob→Alice: adaptorPoint, hashLock, encrypted key share
   ERROR          = 0xFF
 };
 

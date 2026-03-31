@@ -279,8 +279,6 @@ bool get_inputs_money_amount(const Transaction& tx, uint64_t& money) {
       amount = boost::get<MultisignatureInput>(in).amount;
     } else if (in.type() == typeid(TransactionInputCommitmentSpend)) {
       amount = boost::get<TransactionInputCommitmentSpend>(in).amount;
-    } else if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
-      amount = boost::get<TransactionInputCommitmentTransfer>(in).amount;
     }
 
     money += amount;
@@ -303,10 +301,6 @@ bool check_inputs_types_supported(const TransactionPrefix& tx) {
   for (const auto& in : tx.inputs) {
     const auto& inputType = in.type();
     if (inputType == typeid(MultisignatureInput) || inputType == typeid(TransactionInputCommitmentSpend)) {
-      if (tx.version < TRANSACTION_VERSION_2) {
-        return false;
-      }
-    } else if (inputType == typeid(TransactionInputCommitmentTransfer)) {
       if (tx.version < TRANSACTION_VERSION_2) {
         return false;
       }
@@ -409,8 +403,6 @@ bool check_inputs_overflow(const TransactionPrefix &tx) {
       amount = boost::get<MultisignatureInput>(in).amount;
     } else if (in.type() == typeid(TransactionInputCommitmentSpend)) {
       amount = boost::get<TransactionInputCommitmentSpend>(in).amount;
-    } else if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
-      amount = boost::get<TransactionInputCommitmentTransfer>(in).amount;
     }
 
     if (money > amount + money)

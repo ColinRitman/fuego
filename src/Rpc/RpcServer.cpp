@@ -769,6 +769,7 @@ bool RpcServer::on_get_swap_offers(const COMMAND_RPC_GET_SWAP_OFFERS::request& r
   for (const auto& o : offers) {
     swap_offer_rpc_entry entry;
     entry.offerId     = o.offerId;
+    entry.isSell      = o.isSell;
     entry.xfgAmount   = o.xfgAmount;
     entry.rateNum     = o.rateNum;
     entry.pair        = o.pair;
@@ -875,7 +876,7 @@ bool RpcServer::on_submit_swap_offer(const COMMAND_RPC_SUBMIT_SWAP_OFFER::reques
   // Build offer message
   SwapOfferMsg offer;
   offer.offerId     = req.offerId;
-  offer.isSell      = true;
+  offer.isSell      = req.isSell;
   offer.xfgAmount   = req.xfgAmount;
   offer.rateNum     = req.rateNum;
   offer.pair        = req.pair;

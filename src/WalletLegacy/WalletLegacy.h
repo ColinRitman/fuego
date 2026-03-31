@@ -116,6 +116,7 @@ public:
   virtual TransactionId deposit(uint32_t term, uint64_t amount, uint64_t fee, uint64_t mixIn = 4) override;
   virtual TransactionId deposit(uint32_t term, uint64_t amount, uint64_t fee, const std::string& extra, uint64_t mixIn = 4);
   virtual TransactionId withdrawDeposits(const std::vector<DepositId>& depositIds, uint64_t fee) override;
+  virtual TransactionId withdrawDepositsWithInterest(const std::vector<DepositId>& depositIds, uint64_t fee, uint64_t claimedInterest) override;
   virtual std::error_code cancelTransaction(size_t transactionId) override;
 
   virtual void getAccountKeys(AccountKeys& keys) override;
@@ -131,6 +132,8 @@ public:
   // to actualBalance() and are selectable as transaction inputs (spend key b_ij used).
   // Idempotent: calling with a previously-registered index is a no-op and returns the address.
   virtual std::string registerSubAddress(uint32_t major, uint32_t minor) override;
+
+  virtual void sign_hash(const Crypto::Hash& hash, Crypto::Signature& sig) override;
 
 private:
 

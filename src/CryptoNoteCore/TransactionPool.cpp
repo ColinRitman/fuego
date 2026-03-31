@@ -73,12 +73,6 @@ namespace CryptoNote
           (void)r;
           assert(r.second);
         }
-        else if (in.type() == typeid(TransactionInputCommitmentTransfer))
-        {
-          auto r = m_keyImages.insert(boost::get<TransactionInputCommitmentTransfer>(in).keyImage);
-          (void)r;
-          assert(r.second);
-        }
         else if (in.type() == typeid(MultisignatureInput))
         {
           const auto &msig = boost::get<MultisignatureInput>(in);
@@ -112,13 +106,6 @@ namespace CryptoNote
         else if (in.type() == typeid(TransactionInputCommitmentSpend))
         {
           if (m_keyImages.count(boost::get<TransactionInputCommitmentSpend>(in).keyImage))
-          {
-            return false;
-          }
-        }
-        else if (in.type() == typeid(TransactionInputCommitmentTransfer))
-        {
-          if (m_keyImages.count(boost::get<TransactionInputCommitmentTransfer>(in).keyImage))
           {
             return false;
           }

@@ -214,13 +214,10 @@ public:
       s(m_bs.m_feePoolBalance, "fee_pool_balance");
       s(m_bs.m_currentEpochSwapFees, "current_epoch_swap_fees");
       s(m_bs.m_totalCdLocked, "total_cd_locked");
-      s(m_bs.m_activeEfierCount, "active_efier_count");
-      s(m_bs.m_efierSwapRewardPerBlock, "efier_swap_reward_per_block");
-      s(m_bs.m_efierSwapRewardRemaining, "efier_swap_reward_remaining");
+      s(m_bs.m_totalXfgCdLocked, "total_xfg_cd_locked");
       s(m_bs.m_treasuryBalance, "treasury_balance");
       s(m_bs.m_totalSwapFeesCollected, "total_swap_fees_collected");
       s(m_bs.m_totalCdInterestPaid, "total_cd_interest_paid");
-      s(m_bs.m_totalEfierSwapPaid, "total_efier_swap_paid");
       s(m_bs.m_totalTreasuryAccrued, "total_treasury_accrued");
 
     auto dur = std::chrono::steady_clock::now() - start;
@@ -1433,36 +1430,18 @@ bool Blockchain::validate_miner_transaction(const Block& b, uint32_t height, siz
   }
 
   if (blockMajorVersion >= CryptoNote::BLOCK_MAJOR_VERSION_10) {
-    // V10+: Banking fees from deposits are split per-block among active EFiers.
-    // Recompute deterministically from block transactions.
-    uint64_t bankingFeesInBlock = computeBankingFeesFromTransactions(blockTransactions, m_activeEfierCount);
+    // V10+: Banking fees from xfgCD deposits are added to the miner's reward.
+    uint64_t bankingFeesInBlock = computeBankingFeesFromTransactions(blockTransactions);
 
-    // Swap fee share: per-block drip from 20% of last epoch's swap fees (funded from fee pool)
-    uint64_t efierSwapReward = m_efierSwapRewardPerBlock;
-
-    // Total EFier input = banking fees (from miner) + swap reward (from fee pool)
-    uint64_t totalEfierInput = bankingFeesInBlock + efierSwapReward;
-
-    // Compute expected EFier distribution (deterministic — same result on all nodes)
-    auto expectedEfierRewards = m_commitmentIndex.computePerBlockEfierRewards(totalEfierInput, b.previousBlockHash);
-    uint64_t efierTotal = 0;
-    for (const auto& r : expectedEfierRewards) {
-      efierTotal += r.second;
-    }
-
-    // coinbaseTotal = (reward - bankingFees) + efierTotal
-    // bankingFees deducted from miner reward, swap reward funded from fee pool.
-    // Net: miner loses bankingFees, fee pool loses efierSwapReward, EFiers gain efierTotal.
-    uint64_t effectiveBankingFees = std::min(bankingFeesInBlock, reward);  // Can't deduct more than reward
-    uint64_t expectedCoinbase = reward - effectiveBankingFees + efierTotal;
+    // Miner receives base reward + fees + banking fees from deposits
+    uint64_t expectedCoinbase = reward + bankingFeesInBlock;
 
     if (coinbaseTotal != expectedCoinbase) {
       logger(ERROR, BRIGHT_RED) << "Coinbase mismatch at height " << height << ": "
         << m_currency.formatAmount(coinbaseTotal) << " (actual) vs "
         << m_currency.formatAmount(expectedCoinbase) << " (expected)"
         << " [reward=" << m_currency.formatAmount(reward)
-        << ", bankingFees=" << m_currency.formatAmount(bankingFeesInBlock)
-        << ", efierTotal=" << m_currency.formatAmount(efierTotal) << "]";
+        << ", bankingFees=" << m_currency.formatAmount(bankingFeesInBlock) << "]";
       return false;
     }
   } else {
@@ -2171,30 +2150,6 @@ bool Blockchain::checkTransactionInputs(const Transaction& tx, const Crypto::Has
 
         ++inputIndex;
       }
-      else if (txin.type() == typeid(TransactionInputCommitmentTransfer))
-      {
-        const TransactionInputCommitmentTransfer& xfer = boost::get<TransactionInputCommitmentTransfer>(txin);
-
-        if (xfer.outputIndexes.empty()) {
-          logger(ERROR, BRIGHT_RED) << "CommitmentTransfer input has empty outputIndexes in tx " << transactionHash;
-          return false;
-        }
-
-        // Key image double-spend check
-        if (have_tx_keyimg_as_spent(xfer.keyImage)) {
-          logger(DEBUGGING) << "CommitmentTransfer key image already spent: " << Common::podToHex(xfer.keyImage);
-          return false;
-        }
-
-        if (!isInCheckpointZone(getCurrentBlockchainHeight())) {
-          if (!checkCommitmentTransferInput(xfer, tx_prefix_hash, tx.signatures[inputIndex], pmax_used_block_height)) {
-            logger(INFO, BRIGHT_WHITE) << "CommitmentTransfer ring signature check failed in tx " << transactionHash;
-            return false;
-          }
-        }
-
-        ++inputIndex;
-      }
       else
       {
         logger(INFO, BRIGHT_WHITE) << "Transaction << " << transactionHash << " contains input of unsupported type.";
@@ -2330,6 +2285,7 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
   std::vector<const Crypto::PublicKey*> ringKeys;
   ringKeys.reserve(absoluteIndexes.size());
   bool hasNonForever = false;
+  bool hasXfgCd = false;  // at least one ring member is an xfgCD (eligible for fee pool interest)
   uint32_t currentHeight = getCurrentBlockchainHeight();
   uint32_t oldestRingMemberHeight = currentHeight;  // track for interest bounds
   for (uint64_t absIdx : absoluteIndexes) {
@@ -2364,13 +2320,8 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
       }
     }
 
-    // Slashed EFier stake guard: reject rings containing any slashed output.
-    // A slashed EFier must include their own output as a ring member to spend it,
-    // so rejecting all rings with slashed members makes withdrawal permanently impossible.
-    if (ref.isSlashed) {
-      logger(INFO) << "CommitmentSpend: ring member at index " << absIdx
-                   << " is a slashed EFier stake — tx rejected";
-      return false;
+    if (ref.isXfgCd) {
+      hasXfgCd = true;
     }
 
     // Track max referenced block height.
@@ -2402,6 +2353,12 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
 
   // Declare-and-verify: validate claimedInterest against max possible
   if (txin.claimedInterest > 0) {
+    // Only xfgCD deposits (on-chain yield) may claim fee pool interest.
+    if (!hasXfgCd) {
+      logger(INFO) << "CommitmentSpend: claimedInterest " << txin.claimedInterest
+                   << " but no xfgCD ring members — interest claims require at least one xfgCD output";
+      return false;
+    }
     // Max interest = what the oldest ring member could have accrued
     uint64_t maxInterest = m_currency.calculateCdInterest(
         txin.amount, oldestRingMemberHeight, currentHeight, m_commitmentIndex);
@@ -2418,93 +2375,6 @@ bool Blockchain::checkCommitmentSpendInput(const TransactionInputCommitmentSpend
   }
 
   return true;
-}
-
-bool Blockchain::checkCommitmentTransferInput(
-    const TransactionInputCommitmentTransfer& txin,
-    const Crypto::Hash& tx_prefix_hash,
-    const std::vector<Crypto::Signature>& sig,
-    uint32_t* pmax_related_block_height) {
-  std::lock_guard<decltype(m_blockchain_lock)> lk(m_blockchain_lock);
-
-  // Subgroup check (same as CommitmentSpend)
-  static const Crypto::KeyImage I = { { 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 } };
-  static const Crypto::KeyImage L = { { 0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10 } };
-  if (!(scalarmultKey(txin.keyImage, L) == I)) {
-    logger(ERROR) << "CommitmentTransfer key image not in valid Ed25519 domain";
-    return false;
-  }
-
-  // newTerm must meet minimum
-  if (txin.newTerm < CryptoNote::parameters::CD_TRANSFER_MIN_REMAINING_TERM) {
-    logger(ERROR) << "CommitmentTransfer newTerm " << txin.newTerm
-                  << " below minimum " << CryptoNote::parameters::CD_TRANSFER_MIN_REMAINING_TERM;
-    return false;
-  }
-
-  // Resolve commitment outputs for this amount
-  auto it = m_commitmentOutputs.find(txin.amount);
-  if (it == m_commitmentOutputs.end()) {
-    logger(INFO) << "CommitmentTransfer: no commitment outputs for amount " << txin.amount;
-    return false;
-  }
-  const auto& amountRefs = it->second;
-
-  // Decode absolute indices from relative offsets
-  std::vector<uint64_t> absoluteIndexes;
-  absoluteIndexes.reserve(txin.outputIndexes.size());
-  uint64_t absoluteIndex = 0;
-  for (uint32_t relIdx : txin.outputIndexes) {
-    absoluteIndex += relIdx;
-    absoluteIndexes.push_back(absoluteIndex);
-  }
-
-  // Collect ring keys — NO maturity check (transfers allowed anytime)
-  std::vector<const Crypto::PublicKey*> ringKeys;
-  ringKeys.reserve(absoluteIndexes.size());
-  bool hasNonForever = false;
-  for (uint64_t absIdx : absoluteIndexes) {
-    if (absIdx >= amountRefs.size()) {
-      logger(INFO) << "CommitmentTransfer: global index " << absIdx << " out of range";
-      return false;
-    }
-    const CommitmentOutputRef& ref = amountRefs[absIdx];
-    ringKeys.push_back(&ref.commitKey);
-
-    if (ref.term != CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
-      hasNonForever = true;
-    }
-
-    // Reject slashed outputs
-    if (ref.isSlashed) {
-      logger(INFO) << "CommitmentTransfer: ring member at index " << absIdx << " is slashed — rejected";
-      return false;
-    }
-
-    if (pmax_related_block_height) {
-      uint32_t blockHeight = ref.transactionIndex.block;
-      if (*pmax_related_block_height < blockHeight) {
-        *pmax_related_block_height = blockHeight;
-      }
-    }
-  }
-
-  // All-FOREVER guard (same as CommitmentSpend)
-  if (!hasNonForever) {
-    logger(INFO) << "CommitmentTransfer: all ring members are burned outputs — no valid transfer possible";
-    return false;
-  }
-
-  if (ringKeys.size() != sig.size()) {
-    logger(ERROR) << "CommitmentTransfer: ring size " << ringKeys.size() << " != sig count " << sig.size();
-    return false;
-  }
-
-  bool valid = Crypto::check_ring_signature(tx_prefix_hash, txin.keyImage, ringKeys, sig.data());
-  if (!valid) {
-    logger(DEBUGGING) << "CommitmentTransfer ring signature check failed for keyImage: " << Common::podToHex(txin.keyImage);
-  }
-  return valid;
 }
 
 uint64_t Blockchain::get_adjusted_time() {
@@ -2909,15 +2779,9 @@ bool Blockchain::pushBlock(const Block &blockData, const std::vector<Transaction
     for (size_t i = 1; i < block.transactions.size(); ++i) {
       blockTxs.push_back(block.transactions[i].tx);
     }
-    uint64_t blockBankingFee = computeBankingFeesFromTransactions(blockTxs, m_activeEfierCount);
+    uint64_t blockBankingFee = computeBankingFeesFromTransactions(blockTxs);
     if (blockBankingFee > 0) {
       m_commitmentIndex.addBlockBankingFee(blockHeight, blockBankingFee);
-    }
-
-    // Track EFier swap reward drip: decrement remaining, accumulate paid
-    if (m_efierSwapRewardPerBlock > 0 && m_efierSwapRewardRemaining >= m_efierSwapRewardPerBlock) {
-      m_efierSwapRewardRemaining -= m_efierSwapRewardPerBlock;
-      m_totalEfierSwapPaid += m_efierSwapRewardPerBlock;
     }
   }
 
@@ -3027,23 +2891,16 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
     return m_commitmentIndex.highestBlock();
   }
 
-  uint64_t Blockchain::computeBankingFeesFromTransactions(const std::vector<Transaction>& txs, uint32_t activeEfierCount) {
-    if (activeEfierCount == 0) return 0;  // no active EFiers → no banking fees
+  uint64_t Blockchain::computeBankingFeesFromTransactions(const std::vector<Transaction>& txs) {
     uint64_t totalBankingFees = 0;
-    // 0.1% per active EFier = (amount * activeCount) / 1000
+    // Flat 0.1% banking fee for miners on xfgCD deposits
     for (const auto& tx : txs) {
       std::vector<TransactionExtraField> extraFields;
       if (!parseTransactionExtra(tx.extra, extraFields)) continue;
       for (const auto& field : extraFields) {
-        if (field.type() == typeid(TransactionExtraHeatCommitment)) {
-          const auto& heat = boost::get<TransactionExtraHeatCommitment>(field);
-          totalBankingFees += (heat.amount * activeEfierCount) / 1000;
-        } else if (field.type() == typeid(TransactionExtraColdCommitment)) {
-          const auto& cold = boost::get<TransactionExtraColdCommitment>(field);
-          totalBankingFees += (cold.amount * activeEfierCount) / 1000;
-        } else if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
-          const auto& ef = boost::get<TransactionExtraElderfierDeposit>(field);
-          totalBankingFees += (ef.depositAmount * activeEfierCount) / 1000;
+        if (field.type() == typeid(TransactionExtraFuegoCd)) {
+          const auto& cd = boost::get<TransactionExtraFuegoCd>(field);
+          totalBankingFees += cd.amount / 1000;
         }
       }
     }
@@ -3053,346 +2910,33 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
   void Blockchain::pushToBankingIndex(const BlockEntry &block, uint64_t interest)
   {
     int64_t deposit = 0;
-    uint64_t permanentBurns = 0;  // Track permanent burns for ethereal_xfg
-
-    logger(DEBUGGING) << "Processing block " << block.height << " for BankingIndex, current burned: " << m_bankingIndex.getBurnedXfgAmount();
 
     for (const auto &tx : block.transactions)
     {
-      // Parse transaction extra to detect burn types (0X08 0xEF)
+      // Parse transaction extra to detect Fuego CD (0xFD)
       std::vector<TransactionExtraField> extraFields;
       if (parseTransactionExtra(tx.tx.extra, extraFields)) {
-        logger(DEBUGGING, "Blockchain") << "Transaction " << getObjectHash(tx.tx)
-                                 << " extra: Found " << extraFields.size() << " fields";
-        for (size_t i = 0; i < extraFields.size(); ++i) {
-          if (extraFields[i].type() == typeid(TransactionExtraElderfierDeposit)) {
-            logger(DEBUGGING, "Blockchain") << "  Field " << i << ": TransactionExtraElderfierDeposit";
-          } else if (extraFields[i].type() == typeid(TransactionExtraAliasRegistration)) {
-            logger(DEBUGGING, "Blockchain") << "  Field " << i << ": TransactionExtraAliasRegistration";
-          } else if (extraFields[i].type() == typeid(TransactionExtraPublicKey)) {
-            logger(DEBUGGING, "Blockchain") << "  Field " << i << ": TransactionExtraPublicKey";
-          } else {
-            logger(DEBUGGING, "Blockchain") << "  Field " << i << ": Unknown type";
-          }
-        }
         for (const auto& field : extraFields) {
-          // Check for HEAT commitment (0x08) - permanent burn
-          if (field.type() == typeid(TransactionExtraHeatCommitment)) {
-            const auto& heatCommit = boost::get<TransactionExtraHeatCommitment>(field);
-            permanentBurns += heatCommit.amount;
-            logger(DEBUGGING) << "Detected HEAT burn in block " << block.height << ": " << heatCommit.amount << " XFG";
-
-            // Index the HEAT commitment for RPC queries
-            Crypto::Hash txHash = getObjectHash(tx.tx);
-            CommitmentEntry entry;
-            entry.commitment = heatCommit.commitment;
-            entry.txHash = txHash;
-            entry.blockHeight = block.height;
-            entry.amount = heatCommit.amount;
-            entry.term = parameters::DEPOSIT_TERM_FOREVER;  // HEAT is permanent
-            entry.type = CommitmentEntry::Type::HEAT;
-            entry.targetChainId = heatCommit.metadata.size() > 0 ? heatCommit.metadata[0] : 1;  // Default to ETH
-            m_commitmentIndex.addCommitment(entry);
-
-            logger(DEBUGGING) << "HEAT commitment indexed: " << Common::podToHex(heatCommit.commitment)
-                             << " amount=" << heatCommit.amount;
-          }
-          // Check for COLD commitment (0xCD) - term deposit
-          else if (field.type() == typeid(TransactionExtraColdCommitment)) {
-            const auto& coldCommit = boost::get<TransactionExtraColdCommitment>(field);
-
-            // Index the COLD commitment for RPC queries
-            Crypto::Hash txHash = getObjectHash(tx.tx);
-            CommitmentEntry entry;
-            entry.commitment = coldCommit.commitment;
-            entry.txHash = txHash;
-            entry.blockHeight = block.height;
-            entry.amount = coldCommit.amount;
-            entry.term = coldCommit.term;
-            entry.type = CommitmentEntry::Type::COLD;
-            entry.targetChainId = coldCommit.claimChainCode;
-            m_commitmentIndex.addCommitment(entry);
-
-            logger(DEBUGGING) << "COLD commitment indexed: " << Common::podToHex(coldCommit.commitment)
-                             << " amount=" << coldCommit.amount << " term=" << coldCommit.term;
-          }
-          // 0xCE: COLD migration — register v3 commitment for a pre-v3 legacy deposit
-          else if (field.type() == typeid(TransactionExtraColdMigration)) {
-            const auto& migration = boost::get<TransactionExtraColdMigration>(field);
-
-            // Validate: the referenced original tx must exist and contain a legacy
-            // deposit output (MultisignatureOutput) with matching amount.
-            // Migration is ONLY for pre-v3 legacy deposits which use multisig outputs.
-            std::list<Crypto::Hash> txIds = {migration.originalTxHash};
-            std::list<Transaction> txs;
-            std::list<Crypto::Hash> missed;
-            getTransactions(txIds, txs, missed, false);
-            if (!txs.empty()) {
-              const auto& origTx = txs.front();
-              bool depositFound = false;
-              for (const auto& out : origTx.outputs) {
-                if (out.target.type() == typeid(MultisignatureOutput) &&
-                    out.amount == migration.amount) {
-                  depositFound = true;
-                  break;
-                }
-              }
-
-              // Also ensure this commitment hasn't already been registered
-              if (depositFound && !m_commitmentIndex.hasCommitment(migration.commitment)) {
-                // Look up original deposit's block height for legacy rate detection.
-                // The L2 contract needs the original deposit date (not migration date)
-                // to determine if legacy (pre-2026) interest rates apply.
-                uint32_t originalBlockHeight = block.height;  // fallback: migration block
-                auto origIt = m_transactionMap.find(migration.originalTxHash);
-                if (origIt != m_transactionMap.end()) {
-                  originalBlockHeight = origIt->second.block;
-                }
-
+          if (field.type() == typeid(TransactionExtraFuegoCd)) {
+            // Index the CD commitment for fee pool yield tracking
+            // We use the first CommitmentOutput found in this transaction
+            for (const auto& out : tx.tx.outputs) {
+              if (out.target.type() == typeid(TransactionOutputCommitment)) {
+                const auto& commitment = boost::get<TransactionOutputCommitment>(out.target);
+                
                 CommitmentEntry entry;
-                entry.commitment = migration.commitment;
-                entry.txHash = migration.originalTxHash;  // Reference original deposit tx
-                entry.blockHeight = originalBlockHeight;  // Original deposit block, not migration block
-                entry.amount = migration.amount;
-                entry.term = migration.term;
-                entry.type = CommitmentEntry::Type::COLD;
-                entry.targetChainId = migration.claimChainCode;
-                entry.isLegacyMigration = true;  // Confirmed: original tx has MultisignatureOutput
+                entry.commitment = commitment.commitKey; // Use commitKey as unique identifier
+                entry.txHash = getObjectHash(tx.tx);
+                entry.blockHeight = block.height;
+                entry.amount = out.amount;
+                entry.term = commitment.term;
+                entry.type = CommitmentEntry::Type::CD;
+                entry.targetChainId = 0;
                 m_commitmentIndex.addCommitment(entry);
-
-                logger(DEBUGGING) << "COLD migration indexed: original=" << Common::podToHex(migration.originalTxHash)
-                                  << " commitment=" << Common::podToHex(migration.commitment)
-                                  << " amount=" << migration.amount
-                                  << " originalBlock=" << originalBlockHeight;
-              } else if (!depositFound) {
-                logger(WARNING) << "COLD migration rejected: original tx " << Common::podToHex(migration.originalTxHash)
-                                << " has no legacy deposit (multisig) output matching amount=" << migration.amount;
-              }
-            } else {
-              logger(WARNING) << "COLD migration rejected: original tx " << Common::podToHex(migration.originalTxHash)
-                              << " not found in blockchain";
-            }
-          }
-          // Note: TX_EXTRA_ELDERFIER_DEPOSIT (0xEF) is NOT added to ethereal_xfg initially
-          // because it represents slashable staking. However, if the deposit is later
-          // slashed via an Elderfier message with quorum consensus, the slashed
-          // portion WILL be added to ethereal_xfg as it becomes a permanent burn.
-          else if (field.type() == typeid(TransactionExtraElderfierDeposit)) {
-            const auto& elderfierDeposit = boost::get<TransactionExtraElderfierDeposit>(field);
-
-            // Index the 0xEF staking deposit into CommitmentIndex for registration tracking
-            Crypto::Hash txHash = getObjectHash(tx.tx);
-            CommitmentEntry entry;
-            entry.commitment = elderfierDeposit.depositHash;
-            entry.txHash = txHash;
-            entry.blockHeight = block.height;
-            entry.amount = elderfierDeposit.depositAmount;
-            entry.term = 0xFFFFFFFF;  // Staking is locked until explicit unstaking
-            entry.type = CommitmentEntry::Type::ELDERFIER_STAKING;
-            entry.targetChainId = 0;  // No cross-chain claim for staking
-            entry.senderAddress = Common::podToHex(elderfierDeposit.elderfierCommitment);
-
-            // Extract ceremony alias and signing pubkey from metadata
-            // Format: [0xEA][alias:8][signingPubKey:32]
-            std::string ceremonyAlias;
-            Crypto::PublicKey signingPubKey = {};
-            if (elderfierDeposit.metadata.size() >= 2 && elderfierDeposit.metadata[0] == 0xEA) {
-              if (elderfierDeposit.metadata.size() >= 41) {
-                // New format: 1 byte tag + 8 byte alias + 32 byte signing pubkey
-                ceremonyAlias = std::string(elderfierDeposit.metadata.begin() + 1, elderfierDeposit.metadata.begin() + 9);
-                std::memcpy(signingPubKey.data, &elderfierDeposit.metadata[9], 32);
-                logger(INFO) << "Elderfier signing pubkey registered for @" << ceremonyAlias
-                             << ": " << Common::podToHex(signingPubKey);
-              } else {
-                // Legacy format: 1 byte tag + alias (no signing key)
-                ceremonyAlias = std::string(elderfierDeposit.metadata.begin() + 1, elderfierDeposit.metadata.end());
-              }
-            }
-
-            // Use alias as ceremony identifier (groups all 5 deposits)
-            if (!ceremonyAlias.empty()) {
-              entry.senderAddress = "CEREMONY:" + ceremonyAlias;
-            }
-            entry.ceremonyAlias = ceremonyAlias;
-            entry.signingPubKey = signingPubKey;
-
-            m_commitmentIndex.addCommitment(entry);
-
-            logger(DEBUGGING) << "Elderfier staking deposit indexed: " << Common::podToHex(elderfierDeposit.depositHash)
-                             << " amount=" << elderfierDeposit.depositAmount
-                             << " (slashable, NOT added to ethereal_xfg unless slashed)";
-          }
-          // Check for Elderfier messages (0xEC) - may contain slashing decisions
-          else if (field.type() == typeid(TransactionExtraElderfierMessage)) {
-            const auto& elderfierMsg = boost::get<TransactionExtraElderfierMessage>(field);
-
-            // If this is a quorum consensus message with a target deposit hash,
-            // it represents a slashing verdict from the elder_council
-            if (elderfierMsg.consensusRequired &&
-                elderfierMsg.consensusType == ElderfierConsensusType::QUORUM &&
-                elderfierMsg.targetDepositHash != Crypto::Hash()) {
-
-              // ── Slash Safeguards ──────────────────────────────────────────────
-              // Three gates before any slash executes:
-              //   1. Sender must be a registered ACTIVE EFier (proven by senderKey)
-              //   2. Target deposit must not already be slashed (no double-slash)
-              //   3. Sender signature on the message must be cryptographically valid
-              // Any gate failure silently skips — this tx is still valid (fees paid),
-              // the slash just doesn't execute. Malformed slash proposals are a protocol
-              // violation but not a chain-stall event.
-
-              bool slashGatesOk = false;
-
-              // Gate 1: Verify senderKey is a registered ACTIVE EFier's signing pubkey
-              uint8_t senderEfid = 255;
-              for (uint8_t id = 0; id < 255; ++id) {
-                Crypto::PublicKey regPubkey;
-                if (m_commitmentIndex.getElderfierSigningPubkey(id, regPubkey) &&
-                    regPubkey == elderfierMsg.senderKey) {
-                  senderEfid = id;
-                  break;
-                }
-              }
-              if (senderEfid == 255) {
-                logger(WARNING) << "Slash verdict ignored: senderKey not a registered ACTIVE EFier";
-              }
-              // Gate 2: Check target deposit not already slashed
-              else {
-                CommitmentEntry targetEntry;
-                bool targetFound = m_commitmentIndex.getCommitmentEntryByTxHash(
-                    elderfierMsg.targetDepositHash, targetEntry);
-                if (targetFound && targetEntry.isSlashed) {
-                  logger(WARNING) << "Slash verdict ignored: deposit "
-                                  << Common::podToHex(elderfierMsg.targetDepositHash)
-                                  << " is already slashed (double-slash prevented)";
-                } else if (!targetFound) {
-                  logger(WARNING) << "Slash verdict ignored: deposit "
-                                  << Common::podToHex(elderfierMsg.targetDepositHash)
-                                  << " not found in commitment index";
-                } else {
-                  // Gate 3: Verify the sender's Ed25519 signature over the message data
-                  // Signature covers: targetDepositHash || messageData
-                  std::vector<uint8_t> sigPreimage;
-                  sigPreimage.insert(sigPreimage.end(),
-                      elderfierMsg.targetDepositHash.data,
-                      elderfierMsg.targetDepositHash.data + sizeof(elderfierMsg.targetDepositHash));
-                  sigPreimage.insert(sigPreimage.end(),
-                      elderfierMsg.messageData.begin(), elderfierMsg.messageData.end());
-                  Crypto::Hash sigHash;
-                  Crypto::cn_fast_hash(sigPreimage.data(), sigPreimage.size(), sigHash);
-                  Crypto::Signature msgSig;
-                  bool sigValid = false;
-                  if (elderfierMsg.signature.size() == sizeof(Crypto::Signature)) {
-                    memcpy(&msgSig, elderfierMsg.signature.data(), sizeof(Crypto::Signature));
-                    sigValid = Crypto::check_signature(sigHash, elderfierMsg.senderKey, msgSig);
-                  }
-                  if (!sigValid) {
-                    logger(WARNING) << "Slash verdict ignored: invalid EFier signature from EFiD "
-                                    << static_cast<int>(senderEfid + 1);
-                  } else {
-                    slashGatesOk = true;
-                  }
-                }
-              }
-
-              // Record this EFier's slash vote.
-              // addSlashVote returns true ONLY when the quorum threshold is FIRST crossed.
-              // A single propose_slash tx is just one vote — nothing is slashed until
-              // ≥80% of active EFiers have independently submitted proposals.
-              if (slashGatesOk) {
-                // Extract reason string from messageData (after the 9-byte header)
-                std::string slashReason;
-                if (elderfierMsg.messageData.size() > 9) {
-                  const uint8_t* rs = elderfierMsg.messageData.data() + 9;
-                  size_t rl = elderfierMsg.messageData.size() - 9;
-                  size_t nl = 0;
-                  while (nl < rl && rs[nl] != 0x00) ++nl;
-                  slashReason = std::string(reinterpret_cast<const char*>(rs), nl);
-                }
-
-                uint32_t blockHeight = static_cast<uint32_t>(
-                    m_blocks.size() > 0 ? m_blocks.size() - 1 : 0);
-
-                bool quorumReached = m_commitmentIndex.addSlashVote(
-                    elderfierMsg.targetDepositHash,
-                    senderEfid,
-                    slashReason,
-                    blockHeight,
-                    static_cast<uint8_t>(elderfierMsg.requiredThreshold));
-
-                size_t votesNow   = m_commitmentIndex.getSlashVoteCount(elderfierMsg.targetDepositHash);
-                size_t activeEfiers = m_commitmentIndex.getActiveElderfierCount();
-
-                if (!quorumReached) {
-                  // Just a vote — not a slash. Wait for quorum.
-                  logger(INFO) << "Slash vote recorded: EFiD " << static_cast<int>(senderEfid + 1)
-                               << " → deposit " << Common::podToHex(elderfierMsg.targetDepositHash)
-                               << " | votes: " << votesNow << "/" << activeEfiers
-                               << " (need " << static_cast<int>(elderfierMsg.requiredThreshold) << "%)";
-                } else {
-                  // Quorum just reached — execute slash
-                  uint8_t slashPct = elderfierMsg.messageData.size() >= 1
-                      ? elderfierMsg.messageData[0] : 100;
-                  uint64_t slashedAmount = 0;
-                  if (elderfierMsg.messageData.size() >= 9) {
-                    memcpy(&slashedAmount, &elderfierMsg.messageData[1], 8);
-                  }
-
-                  bool markedInIndex = m_commitmentIndex.markCommitmentSlashed(
-                      elderfierMsg.targetDepositHash);
-                  m_commitmentIndex.markSlashProposalExecuted(elderfierMsg.targetDepositHash);
-
-                  // Mark in m_commitmentOutputs (prevents ring membership / withdrawal)
-                  CommitmentEntry slashedEntry;
-                  if (markedInIndex &&
-                      m_commitmentIndex.getCommitmentEntryByTxHash(
-                          elderfierMsg.targetDepositHash, slashedEntry)) {
-                    auto txIt = m_transactionMap.find(elderfierMsg.targetDepositHash);
-                    if (txIt != m_transactionMap.end()) {
-                      const TransactionIndex& slashTxIdx = txIt->second;
-                      auto oIt = m_commitmentOutputs.find(slashedEntry.amount);
-                      if (oIt != m_commitmentOutputs.end()) {
-                        for (auto& ref : oIt->second) {
-                          if (ref.transactionIndex.block == slashTxIdx.block &&
-                              ref.transactionIndex.transaction == slashTxIdx.transaction) {
-                            ref.isSlashed = true;
-                          }
-                        }
-                      }
-                    }
-                  }
-
-                  if (slashedAmount > 0) permanentBurns += slashedAmount;
-
-                  logger(INFO) << "Slash EXECUTED (quorum: " << votesNow << "/" << activeEfiers
-                               << " EFiers, " << static_cast<int>(slashPct) << "%)"
-                               << " | reason=" << slashReason
-                               << " | deposit=" << Common::podToHex(elderfierMsg.targetDepositHash)
-                               << " | ring-withdrawal blocked: " << (markedInIndex ? "YES" : "NO");
-                }
-              }
-            }
-          }
-          // Check for @ Alias Registration (0xEA)
-          else if (field.type() == typeid(TransactionExtraAliasRegistration)) {
-            const auto& aliasReg = boost::get<TransactionExtraAliasRegistration>(field);
-
-            if (aliasReg.isValid()) {
-              AliasEntry aliasEntry;
-              aliasEntry.alias = aliasReg.alias;
-              aliasEntry.ownerAddress = aliasReg.ownerAddress;
-              aliasEntry.aliasHash = aliasReg.aliasHash;
-              aliasEntry.addressHash = aliasReg.addressHash;
-              aliasEntry.aliasType = aliasReg.aliasType;
-              aliasEntry.registeredBlock = block.height;
-
-              if (m_aliasIndex.registerAlias(aliasEntry)) {
-                logger(INFO) << "@ Alias registered in block " << block.height
-                             << ": @" << aliasReg.alias
-                             << " (type=" << static_cast<int>(aliasReg.aliasType) << ")";
-              } else {
-                logger(WARNING) << "@ Alias registration rejected in block " << block.height
-                                << ": @" << aliasReg.alias << " (duplicate or invalid)";
+                
+                logger(DEBUGGING) << "Fuego CD commitment indexed: " << Common::podToHex(entry.commitment)
+                                 << " amount=" << entry.amount << " term=" << entry.term;
+                break; // Only one CD per transaction for now
               }
             }
           }
@@ -3409,7 +2953,6 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             deposit -= multisign.amount;
           }
         }
-        // Commitment withdrawals (ring-sig COLD/EFier): reduce deposit balance
         else if (in.type() == typeid(TransactionInputCommitmentSpend))
         {
           deposit -= boost::get<TransactionInputCommitmentSpend>(in).amount;
@@ -3425,29 +2968,15 @@ uint64_t Blockchain::depositAmountAtHeight(size_t height) const {
             deposit += out.amount;
           }
         }
-        // COLD commitment outputs: add to deposit balance (HEAT/FOREVER burns tracked separately)
         else if (out.target.type() == typeid(TransactionOutputCommitment))
         {
-          const auto& commitment = boost::get<TransactionOutputCommitment>(out.target);
-          if (commitment.term != parameters::DEPOSIT_TERM_FOREVER)
-          {
-            deposit += out.amount;
-          }
+          deposit += out.amount;
         }
       }
     }
 
     // Push deposit tracking
     m_bankingIndex.pushBlock(deposit, interest);
-
-    // Add permanent burns to EternalFlame if any were found
-    if (permanentBurns > 0) {
-      m_bankingIndex.addForeverDeposit(permanentBurns, block.height);
-      // Sync Currency from BankingIndex (single source of truth)
-      const_cast<Currency&>(m_currency).syncEternalFlame(m_bankingIndex.getBurnedXfgAmount());
-      logger(INFO) << "Burn in block " << block.height << ": "
-                   << m_currency.formatAmount(permanentBurns) << " XFG sent into the Ether";
-    }
   }
 
 bool Blockchain::pushBlock(BlockEntry &block) {
@@ -3473,14 +3002,13 @@ bool Blockchain::pushBlock(BlockEntry &block) {
     uint64_t epochNumber = newHeight / epochDuration;
     uint64_t epochStart = (epochNumber - 1) * epochDuration;
     uint64_t epochEnd = epochStart + epochDuration - 1;
-    // Split swap fees: 80% CD yield / 10% EFiers / 10% Treasury
+    // Split swap fees: 90% CD yield / 10% Treasury
     uint64_t epochSwapFees = m_currentEpochSwapFees;
-    uint64_t epochCdLocked = m_totalCdLocked;
-    uint64_t efierSwapShare = (epochSwapFees * CryptoNote::parameters::SWAP_FEE_EFIER_SHARE_PCT) / 100;
-    uint64_t treasuryShare = (epochSwapFees * CryptoNote::parameters::SWAP_FEE_TREASURY_SHARE_PCT) / 100;
-    uint64_t cdSwapShare = epochSwapFees - efierSwapShare - treasuryShare;
+    uint64_t epochCdLocked = m_totalXfgCdLocked;  // only xfgCD deposits earn fee pool yield
+    uint64_t treasuryShare = (epochSwapFees * 10) / 100;
+    uint64_t cdSwapShare = epochSwapFees - treasuryShare;
 
-    // Compute fee rate for this epoch on CD's 80% share only
+    // Compute fee rate for this epoch on CD's 90% share
     uint64_t epochFeeRate = 0;
     if (epochCdLocked > 0 && cdSwapShare > 0) {
       epochFeeRate = (cdSwapShare * CryptoNote::parameters::FEE_POOL_RATE_PRECISION) / epochCdLocked;
@@ -3490,17 +3018,11 @@ bool Blockchain::pushBlock(BlockEntry &block) {
     // Cumulative accounting: track lifetime swap fees entering the pool
     m_totalSwapFeesCollected += epochSwapFees;
 
-    // Deduct EFier + Treasury share from fee pool and spread EFier across next epoch
-    uint64_t totalNonCdShare = efierSwapShare + treasuryShare;
-    if (totalNonCdShare > 0 && m_feePoolBalance >= totalNonCdShare) {
-      m_feePoolBalance -= totalNonCdShare;
-      m_efierSwapRewardPerBlock = efierSwapShare / epochDuration;
-      m_efierSwapRewardRemaining = efierSwapShare;  // drips to 0 over next epoch
+    // Deduct Treasury share from fee pool
+    if (treasuryShare > 0 && m_feePoolBalance >= treasuryShare) {
+      m_feePoolBalance -= treasuryShare;
       m_treasuryBalance += treasuryShare;
       m_totalTreasuryAccrued += treasuryShare;
-    } else {
-      m_efierSwapRewardPerBlock = 0;
-      m_efierSwapRewardRemaining = 0;
     }
 
     // Reset epoch accumulator for next epoch
@@ -3509,9 +3031,6 @@ bool Blockchain::pushBlock(BlockEntry &block) {
     EpochReport report = m_commitmentIndex.generateEpochReport(
         epochNumber, epochStart, epochEnd, newHeight);
 
-    // Snapshot active EFier count for next epoch's banking fee calculation
-    m_activeEfierCount = report.activeEfierCount;
-
     // Fill in fee pool fields
     report.swapFeesCollected = epochSwapFees;
     report.totalCdLockedAtStart = epochCdLocked;
@@ -3519,23 +3038,12 @@ bool Blockchain::pushBlock(BlockEntry &block) {
     m_commitmentIndex.storeEpochReport(report);
     logger(INFO) << "=== Epoch " << epochNumber << " Report ==="
                  << " blocks=" << epochStart << "-" << epochEnd
-                 << " active=" << report.activeEfierCount
-                 << " signed=" << report.participatingEfierCount
-                 << " missing=" << report.missingEfierIds.size()
-                 << " double_signs=" << report.doubleSignEvents.size()
-                 << " recommendations=" << report.slash_advisory.size()
                  << " swapFees=" << epochSwapFees
                  << " cdShare=" << cdSwapShare
-                 << " efierShare=" << efierSwapShare
                  << " treasuryShare=" << treasuryShare
-                 << " efierSwapPerBlk=" << m_efierSwapRewardPerBlock
                  << " treasuryBal=" << m_treasuryBalance
                  << " cdLocked=" << epochCdLocked
-                 << " feeRate=" << epochFeeRate
-                 << " activeEFs=" << m_activeEfierCount;
-    for (auto& rec : report.slash_advisory) {
-      logger(WARNING) << "elder_council ADVISORY (use `propose_slash` to act): " << rec;
-    }
+                 << " feeRate=" << epochFeeRate;
   }
 
   return true;
@@ -3641,19 +3149,28 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
       }
       // CD redemption: reduce locked supply, deduct claimed interest from fee pool
       m_totalCdLocked -= cin.amount;
+      // claimedInterest > 0 proves this is an xfgCD redemption (consensus rejects non-xfgCD interest claims)
+      if (cin.claimedInterest > 0 && m_totalXfgCdLocked >= cin.amount) {
+        m_totalXfgCdLocked -= cin.amount;
+      }
       if (cin.claimedInterest > 0 && cin.claimedInterest <= m_feePoolBalance) {
         m_feePoolBalance -= cin.claimedInterest;
         m_totalCdInterestPaid += cin.claimedInterest;
       }
-    } else if (inv.type() == typeid(TransactionInputCommitmentTransfer)) {
-      const auto& xfer = ::boost::get<TransactionInputCommitmentTransfer>(inv);
-      auto result = m_spent_keys.insert(std::make_pair(xfer.keyImage, block.height));
-      if (!result.second) {
-        logger(ERROR, BRIGHT_RED) << "Double spending commitment transfer was pushed to blockchain.";
-        m_transactionMap.erase(transactionHash);
-        return false;
+    }
+  }
+
+  // Check for xfgCD tag (0xCF) — only these deposits earn on-chain fee pool yield
+  bool hasXfgCdExtra = false;
+  {
+    std::vector<TransactionExtraField> txExtraFields;
+    if (parseTransactionExtra(transaction.tx.extra, txExtraFields)) {
+      for (const auto& f : txExtraFields) {
+        if (f.type() == typeid(TransactionExtraFuegoCd)) {
+          hasXfgCdExtra = true;
+          break;
+        }
       }
-      // Transfer doesn't change locked supply (old CD consumed, new CD produced — net zero)
     }
   }
 
@@ -3672,14 +3189,20 @@ bool Blockchain::pushTransaction(BlockEntry& block, const Crypto::Hash& transact
       const auto& commitOut = ::boost::get<TransactionOutputCommitment>(transaction.tx.outputs[output].target);
       auto& amountOutputs = m_commitmentOutputs[transaction.tx.outputs[output].amount];
       transaction.m_global_output_indexes[output] = static_cast<uint32_t>(amountOutputs.size());
+      bool isXfgCd = hasXfgCdExtra && commitOut.term > 0;
       CommitmentOutputRef ref;
       ref.transactionIndex    = transactionIndex;
       ref.outputInTransaction = output;
       ref.commitKey           = commitOut.commitKey;
       ref.term                = commitOut.term;
+      ref.isXfgCd             = isXfgCd;
       amountOutputs.push_back(ref);
-      // Track total XFG locked in CDs
+      // Track total XFG locked in ALL commitment outputs
       m_totalCdLocked += transaction.tx.outputs[output].amount;
+      // Track xfgCD specifically (no COLD/HEAT/EFier extra → on-chain yield eligible)
+      if (isXfgCd) {
+        m_totalXfgCdLocked += transaction.tx.outputs[output].amount;
+      }
     }
   }
 
@@ -3772,6 +3295,8 @@ void Blockchain::popTransaction(const Transaction& transaction, const Crypto::Ha
         continue;
       }
 
+      // Check isXfgCd flag before popping
+      bool wasXfgCd = amountOutputs->second.back().isXfgCd;
       amountOutputs->second.pop_back();
       if (amountOutputs->second.empty()) {
         m_commitmentOutputs.erase(amountOutputs);
@@ -3779,6 +3304,9 @@ void Blockchain::popTransaction(const Transaction& transaction, const Crypto::Ha
       // Reverse CD locked supply tracking
       if (m_totalCdLocked >= output.amount) {
         m_totalCdLocked -= output.amount;
+      }
+      if (wasXfgCd && m_totalXfgCdLocked >= output.amount) {
+        m_totalXfgCdLocked -= output.amount;
       }
     }
   }
@@ -3809,17 +3337,11 @@ void Blockchain::popTransaction(const Transaction& transaction, const Crypto::Ha
       // Reverse: restore locked supply and fee pool
       m_totalCdLocked += cin.amount;
       if (cin.claimedInterest > 0) {
+        m_totalXfgCdLocked += cin.amount;  // claimedInterest > 0 proves xfgCD
         m_feePoolBalance += cin.claimedInterest;
         if (m_totalCdInterestPaid >= cin.claimedInterest) {
           m_totalCdInterestPaid -= cin.claimedInterest;
         }
-      }
-    } else if (input.type() == typeid(TransactionInputCommitmentTransfer)) {
-      const auto& xfer = ::boost::get<TransactionInputCommitmentTransfer>(input);
-      size_t count = m_spent_keys.erase(xfer.keyImage);
-      if (count != 1) {
-        logger(ERROR, BRIGHT_RED) <<
-          "Blockchain consistency broken - cannot find spent commitment transfer key.";
       }
     }
   }
@@ -4168,28 +3690,6 @@ bool Blockchain::isBlockInMainChain(const Crypto::Hash& blockId) {
 
 bool Blockchain::isInCheckpointZone(const uint32_t height) {
   return m_checkpoints.is_in_checkpoint_zone(height);
-}
-
-// ============================================================================
-// ELDERFIER CONSENSUS BLOCK HOOK
-// ============================================================================
-
-void Blockchain::checkElderfierConsensusThreshold() {
-    // Called after each block is added to check if elderfier consensus threshold is met
-    // This triggers fee distribution and cache flushing when ≥69% elderfiers have signed
-
-    try {
-        uint64_t currentBlockHeight = m_blockIndex.size();
-
-        // Check and flush signature cache if threshold met
-        // This is called every block - the method internally checks if threshold is met
-        m_commitmentIndex.checkAndFlushThreshold(currentBlockHeight);
-
-    } catch (const std::exception& e) {
-        logger(WARNING, YELLOW) << "Exception in checkElderfierConsensusThreshold: " << e.what();
-    } catch (...) {
-        logger(WARNING, YELLOW) << "Unknown exception in checkElderfierConsensusThreshold";
-    }
 }
 
 }  // namespace CryptoNote

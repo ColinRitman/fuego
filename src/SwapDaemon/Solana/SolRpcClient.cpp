@@ -31,10 +31,23 @@
 #include <cassert>
 
 #include <openssl/sha.h>
-#include "../../crypto/musig2.cpp"
 
 extern "C" {
 #include "../../crypto/crypto-ops.h"
+}
+
+// sc_muladd: r = c + a*b (mod L), using crypto-ops primitives
+static void local_sc_muladd(unsigned char *r,
+                             const unsigned char *a,
+                             const unsigned char *b,
+                             const unsigned char *c) {
+  // sc_mulsub(out, x, y, z) computes out = z - x*y  (mod L)
+  // We want r = c + a*b = c - (-(a*b))
+  unsigned char zero[32];
+  sc_0(zero);
+  unsigned char neg_ab[32];
+  sc_mulsub(neg_ab, a, b, zero);  // neg_ab = 0 - a*b = -(a*b)
+  sc_sub(r, c, neg_ab);           // r = c - (-(a*b)) = c + a*b
 }
 
 namespace XfgSwap {
@@ -271,9 +284,9 @@ static void ed25519Sign(const uint8_t* message, size_t msgLen,
   sc_reduce(hram);
 
   // Step 5: s = r + hram * a (mod L)
-  // sc_muladd computes: s = a * b + c (mod L) with 32-byte inputs
+  // local_sc_muladd computes: r_out = c + a * b (mod L)
   uint8_t s[32];
-  Crypto::sc_muladd(s, hram, az, r);
+  local_sc_muladd(s, hram, az, r);
   memcpy(signature + 32, s, 32);
 }
 
@@ -817,16 +830,8 @@ bool SolRpcClient::getRecentBlockhash(std::string& blockhash) {
 }
 
 // ---------------------------------------------------------------------------
-// HTLC operations (stubs — transaction building requires Ed25519 signing)
+// HTLC operations — build, sign, and send Solana transactions
 // ---------------------------------------------------------------------------
-//
-// Full transaction construction requires:
-//   1. Serialize Solana compact instruction format
-//   2. Sign with Ed25519 (using Fuego's crypto library)
-//   3. Base58/base64 encode and send via sendTransaction
-//
-// These are scaffolded — wire up once the Solana keypair management is
-// integrated with the SwapDaemon.
 
 bool SolRpcClient::lock(const std::string& senderSecretKey,
                          const std::string& recipientPubkey,

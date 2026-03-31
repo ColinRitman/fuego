@@ -91,6 +91,11 @@ private:
   bool on_submit_swap_offer(const COMMAND_RPC_SUBMIT_SWAP_OFFER::request& req, COMMAND_RPC_SUBMIT_SWAP_OFFER::response& res);
   bool on_cancel_swap_offer(const COMMAND_RPC_CANCEL_SWAP_OFFER::request& req, COMMAND_RPC_CANCEL_SWAP_OFFER::response& res);
 
+  // CD fee pool RPC endpoints
+  bool on_get_fee_pool(const COMMAND_RPC_GET_FEE_POOL::request& req, COMMAND_RPC_GET_FEE_POOL::response& res);
+  bool on_get_cd_info(const COMMAND_RPC_GET_CD_INFO::request& req, COMMAND_RPC_GET_CD_INFO::response& res);
+  bool on_get_cd_interest(const COMMAND_RPC_GET_CD_INTEREST::request& req, COMMAND_RPC_GET_CD_INTEREST::response& res);
+
   bool on_get_deposits(const COMMAND_RPC_GET_DEPOSITS::request& req, COMMAND_RPC_GET_DEPOSITS::response& res);
   bool on_get_transactions(const COMMAND_RPC_GET_TRANSACTIONS::request& req, COMMAND_RPC_GET_TRANSACTIONS::response& res);
   // Commitment Index RPC endpoints (Fuego → EVM bridge)

@@ -25,7 +25,7 @@ namespace CryptoNote {
 
 namespace TransactionTypes {
   
-  enum class InputType : uint8_t { Invalid, Key, Multisignature, Generating, CommitmentSpend, CommitmentTransfer };
+  enum class InputType : uint8_t { Invalid, Key, Multisignature, Generating, CommitmentSpend };
   enum class OutputType : uint8_t { Invalid, Key, Multisignature, Commitment };
 
   struct GlobalOutput {
@@ -116,7 +116,6 @@ public:
   virtual size_t addInput(const KeyInput& input) = 0;
   virtual size_t addInput(const MultisignatureInput& input) = 0;
   virtual size_t addInput(const TransactionInputCommitmentSpend& input) = 0;
-  virtual size_t addInput(const TransactionInputCommitmentTransfer& input) = 0;
   virtual size_t addInput(const AccountKeys& senderKeys, const TransactionTypes::InputKeyInfo& info, KeyPair& ephKeys) = 0;
 
   virtual size_t addOutput(uint64_t amount, const AccountPublicAddress& to) = 0;
@@ -137,8 +136,6 @@ public:
   // realIndex is position of the real spend within the ring.
   virtual void signInputCommitmentSpend(size_t input, const std::vector<const Crypto::PublicKey*>& ringKeys,
                                         const KeyPair& commitmentKeys, size_t realIndex) = 0;
-  virtual void signInputCommitmentTransfer(size_t input, const std::vector<const Crypto::PublicKey*>& ringKeys,
-                                           const KeyPair& commitmentKeys, size_t realIndex) = 0;
 };
 
 class ITransaction : 

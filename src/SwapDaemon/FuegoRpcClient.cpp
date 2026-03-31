@@ -236,6 +236,110 @@ bool FuegoRpcClient::sendTransfer(const std::string& address, uint64_t amount,
   }
 }
 
+// ── Minimal CryptoNote binary parser ─────────────────────────────────
+//
+// We parse the transaction wire format directly to avoid linking
+// CryptoNoteCore and Serialization (SwapDaemon only links Crypto,
+// Common, Logging).  The wire format uses 7-bit varint encoding
+// (high bit = "more bytes") and typed variant tags for inputs/outputs.
+
+namespace {
+
+// RAII-free binary reader over a byte vector.
+struct BlobReader {
+  const uint8_t* data;
+  size_t         size;
+  size_t         pos;
+
+  BlobReader(const std::vector<uint8_t>& blob)
+    : data(blob.data()), size(blob.size()), pos(0) {}
+
+  bool eof() const { return pos >= size; }
+
+  uint8_t readByte() {
+    if (pos >= size) throw std::runtime_error("BlobReader: unexpected end");
+    return data[pos++];
+  }
+
+  void readBytes(void* dst, size_t n) {
+    if (pos + n > size) throw std::runtime_error("BlobReader: unexpected end");
+    std::memcpy(dst, data + pos, n);
+    pos += n;
+  }
+
+  void skip(size_t n) {
+    if (pos + n > size) throw std::runtime_error("BlobReader: unexpected end");
+    pos += n;
+  }
+
+  uint64_t readVarint() {
+    uint64_t result = 0;
+    unsigned shift = 0;
+    while (true) {
+      uint8_t b = readByte();
+      result |= static_cast<uint64_t>(b & 0x7F) << shift;
+      if ((b & 0x80) == 0) break;
+      shift += 7;
+      if (shift >= 64) throw std::runtime_error("BlobReader: varint overflow");
+    }
+    return result;
+  }
+
+  // Skip a varint-length-prefixed array of varints (e.g. key_offsets).
+  void skipVarintArray() {
+    uint64_t count = readVarint();
+    for (uint64_t i = 0; i < count; ++i) {
+      readVarint();
+    }
+  }
+
+  // Skip one serialized input based on its type tag.
+  // Wire tags (from CryptoNoteSerialization.cpp BinaryVariantTagGetter):
+  //   0xFF  BaseInput:                    varint blockIndex
+  //   0x02  KeyInput:                     varint amount, varintArray offsets, 32B keyImage
+  //   0x03  MultisignatureInput:          varint amount, varint sigCount, varint outputIndex, varint term
+  //   0x04  TransactionInputCommitmentSpend:   varint amount, varintArray offsets, 32B keyImage, varint claimedInterest
+  //   0x05  TransactionInputUnified:      varintArray offsets, 32B keyImage, 32B pseudoCommitment, 32B sigC0
+  void skipInput() {
+    uint8_t tag = readByte();
+    switch (tag) {
+    case 0xFF: // BaseInput
+      readVarint(); // blockIndex
+      break;
+    case 0x02: // KeyInput
+      readVarint(); // amount
+      skipVarintArray(); // outputIndexes
+      skip(32); // keyImage
+      break;
+    case 0x03: // MultisignatureInput
+      readVarint(); // amount
+      readVarint(); // signatureCount
+      readVarint(); // outputIndex
+      readVarint(); // term
+      break;
+    case 0x04: // TransactionInputCommitmentSpend
+      readVarint(); // amount
+      skipVarintArray(); // outputIndexes
+      skip(32); // keyImage
+      readVarint(); // claimedInterest
+      break;
+    case 0x05: // TransactionInputUnified
+      skipVarintArray(); // outputIndexes
+      skip(32); // keyImage
+      skip(32); // pseudoCommitment (EllipticCurvePoint)
+      skip(32); // sigC0 (EllipticCurveScalar)
+      break;
+    default:
+      throw std::runtime_error("BlobReader: unknown input tag " + std::to_string(tag));
+    }
+  }
+};
+
+// MembershipProof size: FUEGO_MEMBERSHIP_N * 2 * 32 bytes (e/s scalar arrays).
+static constexpr size_t MEMBERSHIP_PROOF_BYTES = FUEGO_MEMBERSHIP_N * 2 * 32; // 256
+
+} // anonymous namespace
+
 // ── Daemon RPC: transaction inspection ───────────────────────────────
 
 bool FuegoRpcClient::getTransactionOutputs(const std::string& txHashHex,
@@ -269,25 +373,166 @@ bool FuegoRpcClient::getTransactionOutputs(const std::string& txHashHex,
       return false;
     }
 
-    // Parse the raw transaction binary to extract outputs.
-    // The tx blob is hex-encoded CryptoNote::Transaction.
-    // We decode it and walk the outputs looking for KeyOutputs.
     std::string txHex = txsHex[0].getString();
- //   std::string txBlob = Common::fromHex(txHex);
+    std::vector<uint8_t> blob = Common::fromHex(txHex);
+    BlobReader r(blob);
 
-    // Use CryptoNote binary deserialization.  Rather than pulling in the
-    // full serialization stack here, we store the hex for the caller and
-    // provide a minimal output scan by walking vout entries.
-    //
-    // For now, we return success = tx exists.  The caller matches outputs
-    // by deriving the one-time key from the tx public key and comparing.
-    // The actual output parsing requires CryptoNote deserialization which
-    // will be wired in when the full tx builder is integrated.  We store
-    // the raw hex so higher layers can deserialize as needed.
-    //
-    // TODO: deserialize Transaction and populate TxOutputInfo vector.
+    // ── TransactionPrefix ──
+    // version (varint)
+    r.readVarint();
+    // unlockTime (varint)
+    r.readVarint();
+
+    // ── inputs (vin) ──
+    uint64_t inputCount = r.readVarint();
+    for (uint64_t i = 0; i < inputCount; ++i) {
+      r.skipInput();
+    }
+
+    // ── outputs (vout) ──
+    uint64_t outputCount = r.readVarint();
     outputs.clear();
+    outputs.reserve(static_cast<size_t>(outputCount));
+
+    for (uint64_t i = 0; i < outputCount; ++i) {
+      uint64_t amount = r.readVarint();
+      uint8_t tag = r.readByte();
+
+      switch (tag) {
+      case 0x02: { // KeyOutput — 32-byte public key
+        TxOutputInfo info;
+        info.amount = amount;
+        r.readBytes(info.targetKey.data, 32);
+        outputs.push_back(info);
+        break;
+      }
+      case 0x03: { // MultisignatureOutput — skip: varint-array keys, varint reqSigs, varint term
+        uint64_t keyCount = r.readVarint();
+        r.skip(static_cast<size_t>(keyCount) * 32); // PublicKey array
+        r.readVarint(); // requiredSignatureCount
+        r.readVarint(); // term
+        break;
+      }
+      case 0x04: { // TransactionOutputCommitment — 32B commitKey, varint term, 32B amountCommitment, MEMBERSHIP_PROOF_BYTES
+        r.skip(32); // commitKey
+        r.readVarint(); // term
+        r.skip(32); // amountCommitment (EllipticCurvePoint)
+        r.skip(MEMBERSHIP_PROOF_BYTES); // amountProof
+        break;
+      }
+      case 0x05: { // TransactionOutputUnified — 32B key, varint term, 32B commitment, MEMBERSHIP_PROOF_BYTES
+        r.skip(32); // key
+        r.readVarint(); // term
+        r.skip(32); // commitment (EllipticCurvePoint)
+        r.skip(MEMBERSHIP_PROOF_BYTES); // proof
+        break;
+      }
+      default:
+        throw std::runtime_error("Unknown output tag " + std::to_string(tag));
+      }
+    }
+
     return true;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+// ── Daemon RPC: random outputs for ring construction ─────────────────
+
+bool FuegoRpcClient::getRandomOutputs(uint64_t amount, uint32_t count,
+                                      std::vector<RandomOutput>& outputs) {
+  try {
+    std::ostringstream body;
+    body << "{\"amounts\":[" << amount << "],\"outs_count\":" << count << "}";
+
+    std::string responseBody = daemonPost("/getrandom_outs", body.str());
+    Common::JsonValue json = Common::JsonValue::fromString(responseBody);
+
+    if (!json.isObject() || !json.contains("status")) {
+      return false;
+    }
+
+    if (json("status").getString() != "OK") {
+      return false;
+    }
+
+    if (!json.contains("outs") || !json("outs").isArray()) {
+      return false;
+    }
+
+    const auto& outsArray = json("outs");
+    if (outsArray.size() == 0) {
+      return false;
+    }
+
+    // We requested one amount, so expect one entry.
+    const auto& entry = outsArray[0];
+    if (!entry.isObject() || !entry.contains("outs") || !entry("outs").isArray()) {
+      return false;
+    }
+
+    const auto& entryOuts = entry("outs");
+    outputs.clear();
+    outputs.reserve(entryOuts.size());
+
+    for (size_t i = 0; i < entryOuts.size(); ++i) {
+      const auto& out = entryOuts[i];
+      if (!out.isObject() ||
+          !out.contains("global_amount_index") ||
+          !out.contains("out_key")) {
+        continue;
+      }
+
+      RandomOutput ro;
+      ro.globalIndex = static_cast<uint64_t>(out("global_amount_index").getInteger());
+
+      std::string keyHex = out("out_key").getString();
+      if (!Common::podFromHex(keyHex, ro.key)) {
+        continue;
+      }
+
+      outputs.push_back(ro);
+    }
+
+    return !outputs.empty();
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+// ── Daemon RPC: global output indexes for a transaction ──────────────
+
+bool FuegoRpcClient::getGlobalOutputIndexes(const std::string& txHashHex,
+                                            std::vector<uint64_t>& indexes) {
+  try {
+    std::ostringstream body;
+    body << "{\"txid\":\"" << txHashHex << "\"}";
+
+    std::string responseBody = daemonPost("/get_o_indexes", body.str());
+    Common::JsonValue json = Common::JsonValue::fromString(responseBody);
+
+    if (!json.isObject() || !json.contains("status")) {
+      return false;
+    }
+
+    if (json("status").getString() != "OK") {
+      return false;
+    }
+
+    if (!json.contains("o_indexes") || !json("o_indexes").isArray()) {
+      return false;
+    }
+
+    const auto& arr = json("o_indexes");
+    indexes.clear();
+    indexes.reserve(arr.size());
+
+    for (size_t i = 0; i < arr.size(); ++i) {
+      indexes.push_back(static_cast<uint64_t>(arr[i].getInteger()));
+    }
+
+    return !indexes.empty();
   } catch (const std::exception&) {
     return false;
   }

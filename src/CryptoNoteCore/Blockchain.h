@@ -101,10 +101,11 @@ namespace CryptoNote {
     uint64_t getFeePoolBalance() const { return m_feePoolBalance; }
     uint64_t getCurrentEpochSwapFees() const { return m_currentEpochSwapFees; }
     uint64_t getTotalCdLocked() const { return m_totalCdLocked; }
-    uint32_t getActiveEfierCount() const { return m_activeEfierCount; }
-    uint64_t getBankingFeeRateBps() const { return static_cast<uint64_t>(m_activeEfierCount) * parameters::BANKING_FEE_PER_ELFIER_BPS; }
-    uint64_t getEfierSwapRewardPerBlock() const { return m_efierSwapRewardPerBlock; }
+    uint64_t getTotalXfgCdLocked() const { return m_totalXfgCdLocked; }
     uint64_t getTreasuryBalance() const { return m_treasuryBalance; }
+    uint64_t getTotalSwapFeesCollected() const { return m_totalSwapFeesCollected; }
+    uint64_t getTotalCdInterestPaid() const { return m_totalCdInterestPaid; }
+    uint64_t getTotalTreasuryAccrued() const { return m_totalTreasuryAccrued; }
     uint8_t getBlockMajorVersionForHeight(uint32_t height) const;
     uint8_t blockMajorVersion;
     bool addNewBlock(const Block& bl_, block_verification_context& bvc);
@@ -157,7 +158,7 @@ namespace CryptoNote {
     CommitmentIndex::Height getCommitmentHighestBlock() const;
 
     // Banking fee computation: scan transactions for HEAT/COLD commitments, 0.1% per active EFier
-    static uint64_t computeBankingFeesFromTransactions(const std::vector<Transaction>& txs, uint32_t activeEfierCount);
+    static uint64_t computeBankingFeesFromTransactions(const std::vector<Transaction>& txs);
 
     // Access CommitmentIndex for epoch boundary checks and fee tracking
     CommitmentIndex& getCommitmentIndex() { return m_commitmentIndex; }
@@ -319,6 +320,7 @@ namespace CryptoNote {
       Crypto::PublicKey commitKey;  // cached for ring signature verification
       uint32_t          term;       // lock term in blocks; 0xFFFFFFFF = FOREVER (HEAT burns, never unlocked)
       bool              isSlashed = false;  // true = forbidden ring member (slashed EFier stake)
+      bool              isXfgCd   = false;  // true = xfgCD (on-chain yield eligible, no COLD/HEAT/EFier extra)
 
       void serialize(ISerializer& s) {
         s(transactionIndex, "txindex");
@@ -326,6 +328,7 @@ namespace CryptoNote {
         s(commitKey, "commitKey");
         s(term, "term");
         s(isSlashed, "is_slashed");
+        s(isXfgCd, "is_xfg_cd");
       }
     };
     typedef parallel_flat_hash_map<uint64_t, std::vector<CommitmentOutputRef>> CommitmentOutputsContainer;
@@ -365,18 +368,13 @@ namespace CryptoNote {
     // Fee pool: accumulates swap fees, distributed as interest to CD holders.
     uint64_t m_feePoolBalance = 0;        // total XFG available for CD interest payouts
     uint64_t m_currentEpochSwapFees = 0;  // fees accumulated in current epoch (reset each epoch boundary)
-    uint64_t m_totalCdLocked = 0;         // total XFG locked in CDs (for epoch rate calculation)
+    uint64_t m_totalCdLocked = 0;         // total XFG in ALL commitment outputs (ring pool bookkeeping)
+    uint64_t m_totalXfgCdLocked = 0;      // XFG in xfgCD deposits only (no COLD/HEAT/EFier — fee pool rate denominator)
 
     // Cumulative fee pool accounting (lifetime totals, never reset)
     uint64_t m_totalSwapFeesCollected = 0;    // all swap fees ever entering the pool
     uint64_t m_totalCdInterestPaid = 0;       // total interest paid out to CD holders
-    uint64_t m_totalEfierSwapPaid = 0;        // total EFier 10% share distributed via coinbase
     uint64_t m_totalTreasuryAccrued = 0;      // total 10% accumulated to treasury
-
-    // EFier fee state: dynamic banking fee + swap fee share
-    uint32_t m_activeEfierCount = 0;           // active EFiers (snapshot at epoch boundary)
-    uint64_t m_efierSwapRewardPerBlock = 0;    // 10% of last epoch's swap fees / epoch_duration
-    uint64_t m_efierSwapRewardRemaining = 0;   // undistributed EFier swap share (drips to 0 by epoch end)
 
     // Treasury: 10% of swap fees accumulates for protocol use
     uint64_t m_treasuryBalance = 0;
@@ -438,7 +436,6 @@ namespace CryptoNote {
     void popTransactions(const BlockEntry &block, const Crypto::Hash &minerTransactionHash);
     bool validateInput(const MultisignatureInput &input, const Crypto::Hash &transactionHash, const Crypto::Hash &transactionPrefixHash, const std::vector<Crypto::Signature> &transactionSignatures);
     bool checkCommitmentSpendInput(const TransactionInputCommitmentSpend& txin, const Crypto::Hash& tx_prefix_hash, const std::vector<Crypto::Signature>& sig, uint32_t* pmax_related_block_height = nullptr);
-    bool checkCommitmentTransferInput(const TransactionInputCommitmentTransfer& txin, const Crypto::Hash& tx_prefix_hash, const std::vector<Crypto::Signature>& sig, uint32_t* pmax_related_block_height = nullptr);
     bool removeLastBlock();
     bool checkCheckpoints(uint32_t &lastValidCheckpointHeight);
     bool checkUpgradeHeight(const UpgradeDetector& upgradeDetector);
@@ -450,9 +447,6 @@ namespace CryptoNote {
     void saveTransactions(const std::vector<Transaction>& transactions, uint32_t height);
 
     void sendMessage(const BlockchainMessage& message);
-
-    // Elderfier consensus check (called after each block)
-    void checkElderfierConsensusThreshold();
 
     friend class LockedBlockchainStorage;
   };

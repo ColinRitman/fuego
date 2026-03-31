@@ -379,10 +379,6 @@ double Currency::getBurnPercentage() const {
       const auto& spend = boost::get<TransactionInputCommitmentSpend>(in);
       return spend.amount + spend.claimedInterest;
     }
-    else if (in.type() == typeid(TransactionInputCommitmentTransfer))
-    {
-      return boost::get<TransactionInputCommitmentTransfer>(in).amount;
-    }
     else if (in.type() == typeid(BaseInput))
     {
       return 0;

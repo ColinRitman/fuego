@@ -51,7 +51,6 @@ size_t getSignaturesCount(const TransactionInput& input) {
     size_t operator()(const KeyInput& txin) const { return txin.outputIndexes.size(); }
     size_t operator()(const MultisignatureInput& txin) const { return txin.signatureCount; }
     size_t operator()(const TransactionInputCommitmentSpend& txin) const { return txin.outputIndexes.size(); }
-    size_t operator()(const TransactionInputCommitmentTransfer& txin) const { return txin.outputIndexes.size(); }
     size_t operator()(const TransactionInputUnified& txin) const { return txin.outputIndexes.size(); }
   };
 
@@ -63,7 +62,6 @@ struct BinaryVariantTagGetter: boost::static_visitor<uint8_t> {
   uint8_t operator()(const CryptoNote::KeyInput) { return  0x2; }
   uint8_t operator()(const CryptoNote::MultisignatureInput) { return  0x3; }
   uint8_t operator()(const CryptoNote::TransactionInputCommitmentSpend) { return  0x4; }
-  uint8_t operator()(const CryptoNote::TransactionInputCommitmentTransfer) { return  0x8; }
   uint8_t operator()(const CryptoNote::TransactionInputUnified) { return  0x5; }
   uint8_t operator()(const CryptoNote::KeyOutput) { return  0x2; }
   uint8_t operator()(const CryptoNote::MultisignatureOutput) { return  0x3; }
@@ -111,12 +109,6 @@ void getVariantValue(CryptoNote::ISerializer& serializer, uint8_t tag, CryptoNot
   }
   case 0x5: {
     CryptoNote::TransactionInputUnified v;
-    serializer(v, "value");
-    in = v;
-    break;
-  }
-  case 0x8: {
-    CryptoNote::TransactionInputCommitmentTransfer v;
     serializer(v, "value");
     in = v;
     break;
@@ -360,13 +352,6 @@ void serialize(TransactionInputCommitmentSpend& in, ISerializer& serializer) {
   serializeVarintVector(in.outputIndexes, serializer, "key_offsets");
   serializer(in.keyImage, "k_image");
   serializer(in.claimedInterest, "claimed_interest");
-}
-
-void serialize(TransactionInputCommitmentTransfer& in, ISerializer& serializer) {
-  serializer(in.amount, "amount");
-  serializeVarintVector(in.outputIndexes, serializer, "key_offsets");
-  serializer(in.keyImage, "k_image");
-  serializer(in.newTerm, "new_term");
 }
 
 void serialize(TransactionOutputCommitment& out, ISerializer& serializer) {

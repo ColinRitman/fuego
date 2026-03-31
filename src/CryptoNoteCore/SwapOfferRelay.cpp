@@ -22,6 +22,8 @@
 #include <algorithm>
 #include <chrono>
 
+using namespace Common;
+
 namespace CryptoNote {
 
 // Seed rates: XFG per 1 whole CTR coin (1 XFG = $0.01 USD, March 2026)
@@ -30,9 +32,11 @@ namespace CryptoNote {
 //   XMR = $343   →  34,300 XFG/XMR
 double SwapOfferRelay::getSeedRate(uint8_t pair) {
   switch (pair) {
-    case 1: return 214000.0;  // ETH
-    case 2: return 46900.0;   // BCH
-    case 0: return 34300.0;   // XMR
+    case 0: return 21000.0;   // SOL ($210)
+    case 1: return 214000.0;  // ETH ($2,140)
+    case 2: return 34300.0;   // XMR ($343)
+    case 3: return 10000000.0;// HEAT (1:1 with atomic XFG)
+    case 4: return 100.0;     // LUSD ($1.00 = 100 XFG)
     default: return 0.0;
   }
 }
@@ -41,9 +45,11 @@ double SwapOfferRelay::getSeedRate(uint8_t pair) {
 // These are bootstrap values; external sources override when available.
 double SwapOfferRelay::getCtrUsdPrice(uint8_t pair) {
   switch (pair) {
+    case 0: return 210.0;    // SOL
     case 1: return 2140.0;   // ETH
-    case 2: return 469.0;    // BCH
-    case 0: return 343.0;    // XMR
+    case 2: return 343.0;    // XMR
+    case 3: return 0.01;     // HEAT (1 HEAT = $0.01)
+    case 4: return 1.00;     // LUSD
     default: return 0.0;
   }
 }
@@ -80,6 +86,10 @@ void SwapOfferRelay::cleanupThread() {
         // Remove expired offers
         for (auto it = m_offers.begin(); it != m_offers.end(); ) {
           if (currentHeight > it->second.postedHeight + it->second.ttlBlocks) {
+            auto& pubkey = it->second.makerPubKey;
+            if (m_makerOfferCount.count(pubkey) && m_makerOfferCount[pubkey] > 0) {
+              m_makerOfferCount[pubkey]--;
+            }
             it = m_offers.erase(it);
           } else {
             ++it;
@@ -106,7 +116,7 @@ bool SwapOfferRelay::validateOffer(const SwapOfferMsg& offer) const {
   if (offer.offerId.empty()) return false;
   if (offer.xfgAmount == 0) return false;
   if (offer.rateNum == 0) return false;
-  if (offer.pair > 2) return false;
+  if (offer.pair > 4) return false;
   if (offer.ttlBlocks == 0 || offer.ttlBlocks > 1080) return false;  // max ~6 days at 8min blocks
 
   // Verify signature: maker signs the offerId hash
@@ -121,7 +131,12 @@ void SwapOfferRelay::handleOfferMessage(const SwapOfferMsg& offer) {
   std::lock_guard<std::mutex> lock(m_mutex);
   // Don't replace existing offers — first-seen wins
   if (m_offers.find(offer.offerId) != m_offers.end()) return;
+
+  // Spam prevention: Limit active offers per maker
+  if (m_makerOfferCount[offer.makerPubKey] >= MAX_OFFERS_PER_MAKER) return;
+
   m_offers[offer.offerId] = offer;
+  m_makerOfferCount[offer.makerPubKey]++;
 }
 
 void SwapOfferRelay::handleCancelMessage(const std::string& offerId,
@@ -136,6 +151,9 @@ void SwapOfferRelay::handleCancelMessage(const std::string& offerId,
   std::lock_guard<std::mutex> lock(m_mutex);
   auto it = m_offers.find(offerId);
   if (it != m_offers.end() && it->second.makerPubKey == pubkey) {
+    if (m_makerOfferCount[pubkey] > 0) {
+      m_makerOfferCount[pubkey]--;
+    }
     m_offers.erase(it);
   }
 }
@@ -146,6 +164,35 @@ void SwapOfferRelay::handleTradeCompleted(const SwapTradeRecord& trade) {
   while (m_trades.size() > MAX_TRADE_HISTORY) {
     m_trades.pop_front();
   }
+
+  // Reward maker
+  m_makerSuccessfulSwaps[trade.makerPubKey]++;
+  // Reward formula: 0.01 XFG base reward + 0.1% volume reward
+  uint64_t reward = 100000; // 0.01 XFG (10^5 atomic units)
+  reward += trade.xfgAmount / 1000; // 0.1% of volume
+  m_makerRewards[trade.makerPubKey] += reward;
+}
+
+uint64_t SwapOfferRelay::getMakerRewards(const Crypto::PublicKey& pubkey) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  auto it = m_makerRewards.find(pubkey);
+  return (it != m_makerRewards.end()) ? it->second : 0;
+}
+
+bool SwapOfferRelay::claimMakerRewards(const Crypto::PublicKey& pubkey, const Crypto::Signature& sig, uint64_t& amount) {
+  // Verify claim signature: signs "claim_rewards:<pubkey_hex>"
+  Crypto::Hash claimHash;
+  std::string claimData = "claim_rewards:" + Common::podToHex(pubkey);
+  cn_fast_hash(claimData.data(), claimData.size(), claimHash);
+  if (!Crypto::check_signature(claimHash, pubkey, sig)) return false;
+
+  std::lock_guard<std::mutex> lock(m_mutex);
+  auto it = m_makerRewards.find(pubkey);
+  if (it == m_makerRewards.end() || it->second == 0) return false;
+
+  amount = it->second;
+  it->second = 0; // Reset rewards after claim
+  return true;
 }
 
 std::vector<SwapOfferMsg> SwapOfferRelay::getOffers(uint8_t pair) const {
@@ -212,7 +259,22 @@ bool SwapOfferRelay::submitOffer(const SwapOfferMsg& offer) {
   {
     std::lock_guard<std::mutex> lock(m_mutex);
     if (m_offers.find(offer.offerId) != m_offers.end()) return false;  // duplicate
+
+    // Spam prevention: Rate limit submissions
+    uint64_t now = static_cast<uint64_t>(std::time(nullptr));
+    if (m_lastOfferTime.count(offer.makerPubKey) && 
+        (now - m_lastOfferTime[offer.makerPubKey] < OFFER_RATE_LIMIT_SEC)) {
+      return false;
+    }
+
+    // Spam prevention: Limit active offers
+    if (m_makerOfferCount[offer.makerPubKey] >= MAX_OFFERS_PER_MAKER) {
+      return false;
+    }
+
     m_offers[offer.offerId] = offer;
+    m_makerOfferCount[offer.makerPubKey]++;
+    m_lastOfferTime[offer.makerPubKey] = now;
   }
 
   // Relay to P2P peers
@@ -416,7 +478,7 @@ NativeXfgPriceRange SwapOfferRelay::getNativeXfgPrice() const {
 
   double sum = 0.0;
 
-  for (uint8_t p = 0; p <= 2; ++p) {
+  for (uint8_t p = 0; p <= 4; ++p) {
     CompositePrice cp = getCompositePrice(p);
     if (cp.rate <= 0.0) continue;
 

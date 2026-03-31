@@ -451,6 +451,9 @@ namespace CryptoNote
       uint32_t    ttlBlocks;              // Offer expires after this many blocks
       uint32_t    postedHeight;           // Block height when posted
 
+      bool        dandelion_stem = false; // Dandelion phase
+      uint32_t    hop_count = 0;          // Dandelion hops
+
       void serialize(ISerializer& s) {
         KV_MEMBER(offerId)
         KV_MEMBER(xfgAmount)
@@ -461,6 +464,8 @@ namespace CryptoNote
         KV_MEMBER(timestamp)
         KV_MEMBER(ttlBlocks)
         KV_MEMBER(postedHeight)
+        KV_MEMBER(dandelion_stem)
+        KV_MEMBER(hop_count)
       }
     };
     typedef EMPTY_STRUCT response;

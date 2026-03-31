@@ -118,12 +118,8 @@ public:
     size_t minRingSize = minMixin(blockMajorVersion); // Minimum: 8 at v10+
     size_t maxRingSize = maxMixin(); // Maximum: 18
 
-    // For BlockMajorVersion 10+, never go below ring size 8
-    // If insufficient outputs for ring ct 8, this is handled by the caller
     if (availableOutputs < minRingSize) {
-      // indicates insufficient outputs - caller should handle this error
-
-      return 0; // Signal to caller that ring ct 8 is not achievable - direct user to run optimizer
+      return 0; 
     }
 
     // Target ring sizes in order of preference
@@ -136,7 +132,6 @@ public:
       }
     }
 
-    // Fall back to standard if no targets are achievable
     return minRingSize;
   }
 
@@ -153,8 +148,8 @@ public:
   // Dynamic minimum fee based on block size
   uint64_t dynamicMinimumFee(size_t currentBlockSize, size_t medianBlockSize, uint8_t blockMajorVersion) const;
 
-  // Calculate banking fee: 0.1% per active EFier (dynamic rate)
-  uint64_t calculateBankingFee(uint64_t depositAmount, uint32_t activeEfierCount) const;
+  // Calculate banking fee: flat 0.1% for miners on xfgCD deposits
+  uint64_t calculateBankingFee(uint64_t depositAmount) const;
 
   uint64_t defaultDustThreshold() const { return m_defaultDustThreshold; }
   uint64_t difficultyTarget_DRGL() const { return m_difficultyTarget_DRGL; }
@@ -179,8 +174,9 @@ public:
       }
       else if (blockMajorVersion >= BLOCK_MAJOR_VERSION_7)
       {
-        // v7-v9: single-window LWMA, DIFFICULTY_WINDOW_V4=45 is correct here
-        return difficultyBlocksCount4() + 1;
+        // v7-v9: must match v1.9.3 — uses difficultyBlocksCount3 (WINDOW_V3=60)
+        // V5 internally uses N=DIFFICULTY_WINDOW_V4=45, reads indices 0..N
+        return difficultyBlocksCount3() + 1;
       }
       else if (blockMajorVersion >= BLOCK_MAJOR_VERSION_3)
       {
@@ -268,29 +264,13 @@ public:
   bool constructMinerTx(uint8_t blockMajorVersion, uint32_t height, size_t medianSize, uint64_t alreadyGeneratedCoins, size_t currentBlockSize,
                           uint64_t fee, const AccountPublicAddress &minerAddress, Transaction &tx,
                           const BinaryArray &extraNonce = BinaryArray(), size_t maxOuts = 1, uint64_t burnedCoinsOverride = UINT64_MAX,
-                          uint64_t bankingFeesInBlock = 0,
-                          const std::vector<std::pair<AccountPublicAddress, uint64_t>> &efierRewards = {}) const;
+                          uint64_t bankingFeesInBlock = 0) const;
 
   bool isFusionTransaction(const Transaction &transaction) const;
   bool isFusionTransaction(const Transaction &transaction, size_t size) const;
   bool isFusionTransaction(const std::vector<uint64_t> &inputsAmounts, const std::vector<uint64_t> &outputsAmounts, size_t size) const;
   bool isAmountApplicableInFusionTransactionInput(uint64_t amount, uint64_t threshold, uint32_t height) const;
   bool isAmountApplicableInFusionTransactionInput(uint64_t amount, uint64_t threshold, uint8_t &amountPowerOfTen, uint32_t height) const;
-
-  // Burn deposit validation methods
-  bool isValidBurnDepositAmount(uint64_t amount) const;
-  bool isValidBurnDepositTerm(uint32_t term) const;
-  bool isBurnDeposit(uint32_t term) const;
-  uint64_t getBurnDepositMinAmount() const { return m_burnDepositMinAmount; }
-  uint64_t getBurnDepositStandardAmount() const { return m_burnDepositStandardAmount; }
-  uint64_t getBurnDepositLargeAmount() const { return m_burnDepositLargeAmount; }
-  uint32_t getDepositTermForever() const { return m_depositTermForever; }
-  uint32_t getDepositTermBurn() const { return m_depositTermForever; }  // Alias for compatibility
-
-  // HEAT token conversion methods
-  uint64_t convertXfgToHeat(uint64_t xfgAmount) const;
-  uint64_t convertHeatToXfg(uint64_t heatAmount) const;
-  uint64_t getHeatConversionRate() const { return m_heatConversionRate; }
 
   // Money supply methods
   uint64_t getBaseMoneySupply() const { return m_baseMoneySupply; }
@@ -305,12 +285,6 @@ public:
   const std::string& getFuegoNetworkIdString() const { return m_fuegoNetworkIdString; }
   bool validateNetworkId(uint64_t networkId) const;
   bool validateNetworkIdString(const std::string& networkId) const;
-
-  // Burn proof data methods
-  Crypto::Hash calculateBurnNullifier(const Crypto::SecretKey& secret) const;
-  Crypto::Hash calculateBurnCommitment(const Crypto::SecretKey& secret, uint64_t amount) const;
-  Crypto::Hash calculateBurnRecipientHash(const std::string& recipientAddress) const;
-  bool validateBurnProofData(const std::string& secret, uint64_t amount, const std::string& commitment, const std::string& nullifier) const;
 
   std::string accountAddressAsString(const AccountBase &account) const;
   std::string accountAddressAsString(const AccountPublicAddress &accountPublicAddress) const;
@@ -341,8 +315,6 @@ private:
   bool init();
 
   bool generateGenesisBlock();
-
-  // getPenalizedAmount is a standalone function defined in CryptoNoteBasicImpl.h/CryptoNoteBasicImpl.cpp
 
 private:
   uint64_t m_maxBlockHeight;
@@ -387,17 +359,6 @@ private:
   uint64_t m_depositMinAmount;
   uint32_t m_depositMinTerm;
   uint32_t m_depositMaxTerm;
-    uint64_t m_depositMinTotalRateFactor;
-    uint64_t m_depositMaxTotalRate;
-
-  // Burn deposit configuration
-  uint64_t m_burnDepositMinAmount;
-  uint64_t m_burnDepositStandardAmount;
-  uint64_t m_burnDepositLargeAmount;
-  uint32_t m_depositTermForever;
-
-  // HEAT token conversion
-  uint64_t m_heatConversionRate;
 
   // Money supply
   uint64_t m_baseMoneySupply;
@@ -510,16 +471,6 @@ public:
   CurrencyBuilder& maxBlockSizeInitial(size_t val) { m_currency.m_maxBlockSizeInitial = val; return *this; }
   CurrencyBuilder& maxBlockSizeGrowthSpeedNumerator(uint64_t val) { m_currency.m_maxBlockSizeGrowthSpeedNumerator = val; return *this; }
   CurrencyBuilder& maxBlockSizeGrowthSpeedDenominator(uint64_t val) { m_currency.m_maxBlockSizeGrowthSpeedDenominator = val; return *this; }
-    CurrencyBuilder &depositMinTotalRateFactor(uint64_t val)
-    {
-      m_currency.m_depositMinTotalRateFactor = val;
-      return *this;
-    }
-    CurrencyBuilder &depositMaxTotalRate(uint64_t val)
-    {
-      m_currency.m_depositMaxTotalRate = val;
-      return *this;
-    }
 
   CurrencyBuilder& lockedTxAllowedDeltaSeconds(uint64_t val) { m_currency.m_lockedTxAllowedDeltaSeconds = val; return *this; }
   CurrencyBuilder& lockedTxAllowedDeltaSeconds_v2(uint64_t val) { m_currency.m_lockedTxAllowedDeltaSeconds_v2 = val; return *this; }
@@ -528,15 +479,6 @@ public:
   CurrencyBuilder& depositMinAmount(uint64_t val) { m_currency.m_depositMinAmount = val; return *this; }
   CurrencyBuilder& depositMinTerm(uint32_t val)   { m_currency.m_depositMinTerm = val; return *this;  }
   CurrencyBuilder& depositMaxTerm(uint32_t val)   { m_currency.m_depositMaxTerm = val; return *this; }
-
-  // Burn deposit configuration builders
-  CurrencyBuilder& burnDepositMinAmount(uint64_t val) { m_currency.m_burnDepositMinAmount = val; return *this; }
-  CurrencyBuilder& burnDepositStandardAmount(uint64_t val) { m_currency.m_burnDepositStandardAmount = val; return *this; }
-  CurrencyBuilder& burnDepositLargeAmount(uint64_t val) { m_currency.m_burnDepositLargeAmount = val; return *this; }
-  CurrencyBuilder& depositTermForever(uint32_t val) { m_currency.m_depositTermForever = val; return *this; }
-
-  // HEAT conversion builder
-  CurrencyBuilder& heatConversionRate(uint64_t val) { m_currency.m_heatConversionRate = val; return *this; }
 
   // Money supply builders
   CurrencyBuilder& baseMoneySupply(uint64_t val) { m_currency.m_baseMoneySupply = val; return *this; }
@@ -581,14 +523,14 @@ public:
       publicAddressBase58Prefix(CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET);
       subAddressBase58Prefix(CRYPTONOTE_SUBADDRESS_BASE58_PREFIX_TESTNET);
       // Set testnet-specific deposit terms
-      depositMinTerm(parameters::TESTNET_COLD_MIN_TERM);
-      depositMaxTerm(parameters::TESTNET_COLD_MAX_TERM);
+      depositMinTerm(parameters::TESTNET_CD_MIN_EPOCHS * parameters::TESTNET_EPOCH_DURATION_BLOCKS);
+      depositMaxTerm(parameters::TESTNET_CD_MAX_EPOCHS * parameters::TESTNET_EPOCH_DURATION_BLOCKS);
       // Set testnet-specific mined money unlock window
       minedMoneyUnlockWindow(parameters::CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW_TESTNET);
     } else {
       // Set mainnet deposit terms when switching from testnet to mainnet
-      depositMinTerm(parameters::COLD_MIN_TERM);
-      depositMaxTerm(parameters::COLD_MAX_TERM);
+      depositMinTerm(parameters::CD_MIN_EPOCHS * parameters::EPOCH_DURATION_BLOCKS);
+      depositMaxTerm(parameters::CD_MAX_EPOCHS * parameters::EPOCH_DURATION_BLOCKS);
       // Set mainnet mined money unlock window
       minedMoneyUnlockWindow(parameters::CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW);
     }

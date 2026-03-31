@@ -22,13 +22,18 @@ Adding HTLCs also enables swaps with ETH and BCH.
 
 ## Swap Pairs (Priority Order)
 
-1. **XMR ↔ XFG** — Primary pair. Both Ed25519/CryptoNote. XMR side uses adaptor sigs.
-2. **ETH ↔ XFG** — EVM has native HTLC support (Solidity contract). High liquidity.
-3. **BCH ↔ XFG** — Bitcoin Cash has OP_HASH160/OP_CHECKLOCKTIMEVERIFY. Standard HTLC.
+All swaps use **adaptor signatures on XFG side** — Fuego swap outputs are normal `KeyOutput` to Musig2 joint addresses, indistinguishable from regular transactions on-chain. 
+Counterparty chains use their native mechanisms.
 
-## Protocol: XMR ↔ XFG (COMIT Adaptor Signatures)
+0. **SOL ↔ XFG** — Solana HTLC Program (Anchor, Keccak-256) on SOL side, adaptor sig on XFG side. Both Ed25519.
+1. **ETH ↔ XFG** — HashedTimelock.sol on ETH side, adaptor sig on XFG side. High liquidity.
+2. **XMR ↔ XFG** — COMIT protocol: adaptor sigs on BOTH sides. Both Ed25519/CryptoNote. Most private pair.
+3. **wXFG ↔ XFG** — ERC-20 HTLC on ETH side, adaptor sig on XFG side. wXFG is wrapped XFG (1:1).
+4. **LUSD ↔ XFG** — ERC-20 HTLC on ETH side, adaptor sig on XFG side.
 
-**Core problem:** Monero has no scripting. Standard HTLC atomic swaps don't work on the XMR side. We use the proven COMIT protocol — XMR side uses adaptor signatures (DLEQ proofs), XFG side uses the new HTLC output.
+BCH support (`HtlcScript.h/cpp`, `xfg-bch-swap/`) preserved in codebase for potential future activation.
+
+## Protocol: XFG ↔ XMR (COMIT Adaptor Signatures)
 
 ```
 Alice: has XMR, wants XFG
@@ -141,31 +146,40 @@ Recommended:
 
 ---
 
-## Privacy: Unified Ring Pool (v10 staging → v11 activation)
+## Privacy: Adaptor Signatures (private swaps from day one)
 
-### Problem
-HTLC outputs are transparent — anyone can see which output is being claimed/refunded. Ring sigs need 9+ outputs of the same amount as decoys (mixin=8). Few HTLCs exist initially → no decoys → no privacy.
+### Problem (with HTLCs)
+HTLC outputs are transparent — anyone can see which output is being claimed/refunded. The preimage revealed on-chain links both sides of the swap. `TransactionOutputHashLock` is a distinct output type that screams "this is a swap." Ring sigs can't help because each HTLC has a unique hashlock — no anonymity set.
 
-### Solution: Shared Commitment Pool
+### Solution: Adaptor Signatures (no HTLCs on XFG chain)
 
-HTLC outputs are added to the same per-amount ring pool (`m_commitmentOutputs`) as deposit outputs. This is implemented in v10 — HTLC outputs automatically seed the commitment pool.
+Instead of HTLC outputs, all swap pairs use **Ed25519 adaptor signatures** on the XFG side. Swap funds are locked to a Musig2 joint address and appear as normal `KeyOutput` — indistinguishable from regular transactions.
 
 **How it works:**
-- Every `TransactionOutputHashLock` at amount X also creates a `CommitmentOutputRef` in `m_commitmentOutputs[X]`
-- `recipientKey` is used as `commitKey` for ring membership
-- `getRandomCommitmentOutputsForAmount()` already serves from this pool — no new RPC needed
-- EFier staking seeds 40+ outputs per amount tier → immediate mixin coverage
+1. Both parties negotiate a Musig2 joint public key during swap setup
+2. XFG is sent to the joint address as a normal `KeyOutput` (enters standard ring pool)
+3. One party creates an "adapted signature" — valid only when combined with a secret scalar `t`
+4. When the counterparty publishes the adapted tx, the other party extracts `t`
+5. Secret `t` is used to claim on the counterparty chain (or complete the COMIT protocol for XMR)
 
-**What this hides (when ring sig HTLCs land in v11):**
-- Which specific output is being spent (hidden in ring of deposits + HTLCs)
-- Link between HTLC creator and claimer (ring sigs break the graph)
-- Amount (once BP+ lands)
+**What this hides:**
+- Swap outputs are normal `KeyOutput` — no special type tag, no hashlock visible
+- Spending uses standard ring sigs — hidden in ring of transfers + matured deposits
+- No preimage revealed on XFG chain (only revealed on the counterparty chain, which is public anyway)
+- No link between XFG-side transaction and counterparty-chain HTLC
 
 **What remains visible:**
-- The preimage (inherent to cross-chain atomic swap protocol)
-- That a claim/refund is happening (input type reveals this)
+- Counterparty chain activity (ETH/SOL/BCH are public chains — their HTLCs are visible)
+- XMR pair: NEITHER side reveals swap activity (COMIT protocol, adaptor sigs on both chains)
+- Timing correlation (advanced analysis could correlate XFG tx timing with counterparty HTLC)
 
-**Implemented in:** `Blockchain.cpp` — pushTransaction, rebuildCache, popTransaction all maintain the shared pool.
+**Crypto components (~2000 LoC):**
+- Ed25519 adaptor signatures: create/verify adapted Schnorr sigs (~800 LoC)
+- DLEQ proofs: prove adaptor is well-formed without revealing secret (~400 LoC)
+- Musig2 key aggregation: joint public key from two parties (~300 LoC)
+- Swap state machine: replace HTLC flow with adaptor flow (~500 LoC)
+
+**`TransactionOutputHashLock` is NOT used for swaps.** The type remains in the codebase but is not activated. All swap operations produce normal `KeyOutput` transactions.
 
 ---
 
