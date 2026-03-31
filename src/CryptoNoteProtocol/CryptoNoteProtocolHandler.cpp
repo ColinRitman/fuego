@@ -11,6 +11,7 @@
 #include "CryptoNoteProtocolHandler.h"
 
 #include <future>
+#include <boost/scope_exit.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <System/Dispatcher.h>
 #include <boost/optional.hpp>
@@ -199,7 +200,7 @@ bool CryptoNoteProtocolHandler::process_payload_sync_data(const CORE_SYNC_DATA &
 
     logger(diff >= 0 ? (is_inital ? Logging::INFO : DEBUGGING) : Logging::TRACE)  << context << "Unknown top block: " << get_current_blockchain_height() << " -> " << hshd.current_height
                                                                                           << std::endl
-                                                                                          
+
                                                                                           << "Synchronization started";
 
     logger(DEBUGGING) << "Remote top block height: " << hshd.current_height << ", id: " << hshd.top_id;
@@ -517,13 +518,12 @@ int CryptoNoteProtocolHandler::handle_response_get_objects(int command, NOTIFY_R
       ++dismiss;
     }
 
+    BOOST_SCOPE_EXIT_ALL(this) { m_core.update_block_template_and_resume_mining(); };
+
     int result = processObjects(context, parsed_blocks);
     if (result != 0) {
       return result;
     }
-    
-    // Cleanup: update block template and resume mining
-    m_core.update_block_template_and_resume_mining();
   }
 
   m_core.get_blockchain_top(height, top);
@@ -685,17 +685,18 @@ bool CryptoNoteProtocolHandler::on_connection_synchronized()
 {
   bool val_expected = false;
   if (m_synchronized.compare_exchange_strong(val_expected, true)) {
+    std::string networkName = m_core.currency().isTestnet() ? "Fuego TESTNET" : "Fuego Network";
+    std::string walletName = m_core.currency().isTestnet() ? "test_wallet" : "fire_wallet";
     logger(Logging::INFO, Logging::BRIGHT_CYAN)
       << "**********************************************************************" << ENDL
-      << "You are synchronized with the Fuego network." << ENDL
-      << "fuego-wallet-cli is now at your service, m'lorde." << ENDL
-      << "Type \"help\" to see Fango daemon commands." << ENDL
+      << "You are synchronized with " << networkName << "." << ENDL
+      << walletName << " is at your service now, m'lorde." << ENDL
+      << "Type \"help\" to see available daemon commands." << ENDL
       << ENDL
-      << "Please note, the Fuego blockchain will only be saved after" << ENDL
+      << "Please note, " << networkName << " blockchain will only be saved after" << ENDL
       << "you quit the daemon with \"exit\" command" << ENDL
       << "Better yet use the \"save\" command." << ENDL
-      << "Otherwise, it may be necessary to re-sync.";
-      logger(Logging::INFO, Logging::BRIGHT_CYAN)
+      << "Otherwise, it may be necessary to re-sync." << ENDL
       << "**********************************************************************";
     m_core.on_synchronized();
 

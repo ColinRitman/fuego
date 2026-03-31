@@ -18,9 +18,10 @@
 #pragma once
 
 #ifndef __cplusplus
-#ifdef __clang__
-
+// C11 uses _Static_assert, provide static_assert macro for compatibility
+#if defined(__clang__) || defined(__GNUC__)
+#ifndef static_assert
 #define static_assert _Static_assert
-
+#endif
 #endif
 #endif

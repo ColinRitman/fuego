@@ -1,3 +1,4 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
 // Copyright (c) 2018-2019 The TurtleCoin developers
@@ -15,18 +16,18 @@
 #include <list>
 #include <boost/uuid/uuid.hpp>
 
-#include <System/Context.h>
-#include <System/ContextGroup.h>
-#include <System/Dispatcher.h>
-#include <System/Event.h>
-#include <System/Timer.h>
-#include <System/TcpConnection.h>
-#include <System/TcpListener.h>
+#include "../System/Context.h"
+#include "../System/ContextGroup.h"
+#include "../System/Dispatcher.h"
+#include "../System/Event.h"
+#include "../System/Timer.h"
+#include "../System/TcpConnection.h"
+#include "../System/TcpListener.h"
 
-#include "CryptoNoteCore/OnceInInterval.h"
-#include "CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
-#include "Common/CommandLine.h"
-#include "Logging/LoggerRef.h"
+#include "../CryptoNoteCore/OnceInInterval.h"
+#include "../CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
+#include "../Common/CommandLine.h"
+#include "../Logging/LoggerRef.h"
 
 #include "ConnectionContext.h"
 #include "LevinProtocol.h"
@@ -155,6 +156,7 @@ namespace CryptoNote
     int handle_handshake(int command, COMMAND_HANDSHAKE::request& arg, COMMAND_HANDSHAKE::response& rsp, P2pConnectionContext& context);
     int handle_timed_sync(int command, COMMAND_TIMED_SYNC::request& arg, COMMAND_TIMED_SYNC::response& rsp, P2pConnectionContext& context);
     int handle_ping(int command, COMMAND_PING::request& arg, COMMAND_PING::response& rsp, P2pConnectionContext& context);
+    int handle_elderfier_signature(int command, COMMAND_ELDERFIER_SIGNATURE::request& arg, COMMAND_ELDERFIER_SIGNATURE::response& rsp, P2pConnectionContext& context);
 
 #ifdef ALLOW_DEBUG_COMMANDS
     int handle_get_stat_info(int command, COMMAND_REQUEST_STAT_INFO::request& arg, COMMAND_REQUEST_STAT_INFO::response& rsp, P2pConnectionContext& context);

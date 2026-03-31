@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -20,7 +20,7 @@
 #include <string.h>
 #include <tuple>
 #include <boost/uuid/uuid.hpp>
-#include "Common/StringTools.h"
+#include "../Common/StringTools.h"
 
 namespace CryptoNote
 {
@@ -29,7 +29,7 @@ namespace CryptoNote
   typedef uint64_t PeerIdType;
 
 #pragma pack (push, 1)
-  
+
   struct NetworkAddress
   {
     uint32_t ip;
@@ -68,7 +68,7 @@ namespace CryptoNote
   }
 
   inline std::ostream& operator << (std::ostream& s, const NetworkAddress& na) {
-    return s << Common::ipAddressToString(na.ip) << ":" << std::to_string(na.port);   
+    return s << Common::ipAddressToString(na.ip) << ":" << std::to_string(na.port);
   }
 
   inline uint32_t hostToNetwork(uint32_t n) {

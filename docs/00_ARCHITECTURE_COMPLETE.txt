@@ -1,0 +1,280 @@
+================================================================================
+FUEGO PROJECT ARCHITECTURE DESIGN - PHASE 1 COMPLETE
+================================================================================
+
+DATE: January 26, 2026
+STATUS: 100% Design Complete - Ready for Implementation
+NEXT PHASE: Implementation (Ready to begin Week 1)
+
+================================================================================
+DESIGN DOCUMENTS CREATED (10 Total)
+================================================================================
+
+1. CURRENT_PROJECT_STATUS_AND_NEXT_STEPS.md
+   - Full project overview
+   - 4-week implementation timeline
+   - All architectural decisions finalized
+   - Questions answered
+
+2. DYNAMIGO_ELDERFIER_REGISTRATION_PHASE.md
+   - Dynamigo (elderfier registration phase) specification
+   - 0xEF deposit system design
+   - CLI commands and user flows
+   - Testing requirements
+
+3. DYNAMIGO_IMPLEMENTATION_SUMMARY.md
+   - What already exists (80% of infrastructure)
+   - What needs building (22-28 days effort)
+   - File inventory and existing code reuse
+   - Pre-launch verification checklist
+
+4. ELDERFIER_FUNCTION_CHECKLISTS.md
+   - Comprehensive implementation checklists
+   - MVP vs. Phase 2+ feature separation
+   - Code quality standards
+   - Pre-launch verification requirements
+
+5. ELDERFIER_REGISTRY_AND_SUBMISSION_DESIGN.md
+   - FuegoCommitmentMerkleVerifier.sol specification
+   - Hybrid event-driven + periodic submission frequency
+   - Pre-launch elderfier onboarding timeline
+   - Attestation package format design
+
+6. ELDERFIER_FEE_STRUCTURE.md
+   - Complete fee system design
+   - Separation of Elderfiers from COLDAO (independent systems)
+   - Fee extraction on blockchain
+   - Fee distribution to elderfiers (100% to EF, 0% to miners)
+
+7. ELDERFIER_PRIVACY_AND_ALIASES.md
+   - User-initiated unlock window (indefinite staking)
+   - Privacy options analysis (hashed alias recommended for MVP)
+   - 8-character alias system (FIRENODE, XFG4LIFE, etc.)
+   - Network-wide alias analysis (defer to Phase 2)
+
+8. FUEGO_CHAIN_ALIAS_SYSTEM.md
+   - Aliases stored directly on Fuego blockchain
+   - 0xEA transaction tag design
+   - RPC endpoints for alias lookups
+   - 21-hour implementation effort (2-3 days)
+
+9. ZK_STARK_ALIAS_FEASIBILITY.md
+   - Analysis of using xfg-stark for zk-proof aliases
+   - Recommendation: Use circom (not xfg-stark) for Phase 2 zk-proofs
+   - Why xfg-stark is wrong tool (1000x larger proofs, too expensive)
+   - Alternative: Defer zk-proofs to Phase 2+ (don't delay MVP)
+
+10. ZK_STARK_NETWORK_EVOLUTION_ROADMAP.md
+    - Complete evolution path: Hashing → ZK-STARKs → Network-wide
+    - Phase 1: Simple hashing model (2-3 days, MVP)
+    - Phase 2: Optional zk-STARKs for elderfiers (7 weeks post-MVP)
+    - Phase 3+: Network-wide optimized zk-STARKs (future)
+    - How to evolve xfg-stark over time
+
+11. DESIGN_PHASE_COMPLETE.md
+    - Summary of all design decisions
+    - Ready-to-build checklist
+    - 4-week timeline confirmed
+    - Risk assessment (Low)
+
+================================================================================
+KEY ARCHITECTURAL DECISIONS (FINAL)
+================================================================================
+
+✅ ELDERFIERS VS. COLDAO: Completely Independent
+   - Elderfiers control HEAT/COLD burn/deposit fees
+   - COLDAO controls interest rates
+   - No overlap, separate treasuries
+   - 100% of fees to elderfiers, 0% to miners
+
+✅ SUBMISSION FREQUENCY: Hybrid Event-Driven + Periodic Aging
+   - Submit when root changes (immediate)
+   - Resubmit when aged > 600 blocks (~5 minutes)
+   - Daily cost: ~$5-15 USD
+   - User experience: Claim window guaranteed within 5 minutes
+
+✅ PRIVACY MODEL FOR ELDERFIERS: Hashed Alias (MVP)
+   - Public alias: FIRENODE (8 chars, human-readable)
+   - Hashed address: 0x1f3e5d7c (keccak256, semi-public)
+   - Real address: Private (owner-only access)
+   - Privacy rating: 3/5 (good enough for MVP)
+   - Future upgrade: ZK-STARKs via circom (Phase 2+)
+
+✅ UNLOCK WINDOW: User-Initiated with 8-Day Countdown
+   - Phase 1 (Staking): Indefinite, no countdown
+   - Phase 2 (Request): User initiates unstaking
+   - Phase 3 (Countdown): 8-day clock starts
+   - Privacy benefit: No automatic timestamp reveals
+
+✅ ALIASES ON FUEGO CHAIN: Native Support
+   - 0xEA transaction tag for alias registration
+   - Stored directly on Fuego blockchain
+   - RPC endpoints for lookups
+   - 21 hours to implement (2-3 days)
+   - Effort: Minimal, can do during Dynamigo
+
+✅ ZK-STARK FOR ALIASES: Defer to Phase 2
+   - Use circom + snarkjs (NOT xfg-stark)
+   - xfg-stark produces 1000x larger proofs (not suitable)
+   - Phase 2 implementation: 2-3 weeks post-MVP
+   - Optional layer, not required for launch
+
+================================================================================
+IMPLEMENTATION TIMELINE (4 WEEKS)
+================================================================================
+
+Week 1: Dynamigo Core
+  □ Days 1-2: Add unstaking fields to ElderfierDepositData
+  □ Days 3-4: Fee tracking system + RPC endpoints
+  □ Day 5: CLI create command + basic testing
+
+Week 2: Dynamigo + MVP Start
+  □ Days 1-2: ElderfiersPrivacyRegistry.sol + alias system
+  □ Days 3-4: CLI status/unstake/claim commands
+  □ Day 5: Start relay daemon (parallel work)
+
+Week 3: MVP Implementation
+  □ Days 1-2: Relay daemon (signatures, aggregation, submission)
+  □ Days 3-4: React frontend scaffold + wallet integration
+  □ Day 5: Block header relay reorg fix
+
+Week 4: Integration & Testing
+  □ Days 1-2: End-to-end testing (full flows)
+  □ Days 3-4: Testnet contract deployment
+  □ Day 5: Launch preparation
+
+Dynamigo Launch: End of Week 2
+MVP Launch: End of Week 4
+
+================================================================================
+WHAT ALREADY EXISTS (80% COMPLETE)
+================================================================================
+
+✅ Elderfier deposit data (EldernodeIndexTypes.h:181-217)
+✅ Deposit management (IEldernodeIndexManager)
+✅ 8-character names (ElderfierServiceId)
+✅ Security windows (ElderfierMonitoringConfig)
+✅ Selection multipliers (1x-16x based on uptime)
+✅ Slashing system (BURN only - correct design)
+✅ Elder Council voting (ElderCouncilVote, Messages)
+✅ Registry (ENindex - EldernodeIndexManager)
+
+Total effort remaining: ~22-28 days for complete Dynamigo
+
+================================================================================
+CODE QUALITY STANDARDS (NON-NEGOTIABLE)
+================================================================================
+
+Security:
+  ✅ CSPRNG for secrets (libsodium)
+  ✅ No hardcoded values
+  ✅ Input validation on all boundaries
+  ✅ Overflow/underflow protection
+  ✅ Mutex protection (concurrency)
+  ✅ No private key logging
+
+Readability:
+  ✅ Clear variable names (no single letters)
+  ✅ Function comments (purpose, params, return)
+  ✅ Comments explain WHY, not WHAT
+  ✅ Maximum 100-character lines
+  ✅ Maximum 50-line functions
+
+Testing:
+  ✅ > 80% unit test coverage
+  ✅ Edge cases tested
+  ✅ Integration tests (full flows)
+  ✅ Testnet validation
+  ✅ Stress tests (10k deposits)
+
+================================================================================
+CRITICAL SUCCESS FACTORS
+================================================================================
+
+For Dynamigo:
+  □ 5+ users register with 1600-3200 XFG stakes
+  □ All aliases unique and working
+  □ User-initiated unstaking functions correctly
+  □ Fee tracking accurate
+  □ Zero security issues
+  □ Testnet registration smooth
+
+For MVP:
+  □ Elderfiers operational on mainnet Day 1
+  □ Root submission working reliably
+  □ Users can claim HEAT/COLD tokens
+  □ Merkle proofs verify correctly
+  □ Block header relay handles reorgs
+  □ Gas costs acceptable
+
+================================================================================
+RISK ASSESSMENT: LOW
+================================================================================
+
+Why Low Risk:
+  ✅ 80% of infrastructure already built
+  ✅ All architecture decisions finalized
+  ✅ Detailed specifications complete
+  ✅ Existing codebase leveraged
+  ✅ Clear implementation path
+  ✅ Test strategies defined
+
+Potential Issues Mitigated:
+  ✅ Alias collisions: First-come-first-served
+  ✅ Double-unstaking: Flag-based tracking
+  ✅ Fee calculation: SafeMath + unit tests
+  ✅ Privacy leaks: Never correlate hash with tx hash
+  ✅ Reorg handling: Verify blocks still valid
+
+================================================================================
+NEXT ACTIONS
+================================================================================
+
+1. Review all 10 design documents with team
+2. Assign Week 1 tasks:
+   - C++ developer: ElderfierDepositData + fee tracking
+   - Solidity developer: ElderfiersPrivacyRegistry.sol
+   - CLI developer: xfg-stark-cli elderfier-stake commands
+3. Set up git branches for parallel work
+4. Begin implementation immediately
+
+================================================================================
+QUESTIONS ANSWERED (ALL RESOLVED)
+================================================================================
+
+✅ How often does relay submit?
+   → Hybrid: event-driven (change) + periodic (aging)
+
+✅ Elderfiers with COLDAO?
+   → Completely independent, no overlap
+
+✅ Fee distribution?
+   → 100% to elderfiers, 0% to miners
+
+✅ Unlock window behavior?
+   → User-initiated request, 8-day countdown after
+
+✅ Privacy options for aliases?
+   → Hashed alias (MVP), zk-proofs (Phase 2+)
+
+✅ Network-wide aliases?
+   → Defer to Phase 2 (too much work for MVP)
+
+✅ Can we use xfg-stark for zk?
+   → No, use circom later (xfg-stark wrong tool)
+
+✅ What infrastructure exists?
+   → 80% already built, just need 20% implementation
+
+================================================================================
+SUMMARY
+================================================================================
+
+Phase 1 (Architecture): 100% Complete ✅
+Phase 2 (Implementation): Ready to Start ✅
+Timeline: 4 weeks to MVP launch ✅
+Risk Level: Low ✅
+
+Let's build it! 🚀
+
+================================================================================

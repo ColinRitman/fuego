@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -22,9 +22,9 @@
 #include <vector>
 #include <boost/variant.hpp>
 
-#include <CryptoNote.h>
+#include "../../include/CryptoNote.h"
 #include "ProofStructures.h"
-#include "../include/EldernodeIndexTypes.h"
+#include "../../include/EldernodeIndexTypes.h"
 
 #define TX_EXTRA_PADDING_MAX_COUNT          255
 #define TX_EXTRA_NONCE_MAX_COUNT            255
@@ -42,8 +42,10 @@
 // 0x_8 tags: Burn-related deposit types
 #define TX_EXTRA_HEAT_COMMITMENT            0x08  // Heat commitment (burn)
 #define TX_EXTRA_BURN_RECEIPT               0x18  // Burn transaction receipt
-#define TX_EXTRA_ELDERFIER_DEPOSIT          0xE8  // Elderfier staking (moved from 0x06)
-#define TX_EXTRA_DIGM_MINT                  0xA8  // DIGM coin mint by burn (Split 3 ways dev, digm treasury, burn)
+#define TX_EXTRA_DIGM_MINT                  0xA8  // DIGM coin mint (33% BURN / digm treasury 33% \ devs 33%)
+
+// 0xEF tag: Elderfier staking
+#define TX_EXTRA_ELDERFIER_DEPOSIT          0xEF  // Elderfier staking deposit (no banking fee)
 
 // 0x_A tags: DIGM Artist related meta/msgs/txns
 #define TX_EXTRA_DIGM_ALBUM                 0x0A  // Album metadata
@@ -57,112 +59,25 @@
 #define TX_EXTRA_DIGM_CURATOR               0x0C  // Curator operations
 #define TX_EXTRA_DIGM_CURATOR_COIN          0x1C  // CURA coin operations
 
-// 0xCD tags: COLD (CD) yield deposits
-#define TX_EXTRA_CD_DEPOSIT_SECRET          0xCD  // COLD yield deposits
-
-/*
- * COLD DEPOSIT (CD) YIELD SYSTEM
- * ===============================
- *
- * Fixed term deposit options with guaranteed APR rates:
- *
- * Term Code | Term Length | APR Rate | Days | Basis Points
- * ----------|-------------|----------|------|-------------
- *    1      |   3 months  |   8%     |  90  |    800
- *    2      |   9 months  |  18%     | 270  |   1800
- *    3      |   1 year    |  21%     | 365  |   2100
- *    4      |   3 years   |  33%     | 1095 |   3300
- *    5      |   5 years   |  80%     | 1825 |   8000
- *
- * Deposits are locked for the full term and earn interest off-chain.
- * Staged withdrawal may be permitted - funds remain locked until maturity.
- *
- * Usage Example:
- *   createTxExtraWithCDDepositSecret(secret_key, amount, CD_APR_21PCT, CD_TERM_1YR_21PCT, chain_code, metadata, extra);
- */
-
-// 0x_E tags: Elderfier system (consensus/messaging)
-#define TX_EXTRA_ELDERFIER_MESSAGE          0xEF  // Elderfier messaging/consensus
-
-// 0x_F tags: Encrypted P2P Media Messages (ephemeral content)
-#define TX_EXTRA_ENCRYPTED_MEDIA_MESSAGE    0xF0  // Encrypted media message with TTL
-#define TX_EXTRA_MEDIA_ATTACHMENT           0xF1  // Media attachment chunk
-#define TX_EXTRA_MEDIA_TRANSFER_REQUEST     0xF2  // Request for media transfer
-#define TX_EXTRA_MEDIA_TRANSFER_RESPONSE    0xF3  // Response to media transfer
-
-/*
- * ============================================================================
- * ENCRYPTED P2P MEDIA MESSAGING SYSTEM - DESIGN OVERVIEW
- * ============================================================================
- *
- * This system enables encrypted, ephemeral media sharing in the Fuego blockchain
- * with automatic content cleanup to prevent permanent storage on nodes.
- *
- * KEY FEATURES:
- * - End-to-end encryption using ECDH + AES-256-GCM
- * - Configurable TTL (Time To Live) with automatic cleanup
- * - Support for video, audio, images, documents (up to 100MB)
- * - Chunked transfer for large files
- * - Transfer request/response protocol
- * - Cryptographic signatures for authenticity
- *
- * ARCHITECTURE:
- *
- * 1. ENCRYPTED MEDIA MESSAGE (0xF0):
- *    - Contains encrypted media data or reference
- *    - Includes TTL for automatic cleanup
- *    - Signed by sender for authenticity
- *    - Can be inline (<64KB) or chunked (>64KB)
- *
- * 2. MEDIA ATTACHMENT (0xF1):
- *    - Individual chunks for large files
- *    - SHA3-256 integrity verification
- *    - Reference to parent message
- *
- * 3. TRANSFER REQUEST/RESPONSE (0xF2/0xF3):
- *    - Request media from other nodes
- *    - Response with availability status
- *    - Signed for authenticity
- *
- * USAGE WORKFLOW:
- *
- * 1. Sender encrypts media with recipient's public key
- * 2. Creates TX_EXTRA_ENCRYPTED_MEDIA_MESSAGE transaction
- * 3. If media > 64KB, creates additional TX_EXTRA_MEDIA_ATTACHMENT chunks
- * 4. Recipient receives and decrypts using private key
- * 5. After TTL expires, nodes automatically delete content
- *
- * TRANSFER PROTOCOL:
- *
- * 1. Node A sends TRANSFER_REQUEST for media hash
- * 2. Node B responds with TRANSFER_RESPONSE (accepted/rejected)
- * 3. If accepted, Node B sends media via new transaction(s)
- * 4. Node A receives and validates media integrity
- *
- * SECURITY:
- * - ECDH key exchange for symmetric encryption
- * - AES-256-GCM authenticated encryption
- * - SHA3-256 content hashing
- * - Ed25519 digital signatures
- * - TTL enforcement prevents permanent storage
- *
- * EXAMPLE USAGE:
- *
- * // Create encrypted video message
- * std::vector<uint8_t> videoData = loadVideoFile("myvideo.mp4");
- * std::vector<uint8_t> extra;
- *
- * bool success = createTxExtraWithEncryptedMediaMessage(
- *     senderPublicKey, recipientPublicKey, 86400, // 24 hour TTL
- *     MEDIA_TYPE_VIDEO, videoData, recipientAddress, senderKeys, extra
- * );
- *
- * ============================================================================
- */
+// 0xCD tag: COLD (CD) deposits
+#define TX_EXTRA_COLD_COMMITMENT            0xCD  // COLD CD deposits
+// 0x69 tag: Receipts for both COLD & YIELD
+#define TX_EXTRA_COLD_RECEIPT               0x69  // All Deposits receipt
 
 // 0x07 FUEGO MOB Custom Interest Assets   Check full compatibility -
 #define TX_EXTRA_YIELD_COMMITMENT           0x07  //  yield commitment
-#define TX_EXTRA_DEPOSIT_RECEIPT            0x17  // Deposit receipt
+
+// 0x_C tags: Elderfier system (consensus/messaging)
+#define TX_EXTRA_ELDERFIER_MESSAGE          0xEC  // Elderfier messaging/consensus
+
+// 0xEA tag: @ Alias registration (on-chain)
+#define TX_EXTRA_ELDERFIER_ALIAS            0xEA  // @ alias registration for Elderfiers and users
+
+// 0xCE tag: COLD migration (register v3 commitment for a pre-v3 legacy deposit)
+#define TX_EXTRA_COLD_MIGRATION             0xCE
+
+// 0xD5 tag: Encrypted deposit secret (for COLD withdrawal_commitment_output recovery from seed)
+#define TX_EXTRA_DEPOSIT_SECRET             0xD5
 
 #define TX_EXTRA_NONCE_PAYMENT_ID           0x00
 
@@ -209,19 +124,23 @@ struct TransactionExtraHeatCommitment {
 };
 
 struct TransactionExtraYieldCommitment {
-  Crypto::Hash commitment;
-  uint64_t amount;
-  uint32_t term_months;
-  std::string yield_scheme;
+  Crypto::Hash commitment;       // 🔒 SECURE: Only commitment hash on blockchain
+  uint64_t amount;               // Principal amount in XFG
+  uint32_t term;                 // Deposit term in blocks
   std::vector<uint8_t> metadata;
+  uint8_t claimChainCode;        // Claim chain (1=ETH, 2=SOL, 3=C0DL)
+  std::string CIAId;             // Crypto Interest Asset ID (hash of token/asset)
+  std::vector<uint8_t> gift_secret;        // Secret key encrypted with recipient's view key
+                                            // Only used for gifted deposits, otherwise dummy data with pattern
+
 
   bool serialize(ISerializer& serializer);
 };
 
 struct TransactionExtraElderfierDeposit {
-  Crypto::Hash depositHash;         // Unique deposit identifier
+  Crypto::Hash depositHash;         // Unique deposit identifier (H(ephemeralPubKey))
   uint64_t depositAmount;           // XFG amount (minimum 800 XFG)
-  std::string elderfierAddress;     // Elderfier node address
+  Crypto::Hash elderfierCommitment; // 🔒 SECURE: H(spendPublicKey || ephemeralPublicKey) — one-way commitment
   uint32_t securityWindow;          // Security window in seconds (8 hours = 28800)
   std::vector<uint8_t> metadata;   // Additional metadata
   std::vector<uint8_t> signature;   // Deposit signature
@@ -244,7 +163,7 @@ struct TransactionExtraElderfierMessage {
   bool consensusRequired;              // Whether this message requires consensus validation
   ElderfierConsensusType consensusType; // Type of consensus required (QUORUM, PROOF, WITNESS)
   uint32_t requiredThreshold;          // Threshold required (e.g., 80 for quorum)
-  Crypto::Hash targetDepositHash;      // Target 0xE8 deposit hash (for slashing messages)
+  Crypto::Hash targetDepositHash;      // Target 0xEF deposit hash (for slashing messages)
 
   bool serialize(ISerializer& serializer);
   bool isValid() const;
@@ -252,77 +171,135 @@ struct TransactionExtraElderfierMessage {
   std::string toString() const;
 };
 
+// @ Alias registration structure (0xEA)
+struct TransactionExtraAliasRegistration {
+  uint8_t version = 1;             // Schema version
+  std::string alias;               // Exactly 8 chars: [A-Z0-9] for EFiers, [a-z0-9] for regular users
+  Crypto::Hash aliasHash;          // cn_fast_hash(alias) for fast lookup
+  Crypto::Hash addressHash;        // cn_fast_hash(address) for privacy
+  std::string ownerAddress;        // Full wallet address (optional: can be empty for privacy)
+  uint8_t aliasType = 0;           // 0 = Elderfier (ALLCAPS [A-Z0-9]), 1 = Regular user (lowercase [a-z0-9])
+
+  bool serialize(ISerializer& serializer);
+  bool isValid() const;
+};
+
 // DIGM transaction extra structures will be implemented later
 // Reserved tags: 0x0A (Album), 0x0B (Listen Rights), 0x0C (Curator), 0x1C (CURA Coin), 0xA8 (DIGM Mint)
 
-struct TransactionExtraCDDepositSecret {
-  std::vector<uint8_t> secret_key;  // 32-byte deposit secret key
-  uint64_t xfg_amount;              // XFG amount for CD conversion
-  uint32_t apr_basis_points;        // APR in basis points (800=8%, 1800=18%, etc.)
-  uint8_t term_code;                // CD term code (1=3mo/8%, 2=9mo/18%, 3=1yr/21%, 4=3yr/33%, 5=5yr/80%)
-  uint8_t chain_code;               // Chain code (1=testnet, 2=mainnet)
-  std::vector<uint8_t> metadata;    // Additional metadata
+// COLD commitment structure - mirrors HEAT but includes term in commitment preimage
+struct TransactionExtraColdCommitment {
+  Crypto::Hash commitment;       // 🔒 SECURE: keccak256(secret+amount+tx_hash+recipient+network+chain+version+term)
+  uint64_t amount;               // Principal amount in atomic units
+  uint32_t term;                 // Deposit term in blocks (differentiates from HEAT which is FOREVER)
+  std::vector<uint8_t> metadata; // Chain info, EVM address encoded
+  uint8_t claimChainCode;        // Claim chain (1=ETH, 2=ARB, 3=SOL, etc.)
+  std::vector<uint8_t> gift_secret;  // Secret key encrypted with recipient's view key
+                                     // Only used for gifted deposits, empty if not gifting
 
   bool serialize(ISerializer& serializer);
 };
 
-// Encrypted P2P Media Message structures
-struct TransactionExtraEncryptedMediaMessage {
-  Crypto::PublicKey senderKey;        // Sender's public key
-  Crypto::PublicKey recipientKey;     // Recipient's public key
-  uint64_t timestamp;                 // Message creation timestamp
-  uint64_t ttl;                       // Time to live in seconds from timestamp
-  uint32_t mediaType;                 // 0=text, 1=image, 2=video, 3=audio, 4=document, etc.
-  std::string mediaHash;              // SHA3-256 hash of original media content
-  uint64_t mediaSize;                 // Size of media content in bytes
-  std::vector<uint8_t> encryptedContent; // AES-256-GCM encrypted media data
-  std::vector<uint8_t> encryptionNonce;   // 12-byte nonce for AES-GCM
-  std::vector<uint8_t> encryptionKey;     // ECDH-derived key (encrypted with recipient's pubkey)
-  std::vector<uint8_t> signature;         // Ed25519 signature of the entire message
+// Legacy alias for backward compatibility
+using TransactionExtraCDDepositSecret = TransactionExtraColdCommitment;
 
-  bool encrypt(const std::vector<uint8_t>& mediaData, const AccountPublicAddress& recipient, const KeyPair& senderKeys);
-  bool decrypt(std::vector<uint8_t>& mediaData, const Crypto::SecretKey& recipientPrivateKey) const;
-  bool verifySignature() const;
-  bool isExpired(uint64_t currentTime) const;
-  std::string getMediaTypeString() const;
-  bool isValid() const;
+// COLD migration: register a v3 commitment for a pre-v3 legacy deposit.
+// Attached to a regular self-transfer (no deposit output needed).
+// Blockchain validates that originalTxHash is a real deposit with matching amount/term.
+struct TransactionExtraColdMigration {
+  Crypto::Hash originalTxHash;    // 32 bytes: tx hash of the original pre-v3 deposit
+  Crypto::Hash commitment;        // 32 bytes: v3 commitment (keccak256 of preimage)
+  uint64_t amount;                // 8 bytes: original deposit amount (must match)
+  uint32_t term;                  // 4 bytes: original deposit term (must match)
+  uint8_t claimChainCode;         // 1 byte: claim chain (1=ETH, 2=ARB, etc.)
+
+  bool serialize(ISerializer& serializer);
 };
 
-struct TransactionExtraMediaAttachment {
-  Crypto::Hash messageId;     // Reference to the main media message
-  uint32_t chunkIndex;        // Index of this chunk (0-based)
-  uint32_t totalChunks;       // Total number of chunks
-  std::vector<uint8_t> chunkData;  // Encrypted chunk data
-  Crypto::Hash chunkHash;     // SHA3-256 of chunkData for integrity
+// ============================================================
+// Fuego Ring-Signature Commitment Key Derivation
+// ============================================================
 
-  bool isValid() const;
-  bool verifyIntegrity() const;
+// Keys derived from a 32-byte depositSecret for commitment outputs.
+// All values are deterministic from depositSecret — nothing extra needs storing.
+//
+//   commitKey  = H("fuego_commit_key"  || depositSecret) * G  — on-chain spend key
+//   keyScalar  = the scalar for commitKey                      — spend secret
+//   keyImage   = H_p(commitKey) * keyScalar                   — double-spend nullifier
+//   amountMask = H("fuego_amount_mask" || depositSecret) mod l — Pedersen blinding factor for amountCommitment
+struct DepositCommitmentKeys {
+  Crypto::PublicKey           commitKey;
+  Crypto::SecretKey           keyScalar;
+  Crypto::KeyImage            keyImage;
+  Crypto::EllipticCurveScalar amountMask; // blinding factor for amountCommitment
 };
 
-struct TransactionExtraMediaTransferRequest {
-  Crypto::Hash mediaHash;          // Hash of the media content requested
-  Crypto::PublicKey requesterKey;  // Public key of requester
-  uint64_t timestamp;              // Request timestamp
-  uint32_t priority;               // Transfer priority (0=low, 1=normal, 2=high, 3=critical)
-  std::vector<uint8_t> signature;  // Signature by requester
+// Derive all commitment keys from a 32-byte deposit secret.
+// For HEAT burns: caller discards keyScalar (permanently non-spendable).
+// For COLD/EFier: store depositSecret encrypted in tx_extra (TX_EXTRA_DEPOSIT_SECRET).
+// The masks let the wallet compute + verify amountCommitment and termCommitment.
+DepositCommitmentKeys deriveCommitmentKeys(const std::array<uint8_t, 32>& depositSecret);
 
-  bool isValid() const;
-  bool verifySignature() const;
+// ============================================================
+// Unified Deposit Secret for v10+ Commitment Outputs (0xD5)
+// ============================================================
+// All v10+ deposit types (COLD, HEAT, EFier, Yield) write a SINGLE 0xD5 tag.
+// The deposit type is encoded inside the encrypted payload — no type-revealing
+// tag appears on-chain. Old tags (0x08, 0xCD, 0xEF) remain for legacy multisig
+// deposits only.
+
+enum class DepositType : uint8_t {
+  COLD      = 0x01,  // COLD CD deposit — withdrawable after term
+  HEAT      = 0x02,  // HEAT burn — permanent, key discarded
+  ELDERFIER = 0x03,  // Elderfier stake — review window on unstake
+  YIELD     = 0x04,  // Yield / CIA deposit
 };
 
-struct TransactionExtraMediaTransferResponse {
-  Crypto::Hash mediaHash;          // Hash of the media content
-  Crypto::PublicKey responderKey;  // Public key of responder
-  uint64_t timestamp;              // Response timestamp
-  uint32_t responseCode;           // 0=accepted, 1=rejected, 2=not_found, 3=rate_limited
-  std::string responseMessage;     // Optional response message
-  std::vector<uint8_t> signature;  // Signature by responder
+// Fixed-size plaintext payload encrypted under the wallet's view key.
+// 46 bytes total, encrypted with chacha8.
+#pragma pack(push, 1)
+struct DepositSecretPayload {
+  uint8_t  depositType;        // DepositType enum (type-erased for on-chain privacy)
+  uint64_t amount;             // deposit amount in atomic units (wallet display)
+  uint32_t term;               // lock term in blocks (wallet display)
+  uint8_t  depositSecret[32];  // random 32-byte secret (source of all derived keys)
+};
+#pragma pack(pop)
+static_assert(sizeof(DepositSecretPayload) == 45, "DepositSecretPayload size mismatch");
 
-  bool isValid() const;
-  bool verifySignature() const;
+// On-chain representation: ephemeral pubkey (32) + encrypted payload (45) = 77 bytes.
+// Node stores without decrypting; only the owning wallet can read.
+struct TransactionExtraDepositSecret {
+  Crypto::PublicKey ephPubKey;            // one-time key for ECDH
+  std::vector<uint8_t> encryptedPayload; // exactly 45 bytes (sizeof DepositSecretPayload)
 };
 
-typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraCDDepositSecret, CryptoNote::TransactionExtraEncryptedMediaMessage, CryptoNote::TransactionExtraMediaAttachment, CryptoNote::TransactionExtraMediaTransferRequest, CryptoNote::TransactionExtraMediaTransferResponse, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;
+// Encrypt a DepositSecretPayload for the wallet owner.
+// Generates an ephemeral keypair internally — no tx secret key needed.
+// Encryption: chacha8(key=ECDH(recipientViewPub, ephSecKey), iv=ephPubKey[0:8])
+bool encryptDepositSecret(const DepositSecretPayload& plaintext,
+                          const Crypto::PublicKey& recipientViewPubKey,
+                          TransactionExtraDepositSecret& out);
+
+// Decrypt a TransactionExtraDepositSecret using the wallet's view key.
+// Uses the embedded ephPubKey for ECDH — no tx pubkey needed.
+bool decryptDepositSecret(const TransactionExtraDepositSecret& encrypted,
+                          const Crypto::SecretKey& walletViewSecKey,
+                          DepositSecretPayload& out);
+
+// Write a TransactionExtraDepositSecret into tx_extra bytes (tag 0xD5 + len + ciphertext).
+bool addDepositSecretToExtra(std::vector<uint8_t>& tx_extra,
+                             const TransactionExtraDepositSecret& secret);
+
+// Find and return the first 0xD5 record from tx_extra bytes (encrypted, not decrypted).
+bool getDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra,
+                               TransactionExtraDepositSecret& out);
+
+bool addColdMigrationToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraColdMigration& migration);
+
+
+typedef boost::variant<CryptoNote::TransactionExtraPadding, CryptoNote::TransactionExtraPublicKey, CryptoNote::TransactionExtraNonce, CryptoNote::TransactionExtraMergeMiningTag, CryptoNote::tx_extra_message, CryptoNote::TransactionExtraTTL, CryptoNote::TransactionExtraElderfierDeposit, CryptoNote::TransactionExtraElderfierMessage, CryptoNote::TransactionExtraAliasRegistration, CryptoNote::TransactionExtraHeatCommitment, CryptoNote::TransactionExtraYieldCommitment, CryptoNote::TransactionExtraColdCommitment, CryptoNote::TransactionExtraColdMigration, CryptoNote::TransactionExtraBurnReceipt, CryptoNote::TransactionExtraDepositReceipt> TransactionExtraField;
+
 
 
 template<typename T>
@@ -362,12 +339,12 @@ bool addHeatCommitmentToExtra(std::vector<uint8_t>& tx_extra, const TransactionE
 bool getHeatCommitmentFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraHeatCommitment& commitment);
 
 // Yield commitment helper functions
-bool createTxExtraWithYieldCommitment(const Crypto::Hash& commitment, uint64_t amount, uint32_t term_months, const std::string& yield_scheme, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
+bool createTxExtraWithYieldCommitment(const Crypto::Hash& commitment, uint64_t amount, uint32_t term, const std::string& CIAId, const std::vector<uint8_t>& metadata, uint8_t claimChainCode, const std::vector<uint8_t>& gift_secret, std::vector<uint8_t>& extra);
 bool addYieldCommitmentToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraYieldCommitment& commitment);
 bool getYieldCommitmentFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraYieldCommitment& commitment);
 
 // Elderfier Deposit helper functions (contingency-based)
-bool createTxExtraWithElderfierDeposit(const Crypto::Hash& depositHash, uint64_t depositAmount, const std::string& elderfierAddress, uint32_t securityWindow, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
+bool createTxExtraWithElderfierDeposit(const Crypto::Hash& depositHash, uint64_t depositAmount, const Crypto::Hash& elderfierCommitment, uint32_t securityWindow, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
 bool addElderfierDepositToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraElderfierDeposit& deposit);
 bool getElderfierDepositFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraElderfierDeposit& deposit);
 
@@ -381,126 +358,121 @@ bool createElderfierQuorumMessage(const Crypto::PublicKey& senderKey, const Cryp
 bool createElderfierProofMessage(const Crypto::PublicKey& senderKey, const Crypto::PublicKey& recipientKey, uint32_t messageType, const std::vector<uint8_t>& messageData, uint64_t timestamp, TransactionExtraElderfierMessage& message);
 bool createElderfierWitnessMessage(const Crypto::PublicKey& senderKey, const Crypto::PublicKey& recipientKey, uint32_t messageType, const std::vector<uint8_t>& messageData, uint64_t timestamp, TransactionExtraElderfierMessage& message);
 
+// @ Alias registration helper functions
+bool addAliasToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraAliasRegistration& alias);
+bool getAliasFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraAliasRegistration& alias);
+
 // DIGM helper functions will be implemented later
 
-// CD Deposit Secret helper functions
-bool createTxExtraWithCDDepositSecret(const std::vector<uint8_t>& secret_key, uint64_t xfg_amount, uint32_t apr_basis_points, uint8_t term_code, uint8_t chain_code, const std::vector<uint8_t>& metadata, std::vector<uint8_t>& extra);
-bool addCDDepositSecretToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraCDDepositSecret& deposit_secret);
-bool getCDDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraCDDepositSecret& deposit_secret);
+// COLD Commitment helper functions (unified with HEAT style)
+bool createTxExtraWithColdCommitment(const Crypto::Hash& commitment, uint64_t amount, uint32_t term,
+                                      uint8_t claimChainCode, const std::vector<uint8_t>& metadata,
+                                      const std::vector<uint8_t>& gift_secret, std::vector<uint8_t>& extra);
+bool addColdCommitmentToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraColdCommitment& commitment);
+bool getColdCommitmentFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraColdCommitment& commitment);
 
-// CD Deposit validation and utility functions
-bool validateCDTermAndAPR(uint8_t term_code, uint32_t apr_basis_points);
-uint64_t getCDTermDays(uint8_t term_code);
-double getCDAPRPercent(uint8_t term_code);
+// Legacy aliases for backward compatibility
+inline bool addCDDepositSecretToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraColdCommitment& c) {
+  return addColdCommitmentToExtra(tx_extra, c);
+}
+inline bool getCDDepositSecretFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraColdCommitment& c) {
+  return getColdCommitmentFromExtra(tx_extra, c);
+}
 
-// Helper APIs for wallet integration
-// Computes Keccak256(address || "recipient") into out_hash
-bool computeHeatRecipientHash(const std::string& eth_address, Crypto::Hash& out_hash);
-// Computes Keccak256(secret || le64(amount) || tx_prefix_hash || recipient_hash || network_id || target_chain_id || version)
+// Secret encryption helper functions
+bool encryptSecretWithViewKey(const std::vector<uint8_t>& secret, const Crypto::PublicKey& recipientViewKey, std::vector<uint8_t>& gift_secret);
+bool decryptSecretWithViewKey(const std::vector<uint8_t>& gift_secret, const Crypto::SecretKey& viewSecretKey, std::vector<uint8_t>& secret);
+
+// Helper functions for handling gift_secret field
+bool isDummyGiftSecret(const std::vector<uint8_t>& gift_secret);
+std::vector<uint8_t> createDummyGiftSecret();
+
+// COLD Deposit validation and utility functions
+// Note: APR is now derived from tier in smart contract, not stored on-chain
+uint64_t getColdTermBlocks(uint8_t term_code);
+uint64_t getColdTermDays(uint8_t term_code);
+
+// ---------------- UNIFIED COMMITMENT FORMAT ----------------
+// Both HEAT and COLD use the SAME 88-byte preimage:
+//   keccak256(secret || le64(amount) || tx_prefix_hash || network_id || target_chain_id || version || le32(term))
+//
+// HEAT burns use term = DEPOSIT_TERM_FOREVER (0xFFFFFFFF)
+// COLD deposits use their actual term in blocks
+//
+// PRIVACY MODEL: No recipient in commitment - contract mints to msg.sender, nullifier prevents replay
+
+// Unified commitment computation for BOTH HEAT and COLD
+// Uses 88-byte preimage: 32 + 8 + 32 + 4 + 4 + 4 + 4 = 88 bytes
+// For HEAT: pass term = parameters::DEPOSIT_TERM_FOREVER (0xFFFFFFFF)
+// For COLD: pass actual term in blocks
+Crypto::Hash computeCommitment(const std::array<uint8_t, 32>& secret,
+                               uint64_t amount_atomic,
+                               const Crypto::Hash& tx_prefix_hash,
+                               uint32_t network_id,
+                               uint32_t target_chain_id,
+                               uint32_t commitment_version,
+                               uint32_t term);
+
+// HEAT convenience wrapper - uses DEPOSIT_TERM_FOREVER for term
+// Computes: keccak256(secret || amount || tx_hash || network || chain || version || 0xFFFFFFFF)
 Crypto::Hash computeHeatCommitment(const std::array<uint8_t, 32>& secret,
                                    uint64_t amount_atomic,
                                    const Crypto::Hash& tx_prefix_hash,
-                                   const std::string& eth_address,
                                    uint32_t network_id,
                                    uint32_t target_chain_id,
                                    uint32_t commitment_version);
+
 // Builds tx.extra with TX_EXTRA_HEAT_COMMITMENT (0x08) given inputs
+// PRIVACY MODEL: No recipient - contract mints to msg.sender
 bool buildHeatExtra(const std::array<uint8_t, 32>& secret,
                     uint64_t amount_atomic,
                     const Crypto::Hash& tx_prefix_hash,
-                    const std::string& eth_address,
                     uint32_t network_id,
                     uint32_t target_chain_id,
                     uint32_t commitment_version,
                     const std::vector<uint8_t>& metadata,
                     std::vector<uint8_t>& extra);
 
-// Encrypted Media Message helper functions
-bool createTxExtraWithEncryptedMediaMessage(const Crypto::PublicKey& senderKey,
-                                           const Crypto::PublicKey& recipientKey,
-                                           uint64_t ttl,
-                                           uint32_t mediaType,
-                                           const std::vector<uint8_t>& mediaData,
-                                           const AccountPublicAddress& recipientAddr,
-                                           const KeyPair& senderKeys,
-                                           std::vector<uint8_t>& extra);
-bool addEncryptedMediaMessageToExtra(std::vector<uint8_t>& tx_extra,
-                                    const TransactionExtraEncryptedMediaMessage& message);
-bool getEncryptedMediaMessageFromExtra(const std::vector<uint8_t>& tx_extra,
-                                      TransactionExtraEncryptedMediaMessage& message);
+// COLD convenience wrapper - same as computeCommitment but named for clarity
+// Computes: keccak256(secret || amount || tx_hash || network || chain || version || term)
+Crypto::Hash computeColdCommitment(const std::array<uint8_t, 32>& secret,
+                                   uint64_t amount_atomic,
+                                   const Crypto::Hash& tx_prefix_hash,
+                                   uint32_t network_id,
+                                   uint32_t target_chain_id,
+                                   uint32_t commitment_version,
+                                   uint32_t term);
 
-// Media Attachment helper functions
-bool createTxExtraWithMediaAttachment(const Crypto::Hash& messageId,
-                                     uint32_t chunkIndex,
-                                     uint32_t totalChunks,
-                                     const std::vector<uint8_t>& chunkData,
-                                     std::vector<uint8_t>& extra);
-bool addMediaAttachmentToExtra(std::vector<uint8_t>& tx_extra,
-                              const TransactionExtraMediaAttachment& attachment);
-bool getMediaAttachmentFromExtra(const std::vector<uint8_t>& tx_extra,
-                                TransactionExtraMediaAttachment& attachment);
+// Builds tx.extra with TX_EXTRA_COLD_COMMITMENT (0xCD) given inputs
+// PRIVACY MODEL: No recipient - contract mints to msg.sender
+bool buildColdExtra(const std::array<uint8_t, 32>& secret,
+                    uint64_t amount_atomic,
+                    const Crypto::Hash& tx_prefix_hash,
+                    uint32_t network_id,
+                    uint32_t target_chain_id,
+                    uint32_t commitment_version,
+                    uint32_t term,
+                    uint8_t claimChainCode,
+                    const std::vector<uint8_t>& metadata,
+                    const std::vector<uint8_t>& gift_secret,
+                    std::vector<uint8_t>& extra);
 
-// Media Transfer Request/Response helper functions
-bool createTxExtraWithMediaTransferRequest(const Crypto::Hash& mediaHash,
-                                          const Crypto::PublicKey& requesterKey,
-                                          uint32_t priority,
-                                          const Crypto::SecretKey& requesterSecretKey,
-                                          std::vector<uint8_t>& extra);
-bool addMediaTransferRequestToExtra(std::vector<uint8_t>& tx_extra,
-                                   const TransactionExtraMediaTransferRequest& request);
-bool getMediaTransferRequestFromExtra(const std::vector<uint8_t>& tx_extra,
-                                     TransactionExtraMediaTransferRequest& request);
 
-bool createTxExtraWithMediaTransferResponse(const Crypto::Hash& mediaHash,
-                                           const Crypto::PublicKey& responderKey,
-                                           uint32_t responseCode,
-                                           const std::string& responseMessage,
-                                           const Crypto::SecretKey& responderSecretKey,
-                                           std::vector<uint8_t>& extra);
-bool addMediaTransferResponseToExtra(std::vector<uint8_t>& tx_extra,
-                                    const TransactionExtraMediaTransferResponse& response);
-bool getMediaTransferResponseFromExtra(const std::vector<uint8_t>& tx_extra,
-                                      TransactionExtraMediaTransferResponse& response);
+
 
 // Burn receipt helper functions
 bool getBurnReceiptFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraBurnReceipt& burnReceipt);
 bool addBurnReceiptToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraBurnReceipt& burnReceipt);
 bool createTxExtraWithBurnReceipt(const TransactionExtraBurnReceipt& burnReceipt, std::vector<uint8_t>& extra);
 
+
+
+
+
 // Deposit receipt helper functions
 bool getDepositReceiptFromExtra(const std::vector<uint8_t>& tx_extra, TransactionExtraDepositReceipt& depositReceipt);
 bool addDepositReceiptToExtra(std::vector<uint8_t>& tx_extra, const TransactionExtraDepositReceipt& depositReceipt);
 bool createTxExtraWithDepositReceipt(const TransactionExtraDepositReceipt& depositReceipt, std::vector<uint8_t>& extra);
-
-// Media type constants
-enum MediaType {
-  MEDIA_TYPE_TEXT = 0,
-  MEDIA_TYPE_IMAGE = 1,
-  MEDIA_TYPE_VIDEO = 2,
-  MEDIA_TYPE_AUDIO = 3,
-  MEDIA_TYPE_DOCUMENT = 4,
-  MEDIA_TYPE_ARCHIVE = 5,
-  MEDIA_TYPE_EXECUTABLE = 6,
-  MEDIA_TYPE_OTHER = 255
-};
-
-// Transfer priority constants
-enum TransferPriority {
-  TRANSFER_PRIORITY_LOW = 0,
-  TRANSFER_PRIORITY_NORMAL = 1,
-  TRANSFER_PRIORITY_HIGH = 2,
-  TRANSFER_PRIORITY_CRITICAL = 3
-};
-
-// Transfer response codes
-enum TransferResponseCode {
-  TRANSFER_RESPONSE_ACCEPTED = 0,
-  TRANSFER_RESPONSE_REJECTED = 1,
-  TRANSFER_RESPONSE_NOT_FOUND = 2,
-  TRANSFER_RESPONSE_RATE_LIMITED = 3,
-  TRANSFER_RESPONSE_BUSY = 4,
-  TRANSFER_RESPONSE_STORAGE_FULL = 5
-};
 
 // Cold Deposit (CD) term codes and APR rates
 enum CDTermCode {
@@ -519,11 +491,5 @@ enum CDAPRRate {
   CD_APR_33PCT = 3300,       // 33% APR = 3300 basis points
   CD_APR_80PCT = 8000        // 80% APR = 8000 basis points
 };
-
-// Media chunk size constants (for splitting large files)
-const size_t MAX_MEDIA_CHUNK_SIZE = 1024 * 1024;     // 1MB per chunk
-const size_t MAX_MEDIA_INLINE_SIZE = 64 * 1024;      // 64KB for inline storage
-const uint64_t MAX_MEDIA_FILE_SIZE = 100 * 1024 * 1024; // 100MB max file size
-const uint64_t DEFAULT_MEDIA_TTL = 24 * 60 * 60;     // 24 hours default TTL
 
 }

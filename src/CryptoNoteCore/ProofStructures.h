@@ -1,4 +1,5 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2020-2026 Elderfire Privacy Group
 //
 // This file is part of Fuego.
 //
@@ -14,9 +15,9 @@
 
 #pragma once
 
-#include <json/json.h>
-#include "crypto/crypto.h"
-#include "Serialization/ISerializer.h"
+#include "../Common/JsonValue.h"
+#include "../crypto/crypto.h"
+#include "../Serialization/ISerializer.h"
 
 namespace CryptoNote {
 
@@ -29,7 +30,7 @@ struct TransactionExtraBurnProof {
   std::string proof_type;
 
   bool serialize(CryptoNote::ISerializer& serializer) const;
-  
+
   // Additional fields for serialize/deserialize functions
   std::string tx_hash;
   std::string address;
@@ -44,7 +45,7 @@ struct TransactionExtraDepositProof {
   std::string proof_type;
 
   bool serialize(CryptoNote::ISerializer& serializer) const;
-  
+
   // Additional fields for serialize/deserialize functions
   std::string tx_hash;
   std::string address;
@@ -60,10 +61,10 @@ struct ProofVerificationData {
   std::string nullifier;
   std::string tx_hash;
   std::string proof_type;
-  
-  void serialize(Json::Value& json) const;
-  void deserialize(const Json::Value& json);
-  
+
+  void serialize(Common::JsonValue& json) const;
+  void deserialize(const Common::JsonValue& json);
+
   bool serialize(CryptoNote::ISerializer& serializer) const;
 };
 
@@ -72,7 +73,7 @@ struct ProofVerificationData {
     Crypto::PublicKey proof_pubkey;
     std::string tx_hash;
     uint64_t timestamp;
-    
+
     bool serialize(CryptoNote::ISerializer& serializer) const;
   };
 
@@ -81,9 +82,9 @@ struct ProofVerificationData {
     Crypto::PublicKey proof_pubkey;
     std::string tx_hash;
     uint64_t timestamp;
-    uint32_t term_months;
+    uint32_t term;
     std::string deposit_type;
-    
+
     bool serialize(CryptoNote::ISerializer& serializer) const;
   };
 

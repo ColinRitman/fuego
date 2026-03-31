@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2014-2018 The Monero project
 // Copyright (c) 2014-2018 The Forknote developers
 // Copyright (c) 2016-2019 The Karbowanec developers
@@ -33,29 +33,45 @@ namespace CryptoNote
 		const size_t CRYPTONOTE_MAX_BLOCK_BLOB_SIZE = 8000000;
 		const size_t CRYPTONOTE_MAX_TX_SIZE = 1000000000;
         const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX = 1753191; /* "fire" address prefix */
+        const uint64_t CRYPTONOTE_SUBADDRESS_BASE58_PREFIX = CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX; // same as main (fire) for max privacy, ie indistinguishable to outside observers.
+        // only issue being if user tried to send FROM a sub-addy, which isnt supported by wallets anyway
 		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW = 60;
+		const size_t CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW_TESTNET = 0;
 		const uint64_t DIFFICULTY_TARGET_DRGL = 81;
 		const unsigned EMISSION_SPEED_FACTOR = 18;
-    const unsigned EMISSION_SPEED_FACTOR_FANGO = 19;  //major version 8
-    const unsigned EMISSION_SPEED_FACTOR_FUEGO = 20;   //major version 9
+        const unsigned EMISSION_SPEED_FACTOR_FANGO = 19;  //major version 8
+        const unsigned EMISSION_SPEED_FACTOR_FUEGO = 20;   //major version 9
 		const uint64_t CRYPTONOTE_BLOCK_FUTURE_TIME_LIMIT  = 60 * 60 * 2;
 		const uint64_t CRYPTONOTE_BLOCK_FUTURE_TIME_LIMIT_V1 = DIFFICULTY_TARGET_DRGL * 6;
 		const uint64_t CRYPTONOTE_BLOCK_FUTURE_TIME_LIMIT_V2 = DIFFICULTY_TARGET * 2;
-		const uint64_t CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 10;
+		const uint64_t CRYPTONOTE_DEFAULT_TX_SPENDABLE_AGE = 3;
 		const size_t BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW = 60;
 		const size_t BLOCKCHAIN_TIMESTAMP_CHECK_WINDOW_V1 = 11; /* LWMA3 */
 
 		const uint64_t MONEY_SUPPLY = UINT64_C(80000088000008); /* max supply: 8M8 */
 		const uint64_t COIN = UINT64_C(10000000);
 		const uint64_t MINIMUM_FEE_V1 = UINT64_C(800000);
-		const uint64_t MINIMUM_FEE_V2 = UINT64_C(80000);	/* 0.008 XFG */
-		const uint64_t MINIMUM_FEE = MINIMUM_FEE_V2;
-		const uint64_t MINIMUM_FEE_BANKING = UINT64_C(80000);  /* 0.008 XFG */
-		const uint64_t MINIMUM_FEE_BANKING_PERCENT = UINT64_C(80000);  /* 0.008 XFG */ // 0.08% (1250/1) [0.125% 800]
+		const uint64_t MINIMUM_FEE_V2 = UINT64_C(80000);	/* 0.008 XFG  (80Kħ) */
+		const uint64_t MINIMUM_FEE_8KH = UINT64_C(8000);	/* 0.0008 XFG (8Kħ)  BMv10+ Flat Fee */
+		const uint64_t MINIMUM_FEE = MINIMUM_FEE_8KH;
 
-		const uint64_t MINIMUM_FEE_BURN = UINT64_C(80000);  /* 0.008 XFG */
-		const uint64_t DEFAULT_DUST_THRESHOLD = UINT64_C(10000); /* < 0.001 XFG */
-		const size_t   MINIMUM_MIXIN = 2;  // from GUI- use MinTXmixin
+		// MAINNET banking fees (0.1% of AMOUNT_TIER)
+		const uint64_t BANK_FEE_TIER_0 = UINT64_C(8000);  /* 0.0008 XFG / (8 Kiloħeat) for 0.8 XFG burns */
+		const uint64_t BANK_FEE_TIER_1 = UINT64_C(80000);  /* 0.008 XFG / (80Kħ) for 8 XFG burns */
+		const uint64_t BANK_FEE_TIER_2 = UINT64_C(800000);  /* 0.08 XFG / (800Kħ) for 80 XFG burns */
+		const uint64_t BANK_FEE_TIER_3 = UINT64_C(8000000);  /* 0.8 XFG / (8 Milliħeat) for 800 XFG burns */
+
+		// TESTNET banking fees (0.1% of TEST_AMOUNT_TIER)
+		const uint64_t TEST_BANK_FEE_TIER_0 = UINT64_C(800);    /* 0.1% of 0.08 TEST (800,000 atomic) = 800 atomic */
+		const uint64_t TEST_BANK_FEE_TIER_1 = UINT64_C(8000);   /* 0.1% of 0.8 TEST (8,000,000 atomic) = 8,000 atomic */
+		const uint64_t TEST_BANK_FEE_TIER_2 = UINT64_C(80000);  /* 0.1% of 8 TEST (80,000,000 atomic) = 80,000 atomic */
+		const uint64_t TEST_BANK_FEE_TIER_3 = UINT64_C(800000); /* 0.1% of 80 TEST (800,000,000 atomic) = 800,000 atomic */
+ // may remove alias option for regular network users for privacy
+		// Fire Alias registration fee: 1 XFG for regular users, free for Elderfiers
+		const uint64_t ALIAS_REGISTRATION_FEE = COIN;  /* 1 XFG sent to Fuego Development Fund */
+
+		const uint64_t DEFAULT_DUST_THRESHOLD_20KH = UINT64_C(20000); /* < 0.002 XFG ( under 20 Kħ is dust) */
+		const uint64_t DEFAULT_DUST_THRESHOLD = UINT64_C(1000); /* < 0.0001 XFG ( under 1 Kħ is dust) v10 */
 
 		const size_t   CRYPTONOTE_COIN_VERSION                       = 1;
 		const size_t   CRYPTONOTE_DISPLAY_DECIMAL_POINT 	         = 7;
@@ -96,32 +112,92 @@ namespace CryptoNote
 		const uint32_t DMWDA_BLOCK_STEALING_CHECK_BLOCKS             = 5;    // Number of blocks to check for stealing attempts
 		const uint32_t DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
 		const double   DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.05; // 5% of target time threshold for fast blocks
+		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 60;  // Trend analysis window
 
         // MIXIN
-		const uint64_t MIN_TX_MIXIN_SIZE                             = 2;  // Legacy mixin
+		const uint64_t MIN_TX_MIXIN_SIZE_V2                          = 2;  // Legacy mixin
 		const uint64_t MIN_TX_MIXIN_SIZE_V10                         = 8;  // Maxmix min starting from BlockMajorVersion 10
+        const uint64_t MIN_TX_MIXIN_SIZE                             = MIN_TX_MIXIN_SIZE_V10;  // Default mixin size
 		const uint64_t MAX_TX_MIXIN_SIZE                             = 18;
 		static_assert(2 * DIFFICULTY_CUT <= DIFFICULTY_WINDOW - 2, "Bad DIFFICULTY_WINDOW or DIFFICULTY_CUT");
 
-		// MAINNET DEPOSITS
-		const uint64_t DEPOSIT_MIN_AMOUNT = 8000000000;   // 800 XFG for CD rewards
-      const uint64_t BURN_DEPOSIT_MIN_AMOUNT = 8000000;  // 0.8 XFG (8,000,000 atomic units) 8M
-     const uint64_t YIELD_DEPOSIT_MIN_AMOUNT = 80000000;  // 8 XFG (80,000,000 atomic units) 80M
-	  const uint64_t BURN_DEPOSIT_STANDARD_AMOUNT = 8000000;  // Standard burn: 0.8 XFG (8,000,000 [8M]HEAT)
-		const uint64_t BURN_DEPOSIT_LARGE_AMOUNT = 8000000000;  // 800 XFG (8,000,000,000 [8B]HEAT)
-		 const uint32_t DEPOSIT_MIN_TERM_v1 = 5480;  //blocks
-         const uint32_t DEPOSIT_MAX_TERM_v1 = 5480;
-       const uint32_t DEPOSIT_MIN_TERM = 16440;  //blocks		 /* one month=5480 ( 3 months (16440) for release ) OverviewFrame::depositParamsChanged */
-      const uint32_t DEPOSIT_MAX_TERM = 16440;  		 /* 3 month standard */
-      const uint32_t DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
-       const uint32_t DEPOSIT_TERM_YIELD = DEPOSIT_MIN_TERM;     // 16440 blocks (3 months) for yield deposits
+		// MAINNET BURN/COLD/LP TIERS
+        const uint64_t AMOUNT_TIER_0 =     8000000;  // 0.8 XFG (8,000,000 atomic heat) 8M HEAT
+        const uint64_t AMOUNT_TIER_1 =    80000000;  // 8 XFG (80,000,000 atomic heat) 80M HEAT
+        const uint64_t AMOUNT_TIER_2 =   800000000;  // 80 XFG (800,000,000 atomic heat) 800M HEAT
+        const uint64_t AMOUNT_TIER_3 =  8000000000;  // 800 XFG (8,000,000,000 atomic heat) 8B HEAT
+      		// TESTNET BURN/COLD/LP TIERS
+        const uint64_t TEST_AMOUNT_TIER_0 =     800000;  //0.08 TEST (800,000 atomic units)
+        const uint64_t TEST_AMOUNT_TIER_1 =    8000000;  //0.8 TEST (8,000,000 atomic units)
+        const uint64_t TEST_AMOUNT_TIER_2 =   80000000;  // 8 TEST (80,000,000 atomic units)
+        const uint64_t TEST_AMOUNT_TIER_3 =  800000000;  // 80 TEST (800,000,000 atomic units)
+
+ 	    // ELDERFIER constants
+        // Ceremony: 5 deposits per tier × 4 tiers = 20 deposits, seeds ring pool at all amounts
+        const uint32_t ELDERKING_DEPOSITS_PER_TIER = 5;
+        const uint32_t ELDERKING_TOTAL_DEPOSITS = ELDERKING_DEPOSITS_PER_TIER * 4;  // 20 deposits
+        const uint64_t ELDERKING_CEREMONY_AMOUNT =   // 4,444 XFG total
+            ELDERKING_DEPOSITS_PER_TIER * (AMOUNT_TIER_0 + AMOUNT_TIER_1 + AMOUNT_TIER_2 + AMOUNT_TIER_3);
+        const uint32_t DEPOSIT_TERM_ELDERFIER_STAKING = 8;  // 0xEF deposits: term=8-block minimum, then unstakeable on demand, 1000-block review
+        const uint32_t ELDERFIER_STAKING_REVIEW_WINDOW = 1000;  // 1000 blocks (~5.5 days) for review before unstaking completes
+        // TESTIFIER - TESTNET Elderiers
+        const uint32_t TESTIFIER_DEPOSITS_PER_TIER = 5;
+        const uint32_t TESTIFIER_TOTAL_DEPOSITS = TESTIFIER_DEPOSITS_PER_TIER * 4;  // 20 deposits
+	    const uint64_t TESTIFIER_CEREMONY_AMOUNT =   // 444.4 TEST total
+            TESTIFIER_DEPOSITS_PER_TIER * (TEST_AMOUNT_TIER_0 + TEST_AMOUNT_TIER_1 + TEST_AMOUNT_TIER_2 + TEST_AMOUNT_TIER_3);
+	    const uint32_t TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING = 2;  // 0xEF deposits: term=2 (fast for testing), 10-block review window
+        const uint32_t TESTNET_ELDERFIER_STAKING_REVIEW_WINDOW = 10;  // 10 blocks (fast review for testing)
+
+        // Epoch duration for EFier fee distribution
+        const uint64_t EPOCH_DURATION_BLOCKS = 900;              // Mainnet: 900 blocks (5 days at 480s/block)
+        const uint64_t TESTNET_EPOCH_DURATION_BLOCKS = 10;       // Testnet: 10 blocks (fast epochs for testing)
+
+        // CD Fee Pool — funded by atomic swap fees, distributed as interest to CD holders
+        const uint64_t SWAP_FEE_RATE_BPS = 100;                // 1% of swap claim/refund amount (100 basis points)
+        const uint64_t SWAP_FEE_RATE_DIVISOR = 10000;          // basis point denominator
+        const uint64_t FEE_POOL_RATE_PRECISION = 1000000ULL;   // 1e6 fixed-point (fits uint32_t for div128_32)
+        const uint64_t TESTNET_SWAP_FEE_RATE_BPS = 100;        // 1% on testnet (same as mainnet)
+        const uint32_t CD_TRANSFER_MIN_REMAINING_TERM = 1;     // minimum term for transferred CD
+
+        // Dynamic banking fee: 0.1% per active EFier (10 BPS each)
+        const uint64_t BANKING_FEE_PER_ELFIER_BPS = 10;      // 0.1% per active EFier
+        const uint64_t BANKING_FEE_BPS_DIVISOR = 10000;      // basis point denominator
+        // Swap fee split: 80% CD yield / 10% EFiers / 10% Fuego Treasury
+        const uint64_t SWAP_FEE_CD_SHARE_PCT = 80;           // 80% of epoch swap fees → CD yield pool
+        const uint64_t SWAP_FEE_EFIER_SHARE_PCT = 10;        // 10% of epoch swap fees → EFier distribution
+        const uint64_t SWAP_FEE_TREASURY_SHARE_PCT = 10;     // 10% of epoch swap fees → Fuego Treasury
+
+        // MAINNET DEPOSITS
+        const uint64_t DEPOSIT_MIN_AMOUNT = AMOUNT_TIER_0;   // 0.8 XFG
+        const uint64_t BURN_DEPOSIT_MIN_AMOUNT = AMOUNT_TIER_0;  // 0.8 XFG (8,000,000 atomic units) 8M
+	    const uint32_t DEPOSIT_MIN_TERM_v1 = 5480;  // blocks
+        const uint32_t DEPOSIT_MAX_TERM_v1 = 5480;  // one month=5480
+        const uint32_t DEPOSIT_MIN_TERM = 16440;  // blocks	 ( 3 months (16440) for release )
+        const uint32_t DEPOSIT_MAX_TERM = 16440;
+        const uint32_t COLD_MIN_TERM = 16000;  // (v10+) <3mo in Fuego blocks (180 blocks/day x 88.888888 days)  check OverviewFrame::depositParamsChanged in fuego-desktop QT*/
+        const uint32_t COLD_MAX_TERM = 65000;  //  (v10+) ~1yr in Fuego blocks (180 blocks/day x 361 days)
+        const uint32_t TESTNET_COLD_MIN_TERM =  8;  //  (v10+) <3mo in Fuego blocks (180 blocks/day x 88.888888 days)
+        const uint32_t TESTNET_COLD_MAX_TERM = 42;  //  (v10+) ~1yr in Fuego blocks (180 blocks/day x 361 days)
+
+        const uint32_t DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
+        const uint32_t DEPOSIT_TERM_YIELD = COLD_MIN_TERM;     // 16k blocks (3 mo) for Fuego Untraceable Custom Interest Assets (FuCIA) deposits
         const uint32_t DEPOSIT_TERM_BURN = DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
+
+        // XFG-STARK commitment constants (unified format for xfg-stark-cli relay)
+        const uint32_t STARK_NETWORK_ID_MAINNET  = 1;
+        const uint32_t STARK_NETWORK_ID_TESTNET  = 2;
+        const uint32_t STARK_COMMITMENT_VERSION  = 3;     // v3: unified HEAT+COLD relay format (4 tiers)
+        const uint32_t STARK_TARGET_CHAIN_ETH    = 1;     // Ethereum mainnet
+        const uint32_t STARK_TARGET_CHAIN_ARB    = 42161; // Arbitrum One
+
+        const uint32_t DEPOSIT_TERM_MIN = 16000;  // New 3-month term, slightly <90 days of Fuego blocks (180 blks per day)
+        const uint32_t DEPOSIT_TERM_MAX   = 65000;   // ~1-year using 360(+1)days/yr (65k blocks)
 
         static_assert(DEPOSIT_MIN_TERM > 0, "Bad DEPOSIT_MIN_TERM");
 		static_assert(DEPOSIT_MIN_TERM <= DEPOSIT_MAX_TERM, "Bad DEPOSIT_MAX_TERM");
 
-        const uint64_t MULTIPLIER_FACTOR = 100;		 /* legacy deposits */
-		const uint32_t END_MULTIPLIER_BLOCK = 50; /* legacy deposits */
+        const uint64_t MULTIPLIER_FACTOR = 100;		 /* conceal code */
+		const uint32_t END_MULTIPLIER_BLOCK = 50; /* cocneal deposit code */
 
 		static constexpr uint64_t POISSON_CHECK_TRIGGER = 10; // Reorg size that triggers poisson timestamp check
 		static constexpr uint64_t POISSON_CHECK_DEPTH = 60;   // Main-chain depth of poisson check. The attacker will have to tamper 50% of those blocks
@@ -154,8 +230,9 @@ namespace CryptoNote
         const uint32_t UPGRADE_HEIGHT_V7                             = 657000; //Apotheosis  Fango
 		const uint32_t UPGRADE_HEIGHT_V8                             = 800000; //Dragonborne (emission|deposits)
         const uint32_t UPGRADE_HEIGHT_V9                             = 826420; //Godflame  (emission|UPX2|Fuego)
-        const uint32_t UPGRADE_HEIGHT_V10                            = 980000; //Veryfire  (dmwda|dynamaxin|ethernalXFG)
-
+        const uint32_t UPGRADE_HEIGHT_V10                            = 999999; //Dynamigo  (dmwda|dynamaxin|ethernalXFG)
+// upgradekit
+//
 	    const unsigned UPGRADE_VOTING_THRESHOLD = 90; // percent
 		const size_t UPGRADE_VOTING_WINDOW = EXPECTED_NUMBER_OF_BLOCKS_PER_DAY;
 		const size_t UPGRADE_WINDOW = EXPECTED_NUMBER_OF_BLOCKS_PER_DAY;
@@ -173,6 +250,9 @@ namespace CryptoNote
 
 	} // namespace parameters
 
+	// Development wallet that receives alias registration fees. investigate mullet-cig opt for 3/5 access
+	const char FUEGO_DEV_FUND_ADDRESS[] = "fireVHx639SLMhzmBoJ8drTXbVyv2eRG6A8aMLc1taTiRNwk8pnwXpBDUSjH1dT5fg7yVVZrKkvm31CmigAMdVDg7sgxJmAUNp";
+
     const char CRYPTONOTE_NAME[] = "fuego";
 	const char GENESIS_COINBASE_TX_HEX[] = "013c01ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101bd4e0bf284c04d004fd016a21405046e8267ef81328cabf3017c4c24b273b25a";
 
@@ -188,8 +268,8 @@ namespace CryptoNote
 	const uint8_t  BLOCK_MAJOR_VERSION_7                         =  7;
 	const uint8_t  BLOCK_MAJOR_VERSION_8                         =  8;
 	const uint8_t  BLOCK_MAJOR_VERSION_9                         =  9;
-	const uint8_t  BLOCK_MAJOR_VERSION_10                        = 10;
-
+	const uint8_t  BLOCK_MAJOR_VERSION_10                        = 10; //upgradekit
+	const uint8_t  BLOCK_MAJOR_VERSION_11                        = 11; // future: uniform coinbase decomposition
 
 	const uint8_t  BLOCK_MINOR_VERSION_0 			             =  0;
 	const uint8_t  BLOCK_MINOR_VERSION_1 			             =  1;
@@ -202,8 +282,8 @@ namespace CryptoNote
 	const int P2P_DEFAULT_PORT = 10808;
  	const int RPC_DEFAULT_PORT = 18180;
 
-	/* P2P Network Configuration Section - This defines our current P2P network version
-	and the minimum version for communication between nodes */
+	/* P2P Network Configuration Section - Defines current P2P network version
+	and minimum version for communication between nodes */
 	const uint8_t P2P_VERSION_1 = 1;
 	const uint8_t P2P_VERSION_2 = 2;
 	const uint8_t P2P_CURRENT_VERSION = 1;
@@ -233,68 +313,42 @@ namespace CryptoNote
 
 	// Seed Nodes
 	const std::initializer_list<const char *> SEED_NODES = {
-		"3.16.217.33:10808",
- 		 "80.89.228.157:10808",
- 		   "207.244.247.64:10808",
-	        "216.145.66.224:10808"
+	  "207.244.247.64:10808",
+	    "195.88.57.158:10808",
+ 		   "80.89.228.157:10808",
+	         "216.145.84.248:10808"
 	};
 
 	// ---------------  TESTNET CONFIGS -----------------------------------------------------
 
 	// TESTNET Seed Nodes
 	const std::initializer_list<const char *> SEED_NODES_TESTNET = {
-		"3.16.217.33:20808",
+	   "195.88.57.158:20808",
+		"216.145.84.248:20808",
  		 "80.89.228.157:20808",
- 		   "207.244.247.64:20808",
-	        "216.145.66.224:20808"
-		// Add more testnet seed nodes as they become available
+ 		   "207.244.247.64:20808"
 		};
 
- 	// TESTNET DEFAULTS
- 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "013c01ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd088071210136834e176c3994ebc8622152e76b8093e0b896aa06f790e6f93eba661edefe6a";
+//__________________________________________________________________________________________________________________________
+                                     	// TESTNET parameters
+//--------------------------------------------------------------------------------------------------------------------------
+
+ 	const char GENESIS_COINBASE_TX_HEX_TESTNET[] = "010001ff0001b4bcc29101029b2e4c0281c0b02e7c53291a94d1d0cbff8883f8024f5142ee494ffbbd0880712101eae9a3035cf3facc4a723c8334d5d3836950188703b407793c020741c46c1466";
  	const int P2P_DEFAULT_PORT_TESTNET = 20808;
  	const int RPC_DEFAULT_PORT_TESTNET = 28280;
  	const uint64_t CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET = 1075740; /* "TEST" address prefix */
- 	// TESTNET DEPOSIT PARAMS
-    const uint64_t TESTNET_DEPOSIT_MIN_AMOUNT = 80000000; // 8 TESTNET coins
-    const uint64_t TESTNET_BURN_DEPOSIT_MIN_AMOUNT = 8000000;  // 0.8 TEST (8,000,000 atomic units)
-	const uint64_t TESTNET_BURN_DEPOSIT_STANDARD_AMOUNT = 8000000;  // Standard burn: 0.8 TEST (8,000,000 atomic units)
-	const uint64_t TESTNET_BURN_DEPOSIT_LARGE_AMOUNT = 8000000000;  // 800 TEST (8,000,000,000 atomic units)
-    const uint32_t TESTNET_DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
+	const uint64_t CRYPTONOTE_SUBADDRESS_BASE58_PREFIX_TESTNET = CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET;
+
+	const uint32_t TESTNET_DEPOSIT_TERM_FOREVER = ((uint32_t)(-1));  // Forever term for burn transactions
     const uint32_t TESTNET_DEPOSIT_TERM_BURN = TESTNET_DEPOSIT_TERM_FOREVER;  // 4294967295 for burn deposits
- 	const uint32_t TESTNET_DEPOSIT_MIN_TERM_v1 = 5480;  //blocks
- 	const uint32_t TESTNET_DEPOSIT_MAX_TERM_v1 = 5480;
- 	const uint32_t TESTNET_DEPOSIT_MIN_TERM = 2;  //blocks		 /* one month=5480
- 	const uint32_t TESTNET_DEPOSIT_MAX_TERM = 2;
-    const uint32_t TESTNET_DEPOSIT_TERM_YIELD = TESTNET_DEPOSIT_MIN_TERM;     // 16440 blocks (3 months) for yield deposits
-//__________________________________________________________________________________________________________________________
-                                     	// TESTNET DMWDA parameters
+
+ 	// TESTNET DMWDA parameters
 //--------------------------------------------------------------------------------------------------------------------------
- 		const uint32_t TESTNET_DMWDA_SHORT_WINDOW                            = 15;   // Rapid response window
- 		const uint32_t TESTNET_DMWDA_MEDIUM_WINDOW                           = 45;   // Stability window
- 		const uint32_t TESTNET_DMWDA_LONG_WINDOW                             = 120;  // Trend analysis window
- 		const uint32_t TESTNET_DMWDA_EMERGENCY_WINDOW                        = 5;    // Emergency response window
- 		const double   TESTNET_DMWDA_MIN_ADJUSTMENT                          = 0.5;  // Minimum difficulty adjustment (50%)
- 		const double   TESTNET_DMWDA_MAX_ADJUSTMENT                          = 4.0;  // Maximum difficulty adjustment (400%)
- 		const double   TESTNET_DMWDA_EMERGENCY_THRESHOLD                     = 0.1;  // Emergency threshold (10%)
- 		const double   TESTNET_DMWDA_SMOOTHING_FACTOR                        = 0.3;  // Smoothing factor for oscillations prevention
- 		const double   TESTNET_DMWDA_CONFIDENCE_MIN                          = 0.1;  // Minimum confidence score
- 		const double   TESTNET_DMWDA_CONFIDENCE_MAX                          = 1.0;  // Maximum confidence score
- 	    const double   TESTNET_DMWDA_DEFAULT_CONFIDENCE                      = 0.5;  // Default confidence score
+ 	// TESTNET DMWDA params are now defined in AdaptiveDifficulty.cpp epoch tables.
+ 	// To tune: add a new DmwdaEpoch row to TESTNET_DMWDA_EPOCHS with the desired
+ 	// activationHeight. No chain reset required for param-only changes.
 
-	const double   TESTNET_DMWDA_WEIGHT_SHORT                            = 0.4;  // Weight for short window
- 	const double   TESTNET_DMWDA_WEIGHT_MEDIUM                           = 0.4;  // Weight for medium window
- 	const double   TESTNET_DMWDA_WEIGHT_LONG                             = 0.2;  // Weight for long window
- 	const double   TESTNET_DMWDA_ADJUSTMENT_RANGE                        = 0.3;  // Adjustment range for confidence-based bounds
- 	const uint32_t TESTNET_DMWDA_RECENT_WINDOW_SIZE                      = 5;    // Recent window size for anomaly detection
- 	const uint32_t TESTNET_DMWDA_HISTORICAL_WINDOW_SIZE                  = 20;   // Historical window size for anomaly detection
- 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_CHECK_BLOCKS             = 5;    // Number of blocks to check for stealing attempts
- 	const double   TESTNET_DMWDA_BLOCK_STEALING_TIME_THRESHOLD           = 0.05; // 5% of target time threshold for fast blocks
-
- 	const uint32_t TESTNET_DMWDA_BLOCK_STEALING_THRESHOLD                = 2;    // Threshold for fast blocks to trigger stealing detection
-	const double   TESTNET_DMWDA_HASH_RATE_CHANGE_THRESHOLD              = 10.0; // Hash rate change threshold for anomaly detection
-
- 	// -------------------------------------- TESTNET CONFIGS ---------------------------------------------------------
+ 	// -------------------------------------- END TESTNET CONFIGS ---------------------------------------------------------
 
 	struct CheckpointData
 	{
@@ -310,7 +364,8 @@ namespace CryptoNote
 	const std::initializer_list<CheckpointData>
 		CHECKPOINTS = {
  			{ 800,    "c1c64f752f6f5f6f69671b3794f741af0707c71b35302ea4fc96b0befdce8ce9" },
- 			 { 8008,   "299702f163995cd790b5c45362c78ad596f8717d749ff9016ce27eaa625b8a5e" },
+ 		    { 6484,   "6378b6899aebdf73da9d56ac9db5257af024490d68e6dd8dfb284ee8bd0fb004" },
+             { 8008,   "299702f163995cd790b5c45362c78ad596f8717d749ff9016ce27eaa625b8a5e" },
  			  { 18008,  "46baf8aea2b9472a9f127ad7cdcb01a871ecf20d710e9e0d3a2b13176a452112" },
  			   { 63312,  "57c815dd1480b6a1de7037f85aa510ff7c784b91808f3777451c030d40614ddb" },
  			    { 80008,  "19e65aec81a283e756c9b55a884927bcbffa4639c9fe21fd4894ef211e0e8472" },
@@ -356,9 +411,9 @@ namespace CryptoNote
  			    { 752411, "8675187b8a7bdf73ac93ac9d86f37315c0780a41ff4c0aa671f5d809b6c5b631" },
  			   { 752593, "e270b1419d5ae8589ea8fdb148a6de6b02637432e76a1b23258324754a16f46f" },
 			  { 777777, "82cbbe5436b1f273b4b7b3ebe6517cfe4ddff33dd365e438cc44f456f43fa71b" },
-		   { 800001, "ee744efcc80fe4a483b21bf6918f72bfa19ca2b4324b51786c522428acffce98" },
- 	    { 810000, "ca66bed2600a0750f4dafe8ec7a8e4581b2ab9df326cc8f321ffd96bc2947b2c" },
-	     { 820000, "6bb848f23668412e35c7bdcd60cd0aea70761d11f1f41204a1b8ca2d808e79d7" },
+		     { 800001, "ee744efcc80fe4a483b21bf6918f72bfa19ca2b4324b51786c522428acffce98" },
+ 	        { 810000, "ca66bed2600a0750f4dafe8ec7a8e4581b2ab9df326cc8f321ffd96bc2947b2c" },
+	         { 820000, "6bb848f23668412e35c7bdcd60cd0aea70761d11f1f41204a1b8ca2d808e79d7" },
 			  { 826421, "9a0158c87c062c63a675c65eda91c10bb6d7b68b854be783aa85b2cbbf3b8a55" },
 			   { 830000, "cee38b0701df9f26a938f6c65a1f233d1f810e5f19eb1b4cb87b15d514342064" },
 			    { 840000, "ec767b0e56d7002966e3184e197b3da06c5f94484bf6218781a38f59a75bfaab" },
@@ -372,6 +427,8 @@ namespace CryptoNote
 			    { 950000, "c23a6da74e4d1ec8b2bc1debac5578d7c12ea70f3b03a692a62cab8d3c4431e1" },
 			   { 960000, "1ac7447e9819be997209b0bd3fa56edeca31f4cd33068a1808db3ab2c6705f18" },
 			  { 970000, "96f8735193c5435254d32c03d25b3747e059931cd3382c436d91b61cb6c6b871" },
+			 { 980000, "1ae34b8d56a796bf5d82bd80ba9cb81e029deda46a293ebb225b26f33c8e240a"},
+			  { 988000, "dd509fba899ecb1b7b58ea3023624fbd2b34df247056869c0ac4b59d65cfa6bf"}
 
 
 		};

@@ -30,6 +30,8 @@
 #include <System/Event.h>
 #include "Transfers/TransfersSynchronizer.h"
 #include "Transfers/BlockchainSynchronizer.h"
+#include "EldernodeIndexManager.h"  // For elderfier auto-registration
+#include "crypto/subaddress.h"
 
 namespace CryptoNote
 {
@@ -45,19 +47,19 @@ public:
   virtual ~WalletGreen();
 
   /* Deposit related functions */
-  virtual void createDeposit(uint64_t amount, uint64_t term, std::string sourceAddress, std::string destinationAddress, std::string &transactionHash, const DepositCommitment& commitment = DepositCommitment()/*, bool useStagedUnlock = false*/) override;
+  virtual void createDeposit(uint64_t amount, uint64_t term, std::string sourceAddress, std::string destinationAddress, std::string &transactionHash, const DepositCommitment& commitment = DepositCommitment(), bool useStagedUnlock = false) override;
   virtual void withdrawDeposit(DepositId depositId, std::string &transactionHash) override;
   std::vector<MultisignatureInput> prepareMultisignatureInputs(const std::vector<TransactionOutputInformation> &selectedTransfers);
 
   // Burn deposit information for local secret storage
   struct BurnDepositInfo {
     std::string transactionHash;
-    Crypto::SecretKey secret;      // 🔒 SECURE: Stored locally, never on blockchain
+    Crypto::SecretKey secret;
     uint64_t amount;
     std::vector<uint8_t> metadata;
     bool bpdfGenerated;
     uint64_t timestamp;
-    
+
     BurnDepositInfo() : amount(0), bpdfGenerated(false), timestamp(0) {}
     BurnDepositInfo(const std::string& txHash, const Crypto::SecretKey& s, uint64_t amt, const std::vector<uint8_t>& meta)
       : transactionHash(txHash), secret(s), amount(amt), metadata(meta), bpdfGenerated(false), timestamp(0) {}
@@ -70,9 +72,12 @@ public:
   void markBurnDepositBPDFGenerated(const std::string& transactionHash);
   std::vector<BurnDepositInfo> getAllBurnDeposits();
 
+  // Elderfier auto-registration integration
+  void setEldernodeIndexManager(IEldernodeIndexManager* eldernodeIndexManager);
+
 private:
 
-  
+
   virtual void initialize(const std::string& path, const std::string& password) override;
   virtual void initializeWithViewKey(const std::string& path, const std::string& password, const Crypto::SecretKey& viewSecretKey) override;
   virtual void load(const std::string& path, const std::string& password, std::string& extra) override;
@@ -87,7 +92,7 @@ private:
   virtual void exportWalletKeys(const std::string &path, bool encrypt = true, WalletSaveLevel saveLevel = WalletSaveLevel::SAVE_KEYS_ONLY, const std::string &extra = "") override;
 
   virtual size_t getAddressCount() const override;
-  virtual size_t getWalletDepositCount() const override;  
+  virtual size_t getWalletDepositCount() const override;
   virtual std::string getAddress(size_t index) const override;
   virtual KeyPair getAddressSpendKey(size_t index) const override;
   virtual KeyPair getAddressSpendKey(const std::string &address) const override;
@@ -96,6 +101,14 @@ private:
   virtual std::string createAddress(const Crypto::SecretKey &spendSecretKey) override;
   virtual std::string createAddress(const Crypto::PublicKey &spendPublicKey) override;
   virtual std::vector<std::string> createAddressList(const std::vector<Crypto::SecretKey> &spendSecretKeys, bool reset = true) override;
+
+  // Sub-address support.
+  // Creates a deterministic receive address at index (major, minor).
+  // Derived from master spend+view keys; outputs sent to this address appear in wallet balance.
+  // Spending from sub-address outputs uses the derived spend secret b_ij = b + m automatically.
+  // Do not use index (0,0) — that is the primary address.
+  std::string createSubAddress(uint32_t major, uint32_t minor, uint64_t creationTimestamp = 0);
+  std::vector<std::tuple<uint32_t, uint32_t, std::string>> listSubAddresses() const;
 
   virtual void deleteAddress(const std::string &address) override;
 
@@ -119,10 +132,10 @@ private:
 
   virtual std::vector<TransactionsInBlockInfo> getTransactions(const Crypto::Hash &blockHash, size_t count) const;
   virtual std::vector<TransactionsInBlockInfo> getTransactions(uint32_t blockIndex, size_t count) const;
-  
+
   virtual std::vector<DepositsInBlockInfo> getDeposits(const Crypto::Hash &blockHash, size_t count) const;
   virtual std::vector<DepositsInBlockInfo> getDeposits(uint32_t blockIndex, size_t count) const;
-  
+
   virtual std::vector<Crypto::Hash> getBlockHashes(uint32_t blockIndex, size_t count) const override;
   virtual uint32_t getBlockCount() const override;
   virtual std::vector<WalletTransactionWithTransfers> getUnconfirmedTransactions() const override;
@@ -146,7 +159,10 @@ private:
   DepositId insertDeposit(const Deposit &deposit, size_t bankingIndexInTransaction, const Crypto::Hash &transactionHash);
   DepositId insertNewDeposit(const TransactionOutputInformation &depositOutput,
                              TransactionId creatingTransactionId,
-                             const Currency &currency, uint32_t height);
+                             const Currency &currency,
+                             uint32_t height,
+                             const std::vector<uint8_t> &transactionExtra);
+  void registerElderfierDeposit(const Deposit &deposit, DepositId depositId);
 
 protected:
   struct NewAddressData
@@ -362,7 +378,7 @@ protected:
 
   void copyContainerStorageKeys(ContainerStorage& src, const Crypto::chacha8_key& srcKey, ContainerStorage& dst, const Crypto::chacha8_key& dstKey);
   static void copyContainerStoragePrefix(ContainerStorage& src, const Crypto::chacha8_key& srcKey, ContainerStorage& dst, const Crypto::chacha8_key& dstKey);
-  
+
     void deleteOrphanTransactions(const std::unordered_set<Crypto::PublicKey>& deletedKeys);
   void saveWalletCache(ContainerStorage& storage, const Crypto::chacha8_key& key, WalletSaveLevel saveLevel, const std::string& extra);
   void loadSpendKeys();
@@ -419,6 +435,7 @@ protected:
   WalletTransfers m_transfers;                               //sorted
   mutable std::unordered_map<size_t, bool> m_fusionTxsCache; // txIndex -> isFusion
   UncommitedTransactions m_uncommitedTransactions;
+  std::unordered_map<std::string, bool> m_stagedUnlocks;     // transactionHash -> stagedUnlock
 
   bool m_blockchainSynchronizerStarted;
   BlockchainSynchronizer m_blockchainSynchronizer;
@@ -434,7 +451,7 @@ protected:
   Crypto::chacha8_key m_key;
   std::string m_path;
   std::string m_extra; // workaround for wallet reset
-  
+
   Crypto::PublicKey m_viewPublicKey;
   Crypto::SecretKey m_viewSecretKey;
 
@@ -448,8 +465,11 @@ protected:
 
   BlockHashesContainer m_blockchain;
 
-  // Burn deposit secrets storage (local, never on blockchain)
+  // Burn-secret storage
   std::map<std::string, BurnDepositInfo> m_burnDepositSecrets;
+
+  // Elderfier auto-registration
+  IEldernodeIndexManager* m_eldernodeIndexManager;
 };
 
 } //namespace CryptoNote

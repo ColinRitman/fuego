@@ -65,7 +65,7 @@ namespace CryptoNote
     virtual bool removeObserver(ICryptoNoteProtocolObserver* observer) override;
 
     void set_p2p_endpoint(IP2pEndpoint* p2p);
-    // ICore& get_core() { return m_core; }
+    ICore& get_core() { return m_core; }
     virtual bool isSynchronized() const override { return m_synchronized; }
     void log_connections();
     std::vector<std::string> all_connections();

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, newpath, integtest, dynamigo]
+    branches: [ master, HEAT ]
   pull_request:
     branches: [master, integtest]
 
@@ -18,6 +18,9 @@ jobs:
 
     env:
       CMAKE_BUILD_TYPE: ${{ matrix.build_type }}
+      # Use generic CPU flags with FMA3/FMA4 disabled to fix illegal instruction core dump on Linux
+      CMAKE_C_FLAGS_LINUX: "-march=x86-64 -mtune=generic -mfma=off -mfma4=off"
+      CMAKE_CXX_FLAGS_LINUX: "-march=x86-64 -mtune=generic -mfma=off -mfma4=off"
 
     steps:
       - uses: actions/checkout@v4
@@ -116,10 +119,12 @@ jobs:
         if: matrix.os == 'macos-14'
         run: |
           brew update
-          brew install ninja boost qt@5 miniupnpc qrencode icu4c jsoncpp
+          brew install ninja qt@5 miniupnpc qrencode icu4c jsoncpp boost@1.85
 
-          # Set environment variables for Boost and ICU
-          echo "BOOST_ROOT=$(brew --prefix boost)" >> $GITHUB_ENV
+          # Set environment variables for Boost 1.85
+          BOOST_PREFIX=$(brew --prefix boost@1.85)
+          echo "BOOST_ROOT=$BOOST_PREFIX" >> $GITHUB_ENV
+          echo "Boost 1.85 installed from Homebrew at $BOOST_PREFIX"
 
           # Try different ICU versions
           if [ -d "$(brew --prefix)/opt/icu4c" ]; then
@@ -142,15 +147,20 @@ jobs:
         if: matrix.os == 'windows-2022'
         shell: pwsh
         run: |
-          # Install basic tools
-          choco install -y ninja
-          # Install basic tools
-          choco install -y ninja
-          choco install -y vcpkg
-          choco install -y miniupnpc qrencode
-          choco install -y qt5-default --params '/InstallDir:C:\Qt'
+          # Install basic tools and Boost 1.85.0
+          choco install -y ninja boost-msvc-14.3 --version=1.85.0
 
-          # Initialize vcpkg if not already done
+          # Set Boost environment variable
+          $boostPath = "C:\local\boost_1_85_0"
+          if (Test-Path $boostPath) {
+            echo "BOOST_ROOT=$boostPath" >> $env:GITHUB_ENV
+            Write-Host "Boost 1.85.0 installed at $boostPath"
+          } else {
+            Write-Error "Boost installation failed"
+            exit 1
+          }
+
+          # Initialize vcpkg if not already done for other dependencies
           if (-not (Test-Path "C:/vcpkg/vcpkg.exe")) {
             git clone https://github.com/Microsoft/vcpkg.git C:/vcpkg
             cd C:/vcpkg
@@ -158,12 +168,9 @@ jobs:
             .\vcpkg integrate install
           }
 
-          # Install packages via vcpkg
+          # Install other packages via vcpkg (excluding Boost)
           C:/vcpkg/vcpkg.exe install --triplet x64-windows `
-            boost-filesystem boost-thread boost-date-time boost-chrono `
-            boost-regex boost-serialization boost-program-options `
-            boost-multi-index boost-foreach boost-uuid boost-asio boost-scope-exit `
-            boost-format icu openssl miniupnpc jsoncpp
+            icu openssl miniupnpc jsoncpp qrencode
 
       - name: Debug Boost installation (Windows)
         if: matrix.os == 'windows-2022'
@@ -189,9 +196,15 @@ jobs:
             export LDFLAGS="-L$ICU_ROOT/lib $LDFLAGS"
             export CPPFLAGS="-I$ICU_ROOT/include $CPPFLAGS"
 
+            # Use Boost 1.85 from Homebrew (set in previous step)
+            echo "Using BOOST_ROOT: $BOOST_ROOT"
             echo "Using ICU_ROOT: $ICU_ROOT"
             echo "Available ICU libraries:"
             ls -la "$ICU_ROOT/lib/" | grep -E "libicu.*\.(dylib|a)$" || echo "No ICU libraries found"
+
+            # Verify Boost installation
+            echo "Boost installation verification:"
+            ls -la "$BOOST_ROOT/include/boost/version.hpp" && grep "BOOST_LIB_VERSION" "$BOOST_ROOT/include/boost/version.hpp" || echo "Boost version.hpp not found"
 
             # Check for ICU library files and use versioned names if needed
             ICU_DATA_LIB=""
@@ -226,6 +239,11 @@ jobs:
               -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
               -DCMAKE_OSX_ARCHITECTURES=arm64 \
               -DBOOST_ROOT="$BOOST_ROOT" \
+              -DBOOST_INCLUDEDIR="$BOOST_ROOT/include" \
+              -DBOOST_LIBRARYDIR="$BOOST_ROOT/lib" \
+              -DBoost_NO_SYSTEM_PATHS=ON \
+              -DBOOST_INCLUDEDIR="$BOOST_ROOT/include" \
+              -DBOOST_LIBRARYDIR="$BOOST_ROOT/lib" \
               -DBUILD_TESTS=ON \
               -DICU_ROOT="$ICU_ROOT" \
               -DICU_INCLUDE_DIR="$ICU_ROOT/include" \
@@ -236,13 +254,19 @@ jobs:
               -DCMAKE_LIBRARY_PATH="$ICU_ROOT/lib" \
               -DCMAKE_INCLUDE_PATH="$ICU_ROOT/include" \
               -DBoost_USE_STATIC_LIBS=ON \
+              -DBoost_NO_SYSTEM_PATHS=ON \
               -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
               -DDISABLE_ASYNC_CONSOLE=$([[ "$CMAKE_BUILD_TYPE" == "RelWithDebInfo" ]] && echo ON || echo OFF)
           elif [ "${{ matrix.os }}" = "windows-2022" ]; then
+            # Use Chocolatey Boost 1.85.0
             cmake -S . -B build \
               -G Ninja \
               -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
               -DBUILD_TESTS=ON \
+              -DBOOST_ROOT="C:/local/boost_1_85_0" \
+              -DBOOST_INCLUDEDIR="C:/local/boost_1_85_0" \
+              -DBOOST_LIBRARYDIR="C:/local/boost_1_85_0/lib64-msvc-14.3" \
+              -DBoost_USE_STATIC_LIBS=ON \
               -DCMAKE_TOOLCHAIN_FILE="C:/vcpkg/scripts/buildsystems/vcpkg.cmake" \
               -DCMAKE_POLICY_DEFAULT_CMP0167=OLD
           else
@@ -250,7 +274,9 @@ jobs:
               -G Ninja \
               -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE \
               -DBUILD_TESTS=ON \
-              -DCMAKE_POLICY_DEFAULT_CMP0167=OLD
+              -DCMAKE_POLICY_DEFAULT_CMP0167=OLD \
+              -DCMAKE_CXX_FLAGS="${{ env.CMAKE_CXX_FLAGS_LINUX }}" \
+              -DCMAKE_C_FLAGS="${{ env.CMAKE_C_FLAGS_LINUX }}"
           fi
 
       - name: Build
@@ -284,4 +310,33 @@ jobs:
             build/**/fuego-wallet-cli*
             build/**/walletd*
             build/**/optimizer*
+            build/**/fuego-tui*
           retention-days: 30
+
+      # -------------------- Post-Cache Steps --------------------
+      - name: Post Cache Chocolatey packages (Windows)
+        if: matrix.os == 'windows-2022'
+        uses: actions/cache@v4
+        with:
+          path: C:\ProgramData\chocolatey\lib
+          key: ${{ runner.os }}-choco-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-choco-
+
+      - name: Post Cache vcpkg packages (Windows)
+        if: matrix.os == 'windows-2022'
+        uses: actions/cache@v4
+        with:
+          path: |
+            C:\vcpkg\installed
+            C:\vcpkg\buildtrees
+            C:\vcpkg\downloads
+          key: ${{ runner.os }}-vcpkg-boost-${{ hashFiles('**/CMakeLists.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-
+
+      - name: Post Run actions/checkout@v4
+        if: always()
+        uses: actions/checkout@v4
+        with:
+          clean: true

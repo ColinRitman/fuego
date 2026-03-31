@@ -1,3 +1,5 @@
+// Copyright (c) 2017-2026 Fuego Developers
+// Copyright (c) 2020-2026 Elderfire Privacy Group
 // Copyright (c) 2011-2017 The Cryptonote developers
 // Copyright (c) 2017-2018 The Circle Foundation & Conceal Devs
 // Copyright (c) 2018-2019 The TurtleCoin developers
@@ -11,6 +13,7 @@
 #include <algorithm>
 #include <fstream>
 
+#include <boost/foreach.hpp>
 #include <boost/uuid/random_generator.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <boost/utility/value_init.hpp>
@@ -18,6 +21,7 @@
 
 #include <miniupnpc/miniupnpc.h>
 #include <miniupnpc/upnpcommands.h>
+#include <miniupnpc/upnpdev.h>
 
 #include <System/Context.h>
 #include <System/ContextGroupTimeout.h>
@@ -43,6 +47,8 @@
 #include "Serialization/BinaryOutputStreamSerializer.h"
 #include "Serialization/SerializationOverloads.h"
 #include "Common/StringTools.h"
+#include "CryptoNoteCore/CommitmentIndex.h"
+#include "CryptoNoteCore/Core.h"
 
 using namespace Common;
 using namespace Logging;
@@ -60,16 +66,16 @@ size_t get_random_index_with_fixed_probability(size_t max_index) {
   return (x * x * x ) / (max_index * max_index); //parabola \/
 }
 
-void addPortMapping(Logging::LoggerRef& logger, uint32_t port) {
+void addPortMapping(const Logging::LoggerRef& logger, uint32_t port, uint32_t externalPort) {
   // Add UPnP port mapping
-  logger(INFO) <<  "Attempting to add IGD port mapping.";
+  logger(INFO) << "Attempting to add IGD port mapping.";
   int result;
-  UPNPDev* deviceList = upnpDiscover(1000, NULL, NULL, 0, 0, &result);
+  UPNPDev *deviceList = upnpDiscover(1000, nullptr, nullptr, 0, 0, 2, &result);
   UPNPUrls urls;
   IGDdatas igdData;
   char lanAddress[64];
   result = UPNP_GetValidIGD(deviceList, &urls, &igdData, lanAddress, sizeof lanAddress);
-    freeUPNPDevlist(deviceList);
+  freeUPNPDevlist(deviceList);
   if (result != 0) {
     if (result == 1) {
       std::ostringstream portString;
@@ -88,7 +94,7 @@ void addPortMapping(Logging::LoggerRef& logger, uint32_t port) {
       logger(ERROR) << "UPNP_GetValidIGD returned an unknown result code.";
     }
 
-      FreeUPNPUrls(&urls);
+    FreeUPNPUrls(&urls);
   } else {
     logger(INFO) <<  "No IGD was found.";
   }
@@ -263,6 +269,7 @@ namespace CryptoNote
       INVOKE_HANDLER(COMMAND_HANDSHAKE, &NodeServer::handle_handshake)
       INVOKE_HANDLER(COMMAND_TIMED_SYNC, &NodeServer::handle_timed_sync)
       INVOKE_HANDLER(COMMAND_PING, &NodeServer::handle_ping)
+      INVOKE_HANDLER(COMMAND_ELDERFIER_SIGNATURE, &NodeServer::handle_elderfier_signature)
 #ifdef ALLOW_DEBUG_COMMANDS
       INVOKE_HANDLER(COMMAND_REQUEST_STAT_INFO, &NodeServer::handle_get_stat_info)
       INVOKE_HANDLER(COMMAND_REQUEST_NETWORK_STATE, &NodeServer::handle_get_network_state)
@@ -385,7 +392,7 @@ namespace CryptoNote
 	return true;
   }
   //-----------------------------------------------------------------------------------
-  
+
   bool NodeServer::unblock_host(const uint32_t address_ip)
   {
     auto i = m_blocked_hosts.find(address_ip);
@@ -459,7 +466,7 @@ namespace CryptoNote
 	  std::unique_lock<std::mutex> lock(mutex);
 	  return block_host(address_ip, seconds);
   }
-  
+
   bool NodeServer::unban_host(const uint32_t address_ip)
   {
 	  std::unique_lock<std::mutex> lock(mutex);
@@ -619,7 +626,7 @@ namespace CryptoNote
       logger(INFO) <<  "External port defined as " << m_external_port;
     }
 
-    addPortMapping(logger, m_listeningPort);
+    addPortMapping(logger, m_listeningPort, m_external_port);
 
     return true;
   }
@@ -731,7 +738,7 @@ namespace CryptoNote
     {
       logger(Logging::WARNING) << context
                                << "COMMAND_HANDSHAKE Warning, your software may be out of date. Please visit: "
-                               << "https://github.com/fandomgold/fango/releases for the latest version.";
+                               << "https://github.com/usexfg/fuego-suite/releases for the latest version.";
     }
 
     if (!handle_remote_peerlist(rsp.local_peerlist, rsp.node_data.local_time, context)) {
@@ -1082,7 +1089,7 @@ namespace CryptoNote
     {
       m_peerlist.get_and_empty_anchor_peerlist(apl);
     }
-  
+
       size_t conn_count = get_outgoing_connections_count();
       //add new connections from white peers
       while (conn_count < expected_connections)
@@ -1142,7 +1149,7 @@ namespace CryptoNote
     time(&now);
     delta = now - local_time;
 
-    for(PeerlistEntry& be : local_peerlist)
+    BOOST_FOREACH(PeerlistEntry& be, local_peerlist)
     {
       if(be.last_seen > uint64_t(local_time))
       {
@@ -1434,6 +1441,85 @@ namespace CryptoNote
   }
   //-----------------------------------------------------------------------------------
 
+  int NodeServer::handle_elderfier_signature(int command, COMMAND_ELDERFIER_SIGNATURE::request& arg, COMMAND_ELDERFIER_SIGNATURE::response& rsp, P2pConnectionContext& context)
+  {
+    logger(Logging::TRACE) << context << "COMMAND_ELDERFIER_SIGNATURE from EFiD " << (int)arg.elderfier_id
+                           << " at height " << arg.block_height;
+
+    // STEP 1: Validate message format
+    if (arg.version != 1) {
+      logger(Logging::WARNING) << context << "Invalid elderfier signature message version: " << (int)arg.version;
+      return 1;  // Accept but don't process
+    }
+
+    // Check for empty/invalid signature data
+    if (arg.signature == Crypto::Signature{}) {
+      logger(Logging::WARNING) << context << "Empty signature from EFiD " << (int)arg.elderfier_id;
+      return 1;  // Accept but don't process
+    }
+
+    if (arg.merkle_root == Crypto::Hash{}) {
+      logger(Logging::WARNING) << context << "Empty merkle root from EFiD " << (int)arg.elderfier_id;
+      return 1;  // Accept but don't process
+    }
+
+    // STEP 2: Validate block height (not too far in future/past)
+    uint32_t currentHeight = m_payload_handler.getObservedHeight();
+    if (arg.block_height > currentHeight + 10) {  // Allow 10 blocks ahead (clock skew tolerance)
+      logger(Logging::WARNING) << context << "Elderfier signature with future block height: "
+                               << arg.block_height << " vs current " << currentHeight;
+      return 1;  // Accept but don't process
+    }
+
+    // STEP 3: Validate timestamp (not too old/new)
+    uint64_t currentTime = std::time(nullptr);
+    if (arg.timestamp > currentTime + 300 || arg.timestamp + 3600 < currentTime) {  // Allow 5 min ahead, 1 hour old
+      logger(Logging::DEBUGGING) << context << "Elderfier signature with suspicious timestamp: "
+                             << arg.timestamp << " vs current " << currentTime;
+      // Still relay, but flag as potentially suspicious
+    }
+
+    // STEP 4: Cache the signature
+    // Create cached signature entry for CommitmentIndex
+    CachedElderfierSignature cached_sig;
+    cached_sig.merkle_root = arg.merkle_root;
+    cached_sig.signature = arg.signature;
+    cached_sig.elderfier_id = arg.elderfier_id;
+    cached_sig.block_height = arg.block_height;
+    cached_sig.timestamp = arg.timestamp;
+    cached_sig.received_block_height = currentHeight;
+    cached_sig.is_valid = false;  // Mark for validation by CommitmentIndex
+
+    // Forward validated signature to CommitmentIndex via core->blockchain
+    try {
+      // Populate PQ extension fields from P2P message
+      cached_sig.sig_algorithm = arg.sig_algorithm;
+      cached_sig.pq_signature = arg.pq_signature;
+      cached_sig.pq_public_key = arg.pq_pubkey;
+
+      // Cast ICore& to concrete core& to access get_blockchain_storage()
+      auto& concrete_core = static_cast<CryptoNote::core&>(m_payload_handler.get_core());
+      concrete_core.get_blockchain_storage().addSignatureToCache(cached_sig);
+
+      logger(Logging::DEBUGGING) << "Elderfier signature cached: EFiD " << (int)arg.elderfier_id
+                                 << " at height " << arg.block_height
+                                 << " for merkle root " << Common::podToHex(arg.merkle_root);
+
+    } catch (const std::exception& e) {
+      logger(Logging::ERROR) << "Error processing elderfier signature: " << e.what();
+      return 1;  // Accept but don't process on error
+    }
+
+    // STEP 5: Relay to all peers for gossip propagation
+    // This ensures signatures spread across the network even if initial validation fails
+    relay_notify_to_all(command, LevinProtocol::encode(arg), &context.m_connection_id);
+
+    logger(Logging::DEBUGGING) << context << "Elderfier signature relayed for gossip: EFiD " << (int)arg.elderfier_id;
+
+    return 1;  // Success - always return 1 for notify messages
+  }
+  //-----------------------------------------------------------------------------------
+
   bool NodeServer::log_peerlist()
   {
     std::list<PeerlistEntry> pl_wite;
@@ -1443,7 +1529,7 @@ namespace CryptoNote
     return true;
   }
   //-----------------------------------------------------------------------------------
-  
+
   bool NodeServer::log_banlist()
   {
 	  logger(INFO) << "Banned nodes:" << ENDL << print_banlist_to_string(m_blocked_hosts) << ENDL;
@@ -1538,9 +1624,9 @@ namespace CryptoNote
         ctx.m_is_income = true;
         ctx.m_started = time(nullptr);
 
-          auto addressAndPort = ctx.connection.getPeerAddressAndPort();
-          ctx.m_remote_ip = hostToNetwork(addressAndPort.first.getValue());
-          ctx.m_remote_port = addressAndPort.second;
+        auto addressAndPort = ctx.connection.getPeerAddressAndPort();
+        ctx.m_remote_ip = hostToNetwork(addressAndPort.first.getValue());
+        ctx.m_remote_port = addressAndPort.second;
 
         auto iter = m_connections.emplace(ctx.m_connection_id, std::move(ctx)).first;
         const boost::uuids::uuid& connectionId = iter->first;

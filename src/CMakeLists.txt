@@ -1,5 +1,6 @@
 add_definitions(-DSTATICLIB)
 include_directories(${CMAKE_SOURCE_DIR}/external/parallel_hashmap)
+include_directories(${CMAKE_SOURCE_DIR}/external/httplib)
 
 # Add JSON include directories globally for all targets
 if(JSONCPP_INCLUDE_DIRS)
@@ -9,6 +10,7 @@ endif()
 file(GLOB_RECURSE BlockchainExplorer BlockchainExplorer/*)
 file(GLOB_RECURSE Common Common/*)
 file(GLOB_RECURSE Crypto crypto/*)
+add_library(Crypto STATIC ${Crypto})
 file(GLOB_RECURSE CryptoNoteCore CryptoNoteCore/* CryptoNoteConfig.h DynamicRingSize.cpp OSPEADDecoySelection.cpp)
 file(GLOB_RECURSE CryptoNoteProtocol CryptoNoteProtocol/*)
 file(GLOB_RECURSE Daemon Daemon/*)
@@ -18,7 +20,7 @@ file(GLOB_RECURSE Logging Logging/*)
 # Optimizer sources
 file(GLOB_RECURSE NodeRpcProxy NodeRpcProxy/*)
 file(GLOB_RECURSE P2p P2p/*)
-file(GLOB_RECURSE Rpc Rpc/*)
+file(GLOB_RECURSE RPC_SOURCES Rpc/*)
 file(GLOB_RECURSE Serialization Serialization/*)
 # Source files defined directly in add_executable calls
 
@@ -29,38 +31,105 @@ file(GLOB_RECURSE JsonRpcServer JsonRpcServer/*)
 file(GLOB_RECURSE PaymentGate PaymentGate/*)
 file(GLOB_RECURSE PaymentGateService PaymentGateService/*)
 file(GLOB_RECURSE SimpleWallet SimpleWallet/*)
+
+# Remove duplicate glob definition and explicitly define library sources
+list(REMOVE_ITEM SimpleWallet SimpleWallet/main.cpp)
+
+# Adaptor swap protocol helpers needed by wallet commands
+list(APPEND SimpleWallet
+    SwapDaemon/AdaptorSwap.cpp
+    SwapDaemon/SwapTypes.cpp
+)
+
 file(GLOB_RECURSE Optimizer Optimizer/*)
-file(GLOB_RECURSE SimpleWalletLib SimpleWallet/*)
 
 # Tor integration
-add_subdirectory(FuegoTor)
+#add_subdirectory(FuegoTor)
 
 # Eldernode services
 add_subdirectory(EldernodeIndexManager)
 add_subdirectory(BurnDepositValidationService)
 
 # System files
-if(WIN32)
-  file(GLOB_RECURSE System System/* Platform/Windows/System/*)
+if(MSVC)
+  file(GLOB_RECURSE System Platform/Windows/System/* System/*)
 elseif(APPLE)
-  file(GLOB_RECURSE System System/* Platform/OSX/System/*)
+  file(GLOB_RECURSE System Platform/OSX/System/* System/*)
+elseif(ANDROID)
+  file(GLOB_RECURSE System Platform/Android/System/* System/* Platform/Posix/System/*)
+elseif(FREEBSD)
+  file(GLOB_RECURSE System Platform/FreeBSD/System/* System/* Platform/Posix/System/*)
 else()
-  file(GLOB_RECURSE System System/* Platform/Linux/System/*)
+  file(GLOB_RECURSE System System/* Platform/Linux/System/* Platform/Posix/System/*)
 endif()
 
-source_group("" FILES ${Common} ${Crypto} ${CryptoNoteCore} ${CryptoNoteProtocol} ${Daemon} ${JsonRpcServer} ${Http} ${Logging} ${NodeRpcProxy} ${P2p} ${Rpc} ${Serialization} ${SimpleWallet} ${System} ${Transfers} ${Wallet} ${WalletLegacy})
+# Explicitly include platform-specific files
+if(MSVC)
+  list(APPEND System Platform/Windows/System/Ipv4Resolver.cpp Platform/Windows/System/ErrorMessage.cpp Platform/Windows/System/Future.h)
+elseif(APPLE)
+  list(APPEND System Platform/OSX/System/Ipv4Resolver.cpp Platform/OSX/System/ErrorMessage.cpp Platform/OSX/System/Future.h)
+elseif(ANDROID)
+  list(APPEND System Platform/Android/System/Ipv4Resolver.cpp Platform/Android/System/ErrorMessage.cpp Platform/Android/System/Future.h)
+elseif(FREEBSD)
+  list(APPEND System Platform/FreeBSD/System/Ipv4Resolver.cpp Platform/FreeBSD/System/ErrorMessage.cpp Platform/FreeBSD/System/Future.h)
+else()
+  list(APPEND System Platform/Linux/System/Ipv4Resolver.cpp Platform/Linux/System/ErrorMessage.cpp Platform/Linux/System/Future.h)
+endif()
+
+  # Add Boost linking to existing System target
+
+# Explicitly include ContextGroupTimeout files for all platforms
+list(APPEND System
+  System/ContextGroupTimeout.cpp
+  System/ContextGroupTimeout.h
+)
+
+# Add platform-specific files
+if(MSVC)
+  list(APPEND System Platform/Windows/System/Ipv4Resolver.cpp Platform/Windows/System/ErrorMessage.cpp Platform/Windows/System/Future.h)
+elseif(APPLE)
+  list(APPEND System Platform/OSX/System/Ipv4Resolver.cpp Platform/OSX/System/ErrorMessage.cpp Platform/OSX/System/Future.h)
+elseif(ANDROID)
+  list(APPEND System Platform/Android/System/Ipv4Resolver.cpp Platform/Android/System/ErrorMessage.cpp Platform/Android/System/Future.h)
+elseif(FREEBSD)
+  list(APPEND System Platform/FreeBSD/System/Ipv4Resolver.cpp Platform/FreeBSD/System/ErrorMessage.cpp Platform/FreeBSD/System/Future.h)
+else()
+  list(APPEND System Platform/Linux/System/Ipv4Resolver.cpp Platform/Linux/System/ErrorMessage.cpp Platform/Linux/System/Future.h)
+endif()
+
+# Add ContextGroupTimeout.cpp directly to System library
+set(SYSTEM_SOURCES ${System})
+
+source_group("" FILES ${Common} ${Crypto} ${CryptoNoteCore} ${CryptoNoteProtocol} ${Daemon} ${JsonRpcServer} ${Http} ${Logging} ${NodeRpcProxy} ${P2p} ${Rpc} ${Serialization} ${SimpleWallet} ${SYSTEM_SOURCES} ${Transfers} ${Wallet} ${WalletLegacy})
 
 # --------------------------
 # Libraries
 # --------------------------
 add_library(BlockchainExplorer STATIC ${BlockchainExplorer})
-target_include_directories(BlockchainExplorer SYSTEM PUBLIC ${JSONCPP_INCLUDE_DIRS})
-target_link_libraries(BlockchainExplorer PUBLIC ${JSONCPP_LIBRARIES})
+target_include_directories(BlockchainExplorer SYSTEM PUBLIC ${JSONCPP_INCLUDE_DIRS} ${Boost_INCLUDE_DIRS})
+target_link_libraries(BlockchainExplorer PUBLIC ${JSONCPP_LIBRARIES} ${Boost_LIBRARIES})
 add_library(Common STATIC ${Common})
-add_library(Crypto STATIC ${Crypto})
+# System target already defined at line 81 - removing duplicate definition
+
+if(NOT TARGET System)
+  add_library(System STATIC ${SYSTEM_SOURCES})
+
+  # Fix ucontext compilation issues on macOS
+  if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+      # Define _XOPEN_SOURCE for ucontext functions on macOS
+      target_compile_definitions(System PRIVATE _XOPEN_SOURCE=700)
+      target_compile_definitions(System PRIVATE __MAC_OS_X_VERSION_MIN_REQUIRED=101200)
+      message(STATUS "macOS detected, added ucontext compatibility definitions for System library")
+  endif()
+endif()
+
 
 add_library(CryptoNoteCore STATIC ${CryptoNoteCore})
-target_compile_options(CryptoNoteCore PRIVATE -Wno-deprecated-declarations)
+if(MSVC)
+    target_compile_options(CryptoNoteCore PRIVATE /W0)
+else()
+    target_compile_options(CryptoNoteCore PRIVATE -Wno-deprecated-declarations)
+endif()
 target_link_libraries(CryptoNoteCore PUBLIC
     Crypto
     Common
@@ -75,6 +144,7 @@ target_include_directories(CryptoNoteCore PUBLIC
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/external
 )
+target_include_directories(CryptoNoteCore SYSTEM PUBLIC ${Boost_INCLUDE_DIRS})
 add_dependencies(CryptoNoteCore version)
 
 # --------------------------
@@ -82,23 +152,30 @@ add_dependencies(CryptoNoteCore version)
 # --------------------------
 # Robust AES-NI configuration that works in CI environments
 
-# Always try to enable AES-NI for GCC/Clang on non-Android systems
+# Always try to enable AES-NI for GCC/Clang on non-Android x86_64 systems
 if (CMAKE_C_COMPILER_ID MATCHES "GNU|Clang" AND NOT ANDROID)
-    # Enable AES-NI and SSE instructions for cryptographic operations
-    target_compile_options(Crypto PRIVATE -maes -msse2 -msse4.1 -msse4.2)
-
-    # Add preprocessor definitions for AES-NI support
-    target_compile_definitions(Crypto PRIVATE __AES__ __SSE2__ __SSE4_1__ __SSE4_2__ HAVE_AES_NI)
-
-    # Special handling for CI environments
-    if (DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS} OR DEFINED ENV{GITHUB_REF} OR DEFINED ENV{GITHUB_RUN_ID})
-        # In CI, add march=native for better performance (works in most CI environments)
-        target_compile_options(Crypto PRIVATE -march=native)
-        message(STATUS "CI environment detected, AES-NI enabled with march=native for Crypto library")
+    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin" AND (CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" OR CMAKE_OSX_ARCHITECTURES STREQUAL "arm64"))
+        # Apple Silicon: skip AES/SSE flags, use software AES
+        # FORCE_USE_HEAP: allocate cn_slow_hash scratchpad on heap instead of stack
+        # to avoid stack overflow (2MB buffer vs 512KB default thread stack size)
+        target_compile_definitions(Crypto PRIVATE NO_AES FORCE_USE_HEAP)
+        message(STATUS "Apple Silicon detected, using software AES with heap allocation for Crypto library")
     else()
-        message(STATUS "AES-NI instructions enabled for Crypto library")
-    endif()
+        # Enable AES-NI and SSE instructions for cryptographic operations
+        target_compile_options(Crypto PRIVATE -maes -msse2 -msse4.1 -msse4.2)
 
+        # Add preprocessor definitions for AES-NI support
+        target_compile_definitions(Crypto PRIVATE __AES__ __SSE2__ __SSE4_1__ __SSE4_2__ HAVE_AES_NI)
+
+        # Special handling for CI environments
+        if (DEFINED ENV{CI} OR DEFINED ENV{GITHUB_ACTIONS} OR DEFINED ENV{GITHUB_REF} OR DEFINED ENV{GITHUB_RUN_ID})
+            # In CI, add march=native for better performance (works in most CI environments)
+            target_compile_options(Crypto PRIVATE -march=native)
+            message(STATUS "CI environment detected, AES-NI enabled with march=native for Crypto library")
+        else()
+            message(STATUS "AES-NI instructions enabled for Crypto library")
+        endif()
+    endif()
 elseif (CMAKE_C_COMPILER_ID MATCHES "MSVC" AND NOT ANDROID)
     # MSVC compiler - enable AVX2 which includes AES-NI support
     target_compile_options(Crypto PRIVATE /arch:AVX2)
@@ -115,30 +192,20 @@ else()
     endif()
 endif()
 
-# Platform-specific adjustments
-if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    # On macOS, only enable for Intel Macs
-    if (CMAKE_OSX_ARCHITECTURES MATCHES "arm64")
-        # Apple Silicon - use software AES
-        target_compile_definitions(Crypto PRIVATE NO_AES)
-        target_compile_options(Crypto PRIVATE -msse2 -msse4.1)  # Keep SSE for other crypto operations
-        message(STATUS "Apple Silicon detected, using software AES for Crypto library")
-    else()
-        # Intel Mac or unknown - AES-NI should be enabled above
-        message(STATUS "macOS Intel or unknown architecture, AES-NI configuration applied")
-    endif()
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    # Linux - AES-NI should be enabled above for GCC/Clang
-    message(STATUS "Linux detected, AES-NI configuration applied")
-endif()
+# Platform-specific adjustments handled above
+# No additional flags needed for Darwin/Linux
 
 message(STATUS "=== End AES-NI Configuration ===")
 
 add_library(Http STATIC ${Http})
 add_library(InProcessNode STATIC ${InProcessNode})
 add_library(Logging STATIC ${Logging})
+target_include_directories(Logging SYSTEM PUBLIC ${Boost_INCLUDE_DIRS})
+target_link_libraries(Logging PUBLIC ${Boost_LIBRARIES})
+target_link_libraries(Logging PUBLIC ${Boost_LIBRARIES})
 add_library(NodeRpcProxy STATIC ${NodeRpcProxy})
-add_library(Rpc STATIC ${Rpc})
+add_library(Rpc STATIC ${RPC_SOURCES})
+target_include_directories(Rpc PRIVATE ${CMAKE_SOURCE_DIR}/external/httplib)
 add_library(P2P STATIC ${CryptoNoteProtocol} ${P2p})
 # Check if target exists to prevent duplicate definition
 if(NOT TARGET CryptoNoteCore)
@@ -163,7 +230,6 @@ add_library(Serialization STATIC ${Serialization})
 target_link_libraries(Serialization PUBLIC Common)
 # Link jsoncpp for any potential JSON serialization
 target_link_libraries(Serialization PUBLIC ${JSONCPP_LIBRARIES})
-add_library(System STATIC ${System})
 
 # Fix ucontext compilation issues on macOS
 if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
@@ -180,16 +246,57 @@ add_library(JsonRpcServer STATIC ${JsonRpcServer})
 target_include_directories(JsonRpcServer SYSTEM PUBLIC ${JSONCPP_INCLUDE_DIRS})
 target_link_libraries(JsonRpcServer PUBLIC ${JSONCPP_LIBRARIES})
 add_library(SimpleWalletLib STATIC ${SimpleWallet})
+target_link_libraries(SimpleWalletLib PUBLIC
+    Wallet
+    NodeRpcProxy
+    Transfers
+    Rpc
+    Http
+    CryptoNoteCore
+    System
+    Logging
+    Common
+    Crypto
+    ${Boost_LIBRARIES}
+    Serialization
+    ${JSONCPP_LIBRARIES}
+)
+
 add_executable(Daemon ${Daemon})
 add_executable(TestnetDaemon Daemon/DaemonCommandsHandler.cpp Daemon/DaemonCommandsHandler.h TestnetDaemon/TestnetDaemon.cpp)
-add_executable(SimpleWallet ${SimpleWallet})
+# SimpleWallet executable uses library + adds back main.cpp
+add_executable(SimpleWallet ${SimpleWallet} SimpleWallet/main.cpp)
 add_executable(PaymentGateService ${PaymentGateService})
 add_executable(Optimizer ${Optimizer})
 
-# JSON libraries will be linked through keyword signatures below
+# Swap Daemon executable (xfg-swap)
+add_executable(SwapDaemon
+    SwapDaemon/main.cpp
+    SwapDaemon/SwapTypes.cpp
+    SwapDaemon/SwapStateMachine.cpp
+    SwapDaemon/AdaptorSwap.cpp
+    SwapDaemon/FuegoRpcClient.cpp
+    SwapDaemon/PriceOracle.cpp
+    SwapDaemon/SwapDatabase.cpp
+    SwapDaemon/SwapDaemon.cpp
+    SwapDaemon/SwapP2P.cpp
+    SwapDaemon/Monero/MoneroRpcClient.cpp
+    SwapDaemon/Monero/AdaptorSignature.cpp
+    SwapDaemon/Ethereum/EthRpcClient.cpp
+    SwapDaemon/Ethereum/ContractAbi.cpp
+    SwapDaemon/BitcoinCash/BchRpcClient.cpp
+    SwapDaemon/BitcoinCash/HtlcScript.cpp
+    SwapDaemon/Solana/SolRpcClient.cpp
+)
 
-# Add TestnetWallet executable
-add_executable(testnet-wallet-cli TestnetWallet/TestnetWallet.cpp)
+# Add TestnetWallet executable (extends simple_wallet with testnet-specific commands)
+add_executable(testnet-wallet-cli
+    TestnetWallet/main.cpp
+    TestnetWallet/TestnetWallet.cpp
+    SimpleWallet/PasswordContainer.cpp
+    SimpleWallet/ClientHelper.cpp
+    SimpleWallet/TransferCmd.cpp
+)
 
 # Set proper linker flags to find FuegoTor library
 # FuegoTor library path is handled by target_link_directories
@@ -200,16 +307,16 @@ set(FUEGOTOR_LIB_PATH ${CMAKE_CURRENT_BINARY_DIR}/src/FuegoTor)
 target_link_directories(PaymentGateService PRIVATE ${FUEGOTOR_LIB_PATH})
 target_link_directories(SimpleWallet PRIVATE ${FUEGOTOR_LIB_PATH})
 target_link_directories(Daemon PRIVATE ${FUEGOTOR_LIB_PATH})
+target_link_directories(TestnetDaemon PRIVATE ${FUEGOTOR_LIB_PATH})
 target_link_directories(testnet-wallet-cli PRIVATE ${FUEGOTOR_LIB_PATH})
+target_link_directories(SwapDaemon PRIVATE ${FUEGOTOR_LIB_PATH})
 
 target_link_libraries(testnet-wallet-cli PRIVATE
-    SimpleWalletLib
     Wallet
     NodeRpcProxy
     Transfers
     Rpc
     Http
-    Fuegotor
     CryptoNoteCore
     Crypto
     P2P
@@ -218,7 +325,7 @@ target_link_libraries(testnet-wallet-cli PRIVATE
     Common
     upnpc-static
     BlockchainExplorer
-    Fuegotor
+    SimpleWalletLib
     ${Boost_LIBRARIES}
     Serialization
     ${JSONCPP_LIBRARIES}
@@ -234,14 +341,15 @@ target_link_libraries(Daemon PRIVATE
     CryptoNoteCore
     P2P
     Rpc
+    CryptoNoteCore
+    Crypto
+    Common
+    Logging
     System
     Http
-    Logging
-    Common
     InProcessNode
     upnpc-static
     BlockchainExplorer
-    Fuegotor
     ${Boost_LIBRARIES}
     Serialization
     ${JSONCPP_LIBRARIES}
@@ -251,11 +359,12 @@ target_link_libraries(TestnetDaemon PRIVATE
     CryptoNoteCore
     P2P
     Rpc
+    CryptoNoteCore
+    Crypto
+    Common
+    Logging
     System
     Http
-    Logging
-    Common
-    Crypto
     upnpc-static
     BlockchainExplorer
     ${Boost_LIBRARIES}
@@ -289,14 +398,14 @@ target_link_libraries(PaymentGateService PRIVATE
     Crypto
     P2P
     Rpc
+    CryptoNoteCore
+    Common
+    Logging
     Http
     System
-    Logging
-    Common
     InProcessNode
     upnpc-static
     BlockchainExplorer
-    Fuegotor
     ${Boost_LIBRARIES}
     Serialization
   )
@@ -310,29 +419,60 @@ target_link_libraries(Optimizer PRIVATE
     Common
     Crypto
     System
-    Fuegotor
     ${Boost_LIBRARIES}
     Serialization
     ${JSONCPP_LIBRARIES}
 )
 
+target_link_libraries(SwapDaemon PRIVATE
+    Crypto Common Logging Crypto Common
+    ${Boost_LIBRARIES}
+    ssl
+    crypto
+)
+target_include_directories(SwapDaemon PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/include
+)
+
 target_link_libraries(SimpleWallet PRIVATE
     SimpleWalletLib
-    Wallet
-    NodeRpcProxy
-    Transfers
-    Rpc
-    Http
-    CryptoNoteCore
-    System
-    Logging
-    Common
-    Crypto
-    Fuegotor
-    ${Boost_LIBRARIES}
-    Serialization
-    ${JSONCPP_LIBRARIES}
 )
+
+# Suppress deprecation warnings for Rpc target
+if(APPLE)
+  target_compile_options(Rpc PRIVATE -Wno-deprecated-declarations -Wno-deprecated -Wno-deprecated-builtins -Wno-unused-function -Wno-unused-variable -Wno-unused-but-set-variable -Wno-deprecated-copy -Wno-deprecated-copy-dtor -Wno-system-headers -w)
+  target_include_directories(Rpc SYSTEM PRIVATE /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1)
+  target_include_directories(Rpc SYSTEM PRIVATE /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1)
+  target_include_directories(Rpc SYSTEM PRIVATE /opt/homebrew/include)
+  target_include_directories(Rpc SYSTEM PRIVATE /usr/local/include)
+  target_include_directories(Rpc SYSTEM PRIVATE ${CMAKE_SOURCE_DIR}/external/parallel_hashmap)
+
+  # Ensure proper C++ standard library linking
+  target_link_libraries(Rpc PRIVATE -stdlib=libc++)
+endif()
+
+# Ensure all targets use proper C++ standard library on macOS
+if(APPLE)
+  target_link_libraries(BlockchainExplorer PRIVATE -stdlib=libc++)
+  target_link_libraries(Common PRIVATE -stdlib=libc++)
+  target_link_libraries(Crypto PRIVATE -stdlib=libc++)
+  target_link_libraries(CryptoNoteCore PRIVATE -stdlib=libc++)
+  target_link_libraries(Http PRIVATE -stdlib=libc++)
+  target_link_libraries(InProcessNode PRIVATE -stdlib=libc++)
+  target_link_libraries(Logging PRIVATE -stdlib=libc++)
+  target_link_libraries(NodeRpcProxy PRIVATE -stdlib=libc++)
+  target_link_libraries(Rpc PRIVATE -stdlib=libc++)
+  target_link_libraries(P2P PRIVATE -stdlib=libc++)
+  target_link_libraries(Serialization PRIVATE -stdlib=libc++)
+  target_link_libraries(System PRIVATE -stdlib=libc++)
+  target_link_libraries(Transfers PRIVATE -stdlib=libc++)
+  target_link_libraries(Wallet PRIVATE -stdlib=libc++)
+  target_link_libraries(PaymentGate PRIVATE -stdlib=libc++)
+  target_link_libraries(JsonRpcServer PRIVATE -stdlib=libc++)
+  target_link_libraries(SimpleWalletLib PRIVATE -stdlib=libc++)
+  target_link_libraries(SwapDaemon PRIVATE -stdlib=libc++)
+endif()
 
 # --------------------------
 # ICU linking is handled in root CMakeLists.txt
@@ -348,6 +488,7 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux" OR APPLE AND NOT ANDROID)
   target_link_libraries(TestnetDaemon PRIVATE -lresolv)
   target_link_libraries(PaymentGateService PRIVATE -lresolv)
   target_link_libraries(Optimizer PRIVATE -lresolv)
+  target_link_libraries(SwapDaemon PRIVATE -lresolv)
 endif ()
 
 # --------------------------
@@ -365,9 +506,10 @@ add_dependencies(P2P version)
 # --------------------------
 # Output names
 # --------------------------
-set_property(TARGET SimpleWallet PROPERTY OUTPUT_NAME "fuego-wallet-cli")
-set_property(TARGET testnet-wallet-cli PROPERTY OUTPUT_NAME "testnet-wallet-cli")
+set_property(TARGET SimpleWallet PROPERTY OUTPUT_NAME "fire_wallet")
+set_property(TARGET testnet-wallet-cli PROPERTY OUTPUT_NAME "test_wallet")
 set_property(TARGET PaymentGateService PROPERTY OUTPUT_NAME "walletd")
 set_property(TARGET Daemon PROPERTY OUTPUT_NAME "fuegod")
 set_property(TARGET TestnetDaemon PROPERTY OUTPUT_NAME "testnetd")
-set_property(TARGET Optimizer PROPERTY OUTPUT_NAME "fuego-optimizer")
+set_property(TARGET Optimizer PROPERTY OUTPUT_NAME "optimizer")
+set_property(TARGET SwapDaemon PROPERTY OUTPUT_NAME "xfg-swap")

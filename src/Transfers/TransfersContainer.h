@@ -135,6 +135,8 @@ struct TransactionOutputInformationEx : public TransactionOutputInformationIn {
     } else if (type == TransactionTypes::OutputType::Multisignature) {
       s(requiredSignatures, "");
       s(term, "");
+    } else if (type == TransactionTypes::OutputType::Commitment) {
+      s(term, "");
     }
   }
 

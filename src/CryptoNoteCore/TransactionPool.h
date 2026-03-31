@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -30,21 +30,21 @@
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/multi_index/member.hpp>
 
-#include "Common/Util.h"
-#include "Common/int-util.h"
-#include "Common/ObserverManager.h"
-#include "crypto/hash.h"
+#include "../Common/Util.h"
+#include "../Common/int-util.h"
+#include "../Common/ObserverManager.h"
+#include "../crypto/hash.h"
 
-#include "CryptoNoteCore/CryptoNoteBasic.h"
-#include "CryptoNoteCore/CryptoNoteBasicImpl.h"
-#include "CryptoNoteCore/Currency.h"
-#include "CryptoNoteCore/ITimeProvider.h"
-#include "CryptoNoteCore/ITransactionValidator.h"
-#include "CryptoNoteCore/ITxPoolObserver.h"
-#include "CryptoNoteCore/VerificationContext.h"
-#include "CryptoNoteCore/BlockchainIndices.h"
+#include "CryptoNoteBasic.h"
+#include "CryptoNoteBasicImpl.h"
+#include "Currency.h"
+#include "ITimeProvider.h"
+#include "ITransactionValidator.h"
+#include "ITxPoolObserver.h"
+#include "VerificationContext.h"
+#include "BlockchainIndices.h"
 
-#include <Logging/LoggerRef.h>
+#include "../Logging/LoggerRef.h"
 
 namespace CryptoNote {
 
@@ -85,7 +85,7 @@ namespace CryptoNote {
   class tx_memory_pool: boost::noncopyable {
   public:
     tx_memory_pool(
-      const CryptoNote::Currency& currency, 
+      const CryptoNote::Currency& currency,
       CryptoNote::ITransactionValidator& validator,
       CryptoNote::ITimeProvider& timeProvider,
       Logging::ILogger& log);
@@ -118,11 +118,10 @@ namespace CryptoNote {
     std::string print_pool(bool short_format) const;
     void on_idle();
 
-    // Lazy-loading functions for removed indexes
     bool getTransactionIdsByPaymentId(const Crypto::Hash& paymentId, std::vector<Crypto::Hash>& transactionIds);
     bool getTransactionIdsByTimestamp(uint64_t timestampBegin, uint64_t timestampEnd, uint32_t transactionsNumberLimit, std::vector<Crypto::Hash>& hashes, uint64_t& transactionsNumberWithinTimestamps);
     bool getTransaction(const Crypto::Hash &id, Transaction &tx);
-    
+
     template<class t_ids_container, class t_tx_container, class t_missed_container>
     void getTransactions(const t_ids_container& txsIds, t_tx_container& txs, t_missed_container& missedTxs) {
       std::lock_guard<std::recursive_mutex> lock(m_transactions_lock);
@@ -209,14 +208,14 @@ namespace CryptoNote {
     CryptoNote::ITransactionValidator& m_validator;
     CryptoNote::ITimeProvider& m_timeProvider;
 
-    tx_container_t m_transactions;  
+    tx_container_t m_transactions;
     tx_container_t::nth_index<1>::type& m_fee_index;
-    // std::unordered_map<Crypto::Hash, uint64_t> m_recentlyDeletedTransactions;  // REMOVED: Debug only
+    std::unordered_map<Crypto::Hash, uint64_t> m_recentlyDeletedTransactions;
 
     Logging::LoggerRef logger;
 
-    // PaymentIdIndex m_paymentIdIndex;  // REMOVED: RPC convenience only, lazy-load when needed
-    // TimestampTransactionsIndex m_timestampIndex;  // REMOVED: RPC convenience only, lazy-load when needed
+    PaymentIdIndex m_paymentIdIndex;
+    TimestampTransactionsIndex m_timestampIndex;
     std::unordered_map<Crypto::Hash, uint64_t> m_ttlIndex;
   };
 }

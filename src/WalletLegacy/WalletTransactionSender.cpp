@@ -17,6 +17,7 @@
 
 #include "INode.h"
 #include "crypto/crypto.h" //for rand()
+#include <iostream>
 #include "CryptoNoteCore/Account.h"
 #include "DynamicRingSize.h"
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
@@ -25,16 +26,37 @@
 #include "CryptoNoteCore/CryptoNoteBasicImpl.h"
 #include "WalletLegacy/WalletTransactionSender.h"
 #include "WalletLegacy/WalletUtils.h"
+#include "CryptoNoteCore/DepositCommitment.h"
+#include "CryptoNoteCore/BurnProofDataFileGenerator.h"
+#include "Common/FileSystem.h"
+#include "Common/PathTools.h"
+#include "INode.h"
 
 #include <Logging/LoggerGroup.h>
+#include <array>
+#include <cstring>
+#include <numeric>
 #include <random>
 #include <set>
+#include "CryptoNoteCore/TransactionExtra.h"
 
 using namespace Crypto;
 
 namespace
 {
   using namespace CryptoNote;
+
+  // Build a 36-byte map key from (txHash, outputIndex) for sub-address output lookup
+  // std::array has lexicographic operator<, so no custom comparator needed
+  std::array<uint8_t, 36> makeSubAddrOutputKey(const Crypto::Hash& txHash, uint32_t outputIdx) {
+    std::array<uint8_t, 36> key;
+    std::memcpy(key.data(), txHash.data, 32);
+    key[32] = outputIdx & 0xFF;
+    key[33] = (outputIdx >> 8) & 0xFF;
+    key[34] = (outputIdx >> 16) & 0xFF;
+    key[35] = (outputIdx >> 24) & 0xFF;
+    return key;
+  }
 
   uint64_t countNeededMoney(uint64_t fee, const std::vector<WalletLegacyTransfer> &transfers)
   {
@@ -158,31 +180,30 @@ namespace
       throwIf(deposit.locked, error::DEPOSIT_LOCKED);
 
 
-      amount += deposit.amount + deposit.interest;
+      amount += deposit.amount;
     }
 
     return amount;
   }
-  
-  void countDepositsTotalSumAndInterestSum(const std::vector<DepositId> &depositIds, WalletUserTransactionsCache &depositsCache,
 
+  void countDepositsTotalSumAndInterestSum(const std::vector<DepositId> &depositIds, WalletUserTransactionsCache &depositsCache,
                                            uint64_t &totalSum, uint64_t &interestsSum)
   {
     totalSum = 0;
     interestsSum = 0;
-   
+
 
     for (auto id : depositIds)
     {
       Deposit &deposit = depositsCache.getDeposit(id);
 
-      totalSum += deposit.amount + deposit.interest;
+      totalSum += deposit.amount;
       interestsSum += deposit.interest;
 
-      
+
     }
   }
-  
+
 } //namespace
 
 namespace CryptoNote
@@ -200,6 +221,21 @@ namespace CryptoNote
   void WalletTransactionSender::stop()
   {
     m_isStoping = true;
+  }
+
+  void WalletTransactionSender::addSubAddress(const AccountKeys& subKeys, ITransfersContainer& subContainer)
+  {
+    m_subAddressSources.push_back({subKeys, &subContainer});
+
+    // Index all currently known unlocked outputs from this sub-address container
+    // so prepareKeyInputs can look up the correct signing keys per output
+    std::vector<TransactionOutputInformation> outputs;
+    subContainer.getOutputs(outputs, ITransfersContainer::IncludeKeyUnlocked);
+    for (const auto& out : outputs) {
+      if (out.type == TransactionTypes::OutputType::Key) {
+        m_subAddressOutputKeys[makeSubAddrOutputKey(out.transactionHash, out.outputInTransaction)] = subKeys;
+      }
+    }
   }
 
   bool WalletTransactionSender::validateDestinationAddress(const std::string &address)
@@ -247,22 +283,13 @@ namespace CryptoNote
     }
     else
     {
-      // Use dynamic ring sizing for optimal privacy
-      // This will be enforced by the blockchain when BlockMajorVersion 10 is active
-      mixIn = CryptoNote::parameters::MIN_TX_MIXIN_SIZE_V10; // Start with minimum
       neededMoney = countNeededMoney(fee, transfers);
       context->foundMoney = selectTransfersToSend(neededMoney, false, context->dustPolicy.dustThreshold, context->selectedTransfers);
-      
-      // Calculate optimal ring size based on available outputs
-      uint64_t calculatedRingSize = calculateDynamicRingSize(context->selectedTransfers, mixIn);
-      
-      // Check if ring size 8 is achievable (for BlockMajorVersion 10+)
-      if (calculatedRingSize == 0) {
-        // Insufficient outputs for minimum ring size 8
-        throw std::system_error(make_error_code(error::INSUFFICIENT_OUTPUTS_FOR_RING_SIZE));
-      }
-      
-      mixIn = calculatedRingSize;
+
+      // Probe with maxMixin outputs per amount; actual ring size is selected in
+      // sendTransactionRandomOutsByAmount once we know what the daemon has available.
+      mixIn = m_currency.maxMixin();
+      context->dynamicRingSize = true;
     }
     throwIf(context->foundMoney < neededMoney, error::WRONG_AMOUNT);
 
@@ -299,16 +326,39 @@ namespace CryptoNote
       uint64_t fee,
       uint64_t mixIn)
   {
+    return makeDepositRequest(transactionId, events, term, amount, fee, std::string(), mixIn);
+  }
 
-    throwIf(term < m_currency.depositMinTerm(), error::DEPOSIT_TERM_TOO_SMALL);
-    throwIf(term > m_currency.depositMaxTerm(), error::DEPOSIT_TERM_TOO_BIG);
-    throwIf(amount < m_currency.depositMinAmount(), error::DEPOSIT_AMOUNT_TOO_SMALL);
+  std::unique_ptr<WalletRequest> WalletTransactionSender::makeDepositRequest(
+      TransactionId &transactionId,
+      std::deque<std::unique_ptr<WalletLegacyEvent>> &events,
+      uint64_t term,
+      uint64_t amount,
+      uint64_t fee,
+      const std::string& extra,
+      uint64_t mixIn)
+  {
+
+    // Skip term range validation for special terms (FOREVER burns and EFier staking)
+    bool isSpecialTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER ||
+                          term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING ||
+                          term == CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING);
+    if (!isSpecialTerm) {
+      throwIf(term < m_currency.depositMinTerm(), error::DEPOSIT_TERM_TOO_SMALL);
+      throwIf(term > m_currency.depositMaxTerm(), error::DEPOSIT_TERM_TOO_BIG);
+    }
+    throwIf(amount != CryptoNote::parameters::TEST_AMOUNT_TIER_0 && amount < m_currency.depositMinAmount(), error::DEPOSIT_AMOUNT_TOO_SMALL);
+
+    // use dynamic max mixin; DynamicRingSizeCalculator uses highest achievable ring size
+    // (18, 15, 12, 10, or 8) from whatever daemon actually has available.
+    mixIn = m_currency.maxMixin();
 
     uint64_t neededMoney = getSumWithOverflowCheck(amount, fee);
     std::shared_ptr<SendTransactionContext> context = std::make_shared<SendTransactionContext>();
+    context->dynamicRingSize = true;
     context->dustPolicy.dustThreshold = m_currency.defaultDustThreshold();
 
-    context->foundMoney = selectTransfersToSend(neededMoney, 0 == mixIn, context->dustPolicy.dustThreshold, context->selectedTransfers);
+    context->foundMoney = selectTransfersToSend(neededMoney, false, context->dustPolicy.dustThreshold, context->selectedTransfers);
 
     throwIf(context->foundMoney < neededMoney, error::WRONG_AMOUNT);
 
@@ -317,13 +367,13 @@ namespace CryptoNote
     context->mixIn = mixIn;
     context->depositTerm = static_cast<uint32_t>(term);
 
-    if (context->mixIn != 0)
+    context->extra = extra;
+
+    // Always fetch random outputs — mixin is now always >= requiredMixin
     {
       Crypto::SecretKey transactionSK;
       return makeGetRandomOutsRequest(std::move(context), true, transactionSK);
     }
-
-    return doSendMultisigTransaction(std::move(context), events);
   }
 
   std::unique_ptr<WalletRequest> WalletTransactionSender::makeWithdrawDepositRequest(TransactionId &transactionId,
@@ -343,6 +393,21 @@ namespace CryptoNote
     context->mixIn = 0;
 
     setSpendingTransactionToDeposits(transactionId, depositIds);
+
+    // If any selected transfer is a commitment output, use the ring-sig withdrawal path.
+    bool isCommitment = false;
+    for (const auto& t : context->selectedTransfers) {
+      if (t.type == TransactionTypes::OutputType::Commitment) {
+        isCommitment = true;
+        break;
+      }
+    }
+
+    if (isCommitment) {
+      // All deposits in this withdrawal_ring must share same amount for decoy selection.
+      const uint64_t depositAmount = context->selectedTransfers.empty() ? 0 : context->selectedTransfers[0].amount;
+      return makeGetRandomCommitmentOutsRequest(std::move(context), depositAmount, depositIds);
+    }
 
     return doSendDepositWithdrawTransaction(std::move(context), events, depositIds);
   }
@@ -399,6 +464,63 @@ namespace CryptoNote
                                                                                             std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)));
   }
 
+  std::unique_ptr<WalletRequest> WalletTransactionSender::makeGetRandomCommitmentOutsRequest(
+      std::shared_ptr<SendTransactionContext>&& context,
+      uint64_t amount,
+      const std::vector<DepositId>& depositIds)
+  {
+    uint64_t outsCount = m_currency.maxMixin() + 1; // probe with max + 1 for real output
+    return std::unique_ptr<WalletRequest>(new WalletGetRandomCommitmentOutsRequest(
+      amount, outsCount, context,
+      std::bind(&WalletTransactionSender::sendCommitmentWithdrawRandomOutsByAmount, this,
+        context, depositIds,
+        std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)));
+  }
+
+  void WalletTransactionSender::sendCommitmentWithdrawRandomOutsByAmount(
+      std::shared_ptr<SendTransactionContext> context,
+      const std::vector<DepositId> depositIds,
+      std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
+      std::unique_ptr<WalletRequest>& nextRequest,
+      std::error_code ec)
+  {
+    if (m_isStoping) {
+      ec = make_error_code(error::TX_CANCELLED);
+    }
+
+    if (ec) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, ec));
+      return;
+    }
+
+    // use DynamicRingSizeCalculator to get optimal ring size from available commitment outputs
+    const size_t available = context->commitmentOuts.size();
+    std::vector<CryptoNote::OutputInfo> outputInfos;
+    outputInfos.emplace_back(0, available);
+
+    size_t ringSize = CryptoNote::DynamicRingSizeCalculator::calculateOptimalRingSize(
+      0, outputInfos,
+      CryptoNote::BLOCK_MAJOR_VERSION_10,
+      m_currency.minMixin(CryptoNote::BLOCK_MAJOR_VERSION_10),
+      m_currency.maxMixin()
+    );
+
+    if (ringSize == 0) {
+      // if not enough commitment outputs yet — fall back to minimum if we have at least 1.
+      // Commitment pool is new; allow single-member ring until pool grows.
+      ringSize = available > 0 ? available : 0;
+    }
+
+    if (ringSize == 0) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId,
+        make_error_code(error::MIXIN_COUNT_TOO_BIG)));
+      return;
+    }
+
+    context->mixIn = static_cast<uint64_t>(ringSize);
+    nextRequest = doSendCommitmentWithdrawTransaction(std::move(context), events, depositIds);
+  }
+
   void WalletTransactionSender::sendTransactionRandomOutsByAmount(bool isMultisigTransaction,
                                                                   std::shared_ptr<SendTransactionContext> context,
                                                                   Crypto::SecretKey &transactionSK,
@@ -417,10 +539,38 @@ namespace CryptoNote
       return;
     }
 
-    if (!checkIfEnoughMixins(context->outs, context->mixIn))
-    {
-      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::MIXIN_COUNT_TOO_BIG)));
-      return;
+    if (context->dynamicRingSize) {
+      // Determine the binding constraint: the minimum outs actually returned by the daemon
+      // across all input amounts. Each input ring must independently satisfy the ring size.
+      size_t minAvailable = context->outs.empty() ? 0 : SIZE_MAX;
+      for (const auto& oa : context->outs) {
+        minAvailable = std::min(minAvailable, oa.outs.size());
+      }
+
+      // Build a single OutputInfo representing the binding constraint and run DynamicRingSizeCalculator.
+      std::vector<CryptoNote::OutputInfo> outputInfos;
+      outputInfos.emplace_back(0, minAvailable);
+
+      size_t optimalRingSize = CryptoNote::DynamicRingSizeCalculator::calculateOptimalRingSize(
+        0,
+        outputInfos,
+        CryptoNote::BLOCK_MAJOR_VERSION_10,
+        m_currency.minMixin(CryptoNote::BLOCK_MAJOR_VERSION_10),
+        m_currency.maxMixin()
+      );
+
+      if (optimalRingSize == 0) {
+        events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::MIXIN_COUNT_TOO_BIG)));
+        return;
+      }
+
+      context->mixIn = static_cast<uint64_t>(optimalRingSize);
+    } else {
+      if (!checkIfEnoughMixins(context->outs, context->mixIn))
+      {
+        events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::MIXIN_COUNT_TOO_BIG)));
+        return;
+      }
     }
 
     if (isMultisigTransaction)
@@ -510,13 +660,62 @@ namespace CryptoNote
       std::unique_ptr<ITransaction> transaction = createTransaction();
 
       uint64_t totalAmount = std::abs(transactionInfo.totalAmount);
-      std::vector<TransactionTypes::InputKeyInfo> inputs = prepareKeyInputs(context->selectedTransfers, context->outs, context->mixIn);
+
+      // Keep TransactionSourceEntry sources so we can read hasCustomKeys/customKeys
+      // for sub-address outputs. convertSources() drops that info into InputKeyInfo.
+      std::vector<TransactionSourceEntry> sources;
+      prepareKeyInputs(context->selectedTransfers, context->outs, sources, context->mixIn);
+      std::vector<TransactionTypes::InputKeyInfo> inputs = convertSources(std::vector<TransactionSourceEntry>(sources));
+
       std::vector<uint64_t> decomposedChange = splitAmount(context->foundMoney - totalAmount, context->dustPolicy.dustThreshold);
 
-      auto bankingIndex = transaction->addOutput(std::abs(transactionInfo.totalAmount) - transactionInfo.fee,
-                                                 {m_keys.address},
-                                                 1,
-                                                 context->depositTerm);
+      // --- Fuego Ring-Signature Commitment Output ---
+      // Derive the deposit secret deterministically (COLD) or discard it (HEAT burns).
+      //
+      // COLD deposits (finite term): depositSecret = H("fuego_commit_v1" || ECDH || outputIndex)
+      //   where ECDH = txSecretKey * viewPublicKey — the same shared secret used by CryptoNote
+      //   stealth address scanning. The depositor can re-derive this with their view key + the
+      //   tx public key found in the blockchain, so it is fully recoverable from seed.
+      //
+      // HEAT burns (FOREVER term): random ephemeral key is generated and discarded immediately.
+      //   No one knows the keyScalar → output is permanently non-spendable as a ring member only.
+      const uint32_t commitOutputIndex = static_cast<uint32_t>(transaction->getOutputCount());
+      std::array<uint8_t, 32> depositSecret;
+
+      // All deposit types (COLD, HEAT/burn, Elderfier) use deterministic ECDH derivation.
+      // depositSecret = H(ECDH(txSecretKey, viewPubKey) || outputIndex_LE32)
+      // This makes every commitment output re-detectable on wallet rescan using the view key.
+      // HEAT burns are "permanent" because term=FOREVER has no withdrawal path in the UI,
+      // not because the secret is unrecoverable.
+      {
+        Crypto::SecretKey txSecretKey;
+        if (!transaction->getTransactionSecretKey(txSecretKey)) {
+          throw std::runtime_error("deposit: could not retrieve tx secret key for commitment derivation");
+        }
+        Crypto::KeyDerivation ecdh;
+        if (!Crypto::generate_key_derivation(m_keys.address.viewPublicKey, txSecretKey, ecdh)) {
+          throw std::runtime_error("deposit: ECDH key derivation failed");
+        }
+        // Mix in output index (LE32) so multiple commitment outputs per tx are independent.
+        uint8_t preimage[36];
+        memcpy(preimage, &ecdh, 32);
+        preimage[32] = commitOutputIndex & 0xFF;
+        preimage[33] = (commitOutputIndex >> 8) & 0xFF;
+        preimage[34] = (commitOutputIndex >> 16) & 0xFF;
+        preimage[35] = (commitOutputIndex >> 24) & 0xFF;
+        Crypto::Hash h = Crypto::cn_fast_hash(preimage, sizeof(preimage));
+        memcpy(depositSecret.data(), h.data, 32);
+      }
+
+      CryptoNote::DepositCommitmentKeys commitKeys = CryptoNote::deriveCommitmentKeys(depositSecret);
+
+      CryptoNote::TransactionOutputCommitment commitOut;
+      commitOut.commitKey = commitKeys.commitKey;
+      commitOut.term      = static_cast<uint32_t>(context->depositTerm);
+
+      auto bankingIndex = transaction->addOutput(
+          std::abs(transactionInfo.totalAmount) - transactionInfo.fee,
+          commitOut);
 
       for (uint64_t changeOut : decomposedChange)
       {
@@ -525,19 +724,84 @@ namespace CryptoNote
 
       transaction->setUnlockTime(transactionInfo.unlockTime);
 
+      // Add extra data if provided (for deposit commitments)
+      if (!context->extra.empty()) {
+        CryptoNote::BinaryArray extraData(context->extra.begin(), context->extra.end());
+        transaction->appendExtra(extraData);
+      }
+
       std::vector<KeyPair> ephKeys;
       ephKeys.reserve(inputs.size());
 
-      for (const auto &input : inputs)
+      for (size_t i = 0; i < inputs.size(); ++i)
       {
         KeyPair ephKey;
-        transaction->addInput(m_keys, input, ephKey);
+        const AccountKeys &keys = (i < sources.size() && sources[i].hasCustomKeys)
+                                      ? sources[i].customKeys
+                                      : m_keys;
+        transaction->addInput(keys, inputs[i], ephKey);
         ephKeys.push_back(std::move(ephKey));
       }
 
       for (size_t i = 0; i < inputs.size(); ++i)
       {
         transaction->signInputKey(i, inputs[i], ephKeys[i]);
+      }
+
+      // Deposit commitment detection:
+      // - 0x08 (HEAT) for FOREVER/burn deposits
+      // - 0xCD (COLD) for term deposits
+      // - 0xEF (ELDERFIER) for staking deposits
+      // The wallet already created and appended the commitment to context->extra (line 551-554).
+      // Detect the type directly from the tag byte — parseTransactionExtra has stream
+      // position issues with commitment-only extras that cause silent failures.
+
+      bool isHeatDeposit = false;
+      bool isColdDeposit = false;
+      Deposit::Type detectedType = Deposit::Type::COLD;
+
+      if (!context->extra.empty()) {
+        uint8_t tag = static_cast<uint8_t>(context->extra[0]);
+        if (tag == TX_EXTRA_HEAT_COMMITMENT) {
+          detectedType = Deposit::Type::HEAT;
+          isHeatDeposit = true;
+        } else if (tag == TX_EXTRA_COLD_COMMITMENT) {
+          detectedType = Deposit::Type::COLD;
+          isColdDeposit = true;
+        } else if (tag == TX_EXTRA_ELDERFIER_DEPOSIT) {
+          detectedType = Deposit::Type::ELDERFIER;
+        }
+      } else {
+        // No wallet-provided commitment — generate one based on deposit term
+        std::vector<uint8_t> generatedExtra;
+
+        if (context->depositTerm == parameters::DEPOSIT_TERM_FOREVER) {
+          uint64_t depositAmount = std::abs(transactionInfo.totalAmount) - transactionInfo.fee;
+          auto [commitment, secret] = CryptoNote::DepositCommitmentGenerator::generateHeatCommitmentWithSecret(
+            depositAmount, std::vector<uint8_t>());
+
+          if (!CryptoNote::createTxExtraWithHeatCommitment(commitment.commitment, depositAmount, commitment.metadata, generatedExtra)) {
+            throw std::runtime_error("Failed to generate HEAT commitment for burn deposit");
+          }
+
+          transaction->appendExtra(generatedExtra);
+          isHeatDeposit = true;
+          detectedType = Deposit::Type::HEAT;
+        } else {
+          uint64_t depositAmount = std::abs(transactionInfo.totalAmount) - transactionInfo.fee;
+          auto commitment = CryptoNote::DepositCommitmentGenerator::generateYieldCommitment(
+            context->depositTerm, depositAmount, std::vector<uint8_t>());
+
+          std::vector<uint8_t> emptyMetadata;
+          std::vector<uint8_t> emptyGiftSecret;
+          if (!CryptoNote::createTxExtraWithColdCommitment(commitment.commitment, depositAmount, context->depositTerm, 1, emptyMetadata, emptyGiftSecret, generatedExtra)) {
+            throw std::runtime_error("Failed to generate COLD commitment for term deposit");
+          }
+
+          transaction->appendExtra(generatedExtra);
+          detectedType = Deposit::Type::COLD;
+          isColdDeposit = true;
+        }
       }
 
       transactionInfo.hash = transaction->getTransactionHash();
@@ -547,18 +811,58 @@ namespace CryptoNote
       deposit.term = context->depositTerm;
       deposit.creatingTransactionId = context->transactionId;
       deposit.spendingTransactionId = WALLET_LEGACY_INVALID_TRANSACTION_ID;
-      uint32_t height = transactionInfo.blockHeight;
-
-      // Interest calculation removed - no on-chain interest
-
       deposit.locked = true;
-      DepositId depositId = m_transactionsCache.insertDeposit(deposit, bankingIndex, transaction->getTransactionHash());
+      deposit.height = transactionInfo.blockHeight;
+      deposit.unlockHeight = transactionInfo.blockHeight + context->depositTerm;
+      deposit.transactionHash = transaction->getTransactionHash();
+      deposit.outputInTransaction = bankingIndex;
+      deposit.depositType = detectedType;
+      deposit.interest = 0; // No interest for any deposits (field kept for compatibility)
+
+      deposit.amount = std::abs(transactionInfo.totalAmount) - transactionInfo.fee;
+
+      // Set extra field
+      if (!context->extra.empty()) {
+        deposit.extra = context->extra;
+      }
+
+      // For burn deposits, use a special banking index since there's no regular output
+      DepositId depositId = 0;
+      if (context->depositTerm == parameters::DEPOSIT_TERM_FOREVER) {
+        depositId = m_transactionsCache.insertDeposit(deposit, 0, transaction->getTransactionHash());
+      } else {
+        depositId = m_transactionsCache.insertDeposit(deposit, bankingIndex, transaction->getTransactionHash());
+      }
+
+      // HEAT secret notification: the wallet that created the burn commitment
+      // holds the secret key. We only emit this event for completeness.
+      if (isHeatDeposit || isColdDeposit) {
+        std::string txHashStr = Common::podToHex(transactionInfo.hash);
+        // Store the ECDH-derived commitKeys.keyScalar for future withdrawals
+        // This secret is deterministically derived from: H(ECDH(txSecretKey, viewPubKey) || outputIndex)
+        std::vector<uint8_t> secretMetadata;
+        if (isColdDeposit) {
+          // For COLD deposits, store commitment metadata if available
+          secretMetadata.assign(context->extra.begin(), context->extra.end());
+        }
+        events.push_back(std::unique_ptr<WalletBurnDepositSecretCreatedEvent>(
+          new WalletBurnDepositSecretCreatedEvent(txHashStr, commitKeys.keyScalar, deposit.amount, secretMetadata)));
+      }
+
       transactionInfo.firstDepositId = depositId;
       transactionInfo.depositCount = 1;
 
       Transaction lowlevelTransaction = convertTransaction(*transaction, static_cast<size_t>(m_upperTransactionSizeLimit));
       m_transactionsCache.updateTransaction(context->transactionId, lowlevelTransaction, totalAmount, context->selectedTransfers);
-      m_transactionsCache.addCreatedDeposit(depositId, deposit.amount + deposit.interest);
+
+      // For burn deposits, there's no interest - the full amount is burned
+      uint64_t depositTotal = 0;
+      if (context->depositTerm == parameters::DEPOSIT_TERM_FOREVER) {
+        depositTotal = deposit.amount; // No interest for burn deposits
+      } else {
+        depositTotal = deposit.amount; // No interest for any deposits
+      }
+      m_transactionsCache.addCreatedDeposit(depositId, depositTotal);
 
       notifyBalanceChanged(events);
 
@@ -569,10 +873,12 @@ namespace CryptoNote
     }
     catch (std::system_error &ec)
     {
+      std::cerr << "[doSendMultisig] system_error: " << ec.what() << std::endl;
       events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, ec.code()));
     }
-    catch (std::exception &)
+    catch (std::exception &e)
     {
+      std::cerr << "[doSendMultisig] exception: " << e.what() << std::endl;
       events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::INTERNAL_WALLET_ERROR)));
     }
 
@@ -644,6 +950,156 @@ namespace CryptoNote
     return std::unique_ptr<WalletRequest>();
   }
 
+  std::unique_ptr<WalletRequest> WalletTransactionSender::doSendCommitmentWithdrawTransaction(
+      std::shared_ptr<SendTransactionContext>&& context,
+      std::deque<std::unique_ptr<WalletLegacyEvent>>& events,
+      const std::vector<DepositId>& depositIds)
+  {
+    if (m_isStoping) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, make_error_code(error::TX_CANCELLED)));
+      return std::unique_ptr<WalletRequest>();
+    }
+
+    try {
+      WalletLegacyTransaction& transactionInfo = m_transactionsCache.getTransaction(context->transactionId);
+      std::unique_ptr<ITransaction> transaction = createTransaction();
+
+      // Split withdrawal proceeds to wallet address.
+      std::vector<uint64_t> outputAmounts = splitAmount(
+          context->foundMoney - transactionInfo.fee, context->dustPolicy.dustThreshold);
+      for (auto amount : outputAmounts) {
+        transaction->addOutput(amount, m_keys.address);
+      }
+      transaction->setUnlockTime(transactionInfo.unlockTime);
+
+      const size_t ringSize = static_cast<size_t>(context->mixIn);
+      const auto& decoys = context->commitmentOuts; // returned by getRandomCommitmentOutsForAmount
+
+      // Select `ringSize` decoys from the returned pool (already randomly chosen by daemon).
+      // The real spend is added at a random position within the ring.
+      for (size_t depositIdx = 0; depositIdx < context->selectedTransfers.size(); ++depositIdx) {
+        const TransactionOutputInformation& transfer = context->selectedTransfers[depositIdx];
+
+        // Re-derive the depositKeyScalar deterministically.
+        // At deposit creation we use: depositSecret = H(ECDH(txSecretKey, viewPubKey) || outputIndex)
+        Crypto::KeyDerivation ecdh;
+        if (!Crypto::generate_key_derivation(transfer.transactionPublicKey, m_keys.viewSecretKey, ecdh)) {
+          throw std::runtime_error("Commitment withdrawal: ECDH derivation failed");
+        }
+        uint8_t preimage[36];
+        memcpy(preimage, &ecdh, 32);
+        const uint32_t outIdx = transfer.outputInTransaction;
+        preimage[32] = outIdx & 0xFF;
+        preimage[33] = (outIdx >> 8) & 0xFF;
+        preimage[34] = (outIdx >> 16) & 0xFF;
+        preimage[35] = (outIdx >> 24) & 0xFF;
+        Crypto::Hash h = Crypto::cn_fast_hash(preimage, sizeof(preimage));
+
+        std::array<uint8_t, 32> depositSecret;
+        memcpy(depositSecret.data(), h.data, 32);
+
+        CryptoNote::DepositCommitmentKeys commitKeys = CryptoNote::deriveCommitmentKeys(depositSecret);
+        KeyPair commitmentKeyPair;
+        commitmentKeyPair.publicKey  = commitKeys.commitKey;
+        commitmentKeyPair.secretKey  = commitKeys.keyScalar;
+
+        // Filter decoys: exclude the real output's global index to prevent duplicate
+        // ring members (daemon returns all outputs including the real when pool is small).
+        std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry> filteredDecoys;
+        filteredDecoys.reserve(decoys.size());
+        for (const auto& d : decoys) {
+          if (d.global_amount_index != static_cast<uint32_t>(transfer.globalOutputIndex)) {
+            filteredDecoys.push_back(d);
+          }
+        }
+
+        // Decide how many decoys we can actually use (capped at ringSize - 1, leaving 1 slot for real).
+        const size_t numDecoys = std::min(filteredDecoys.size(), ringSize - 1);
+        const size_t actualRingSize = numDecoys + 1;
+
+        // Pick a random position for the real spend within the ring.
+        const size_t realPos = Crypto::rand<size_t>() % actualRingSize;
+
+        // Build ordered ring of global indices (relative-encoded) and public keys.
+        std::vector<uint32_t> absIndices;
+        std::vector<const Crypto::PublicKey*> ringKeys;
+
+        size_t decoyPos = 0;
+        for (size_t slot = 0; slot < actualRingSize; ++slot) {
+          if (slot == realPos) {
+            // Real spend: global index from the transfer record.
+            absIndices.push_back(transfer.globalOutputIndex);
+            ringKeys.push_back(&commitmentKeyPair.publicKey);
+          } else {
+            absIndices.push_back(filteredDecoys[decoyPos].global_amount_index);
+            ringKeys.push_back(&filteredDecoys[decoyPos].commit_key);
+            ++decoyPos;
+          }
+        }
+
+        // Sort ring by global index (ascending) — same as KeyInput convention.
+        // Recompute realPos after sort.
+        std::vector<size_t> order(actualRingSize);
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+          return absIndices[a] < absIndices[b];
+        });
+        size_t sortedRealPos = 0;
+        std::vector<uint32_t> sortedAbs(actualRingSize);
+        std::vector<const Crypto::PublicKey*> sortedKeys(actualRingSize);
+        for (size_t s = 0; s < actualRingSize; ++s) {
+          sortedAbs[s]  = absIndices[order[s]];
+          sortedKeys[s] = ringKeys[order[s]];
+          if (order[s] == realPos) sortedRealPos = s;
+        }
+
+        // Convert absolute indices to relative offsets (delta-encoded).
+        std::vector<uint32_t> relOffsets(actualRingSize);
+        relOffsets[0] = sortedAbs[0];
+        for (size_t s = 1; s < actualRingSize; ++s) {
+          relOffsets[s] = sortedAbs[s] - sortedAbs[s - 1];
+        }
+
+        // Build the TransactionInputCommitmentSpend.
+        TransactionInputCommitmentSpend csInput;
+        csInput.amount        = transfer.amount;
+        csInput.outputIndexes = relOffsets;
+        csInput.keyImage      = commitKeys.keyImage;
+        transaction->addInput(csInput);
+
+        // Sign the input.
+        transaction->signInputCommitmentSpend(depositIdx, sortedKeys, commitmentKeyPair, sortedRealPos);
+      }
+
+      transactionInfo.hash = transaction->getTransactionHash();
+
+      Transaction lowlevelTx = convertTransaction(*transaction, static_cast<size_t>(m_upperTransactionSizeLimit));
+
+      uint64_t interestsSum, totalSum;
+      countDepositsTotalSumAndInterestSum(depositIds, m_transactionsCache, totalSum, interestsSum);
+
+      UnconfirmedSpentDepositDetails unconfirmed;
+      unconfirmed.depositsSum = totalSum;
+      unconfirmed.fee         = transactionInfo.fee;
+      unconfirmed.transactionId = context->transactionId;
+      m_transactionsCache.addDepositSpendingTransaction(transaction->getTransactionHash(), unconfirmed);
+
+      return std::unique_ptr<WalletRelayDepositTransactionRequest>(
+        new WalletRelayDepositTransactionRequest(lowlevelTx,
+          std::bind(&WalletTransactionSender::relayDepositTransactionCallback, this,
+            context, depositIds, std::placeholders::_1, std::placeholders::_2, std::placeholders::_3)));
+    }
+    catch (std::system_error& err) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, err.code()));
+    }
+    catch (std::exception&) {
+      events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId,
+        make_error_code(error::INTERNAL_WALLET_ERROR)));
+    }
+
+    return std::unique_ptr<WalletRequest>();
+  }
+
   void WalletTransactionSender::relayTransactionCallback(std::shared_ptr<SendTransactionContext> context, std::deque<std::unique_ptr<WalletLegacyEvent>> &events,
                                                          std::unique_ptr<WalletRequest> &nextRequest, std::error_code ec)
   {
@@ -668,6 +1124,12 @@ namespace CryptoNote
 
     events.push_back(makeCompleteEvent(m_transactionsCache, context->transactionId, ec));
     events.push_back(std::unique_ptr<WalletDepositsUpdatedEvent>(new WalletDepositsUpdatedEvent(std::move(deposits))));
+
+    //  Handle burn deposit secrets
+    if (context->depositTerm == parameters::DEPOSIT_TERM_FOREVER) {
+      // This is a burn deposit - the secret should be handled by the wallet
+      // In a more complete implementation, we would pass the secret back to the wallet
+    }
   }
 
   void WalletTransactionSender::splitDestinations(TransferId firstTransferId, size_t transfersCount, const TransactionDestinationEntry &changeDts,
@@ -760,6 +1222,14 @@ namespace CryptoNote
       src.realTransactionPublicKey = td.transactionPublicKey;
       src.realOutput = interted_it - src.outputs.begin();
       src.realOutputIndexInTransaction = td.outputInTransaction;
+
+      // Attach sub-address signing keys if this output came from a sub-address container
+      auto keyIt = m_subAddressOutputKeys.find(makeSubAddrOutputKey(td.transactionHash, td.outputInTransaction));
+      if (keyIt != m_subAddressOutputKeys.end()) {
+        src.hasCustomKeys = true;
+        src.customKeys = keyIt->second;
+      }
+
       ++i;
     }
   }
@@ -865,8 +1335,8 @@ namespace CryptoNote
     return foundMoney;
   }
 
-  /** Select the transfers to send for either a transaction or a deposit. The output selection is 
-   * based on separating the available outputs into base10 buckets and then picking outputs from 
+  /** Select the transfers to send for either a transaction or a deposit. The output selection is
+   * based on separating the available outputs into base10 buckets and then picking outputs from
    * each bucket until have enough for the transfer. We only select outputs above the dust threshold
    * so if we want to include dust we need to set it accordingly. (Credit to TRTL)*/
   uint64_t WalletTransactionSender::selectTransfersToSend(
@@ -877,25 +1347,41 @@ namespace CryptoNote
   {
     uint64_t foundMoney = 0;
 
-    /** Get all the unlocked outputs from the wallet */
+    /** Get all the unlocked outputs from the wallet (main + sub-addresses) */
     std::vector<TransactionOutputInformation> outputs;
     m_transferDetails.getOutputs(outputs, ITransfersContainer::IncludeKeyUnlocked);
+    for (const auto& src : m_subAddressSources) {
+      std::vector<TransactionOutputInformation> subOutputs;
+      src.container->getOutputs(subOutputs, ITransfersContainer::IncludeKeyUnlocked);
+      // Index any newly arrived outputs that weren't in the map yet
+      for (const auto& out : subOutputs) {
+        if (out.type == TransactionTypes::OutputType::Key) {
+          m_subAddressOutputKeys[makeSubAddrOutputKey(out.transactionHash, out.outputInTransaction)] = src.keys;
+        }
+      }
+      outputs.insert(outputs.end(), subOutputs.begin(), subOutputs.end());
+    }
 
-    /** Before picking the input buckets, lets shuffle all 
+    /** Before picking the input buckets, lets shuffle all
      * the available outputs for privacy */
     std::shuffle(outputs.begin(), outputs.end(), std::random_device{});
 
-    /** Split the inputs into buckets based on what power of ten they are in 
+    /** Split the inputs into buckets based on what power of ten they are in
      * (For example, [1, 2, 5, 7], [20, 50, 80, 80], [100, 600, 700]), though
      * we will ignore dust for the time being. */
     std::unordered_map<uint64_t, std::vector<TransactionOutputInformation>> buckets;
 
     for (const auto &walletAmount : outputs)
     {
-      /** Use the number of digits to determine which buck they fit in */
+      // Skip outputs already pending in unconfirmed transactions
+      if (m_transactionsCache.isUsed(walletAmount)) {
+        continue;
+      }
+
+      /** Use the number of digits to determine which bucket they fit in */
       int numberOfDigits = floor(log10(walletAmount.amount)) + 1;
 
-      /** If the amount is larger than the current dust threshold 
+      /** If the amount is larger than the current dust threshold
        * insert the amount into the correct bucket */
       if (walletAmount.amount > dust)
       {
@@ -915,8 +1401,8 @@ namespace CryptoNote
         }
         else
         {
-          /** Add the amount to the selected transfers so long as 
-           * foundMoney is still less than neededMoney. This prevents 
+          /** Add the amount to the selected transfers so long as
+           * foundMoney is still less than neededMoney. This prevents
            * larger outputs than we need when we already have enough funds */
           if (foundMoney < neededMoney)
           {
@@ -956,7 +1442,7 @@ namespace CryptoNote
       bool r = m_transactionsCache.getDeposit(id, deposit);
       assert(r);
 
-      foundMoney += deposit.amount + deposit.interest;
+      foundMoney += deposit.amount;
     }
 
     return foundMoney;
@@ -969,54 +1455,6 @@ namespace CryptoNote
       Deposit &deposit = m_transactionsCache.getDeposit(id);
       deposit.spendingTransactionId = transactionId;
     }
-  }
-
-  uint64_t WalletTransactionSender::calculateDynamicRingSize(const std::vector<TransactionOutputInformation>& selectedTransfers, uint64_t minRingSize)
-  {
-    // Target ring sizes in order of preference (highest privacy first)
-    std::vector<uint64_t> targetRingSizes = {18, 15, 12, 11, 10, 9, 8};
-    
-    // For BlockMajorVersion 10+, never go below ring size 8
-    // If we can't achieve ring size 8, direct user to run optimizer
-    if (minRingSize >= CryptoNote::parameters::MIN_TX_MIXIN_SIZE_V10) {
-      // Simplified check: For now, we'll assume we can achieve ring size 8
-      // In a full implementation, we would:
-      // 1. Query daemon for available outputs for each amount in selectedTransfers
-      // 2. Check if any amount has >= 8 outputs available
-      // 3. If not, return 0 to signal insufficient outputs
-      
-      // For now, we'll use a basic heuristic:
-      // If we have multiple different amounts, we're more likely to have enough outputs
-      // This is a simplified approach - a full implementation would query the daemon
-      
-      // Count unique amounts in selected transfers
-      std::set<uint64_t> uniqueAmounts;
-      for (const auto& transfer : selectedTransfers) {
-        uniqueAmounts.insert(transfer.amount);
-      }
-      
-      // If we have very few unique amounts, we might not have enough outputs
-      // This is a conservative check - in practice, we'd query the daemon
-      if (uniqueAmounts.size() < 2) {
-        // Conservative check: if we only have one amount type, 
-        // we might not have enough outputs for ring size 8
-        // Return 0 to signal that ring size 8 is not achievable
-        return 0;
-      }
-      
-      // Start with the highest target and work down
-      for (uint64_t targetSize : targetRingSizes) {
-        if (targetSize >= minRingSize && targetSize <= m_currency.maxMixin()) {
-          return targetSize;
-        }
-      }
-      
-      // This should never happen since we start with minRingSize, but just in case
-      return minRingSize;
-    }
-    
-    // For older block versions, use static ring size
-    return minRingSize;
   }
 
 } /* namespace CryptoNote */

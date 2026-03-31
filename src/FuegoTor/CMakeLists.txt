@@ -80,19 +80,22 @@ include_directories(
     ${CMAKE_SOURCE_DIR}/src/System
     ${CMAKE_SOURCE_DIR}/src/Logging
     ${CMAKE_SOURCE_DIR}/src/Serialization
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}
+    ${Boost_INCLUDE_DIRS}
     ${FUEGOTOR_EXTRA_INCLUDE_DIRS}
 )
 
 # Source files
 set(FUEGOTOR_SOURCES
-    src/Fuegotor.cpp
+    src/FuegoTor.cpp
 )
 
 # Create FuegoTor library
-add_library(Fuegotor STATIC ${FUEGOTOR_SOURCES})
+add_library(FuegoTor STATIC ${FUEGOTOR_SOURCES})
 
 # Set library properties
-set_target_properties(Fuegotor PROPERTIES
+set_target_properties(FuegoTor PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 1
     OUTPUT_NAME "FuegoTor"
@@ -103,35 +106,37 @@ set_target_properties(Fuegotor PROPERTIES
 
 # Compiler-specific options
 if(MSVC)
-    target_compile_options(Fuegotor PRIVATE /W4 /WX)
+    # For MSVC, use less strict warnings to avoid errors on socket definitions
+    target_compile_options(FuegoTor PRIVATE /W3)
 else()
-    target_compile_options(Fuegotor PRIVATE
+    target_compile_options(FuegoTor PRIVATE
         -Wall
         -Wextra
         -Wpedantic
+        -Wno-deprecated-builtins
         -Werror
         -O2
     )
 
     # Enable C++17 features
-    target_compile_features(Fuegotor PRIVATE cxx_std_17)
+    target_compile_features(FuegoTor PRIVATE cxx_std_17)
 endif()
 
 # Platform-specific compile definitions
 if(WIN32)
-    target_compile_definitions(Fuegotor PRIVATE
+    target_compile_definitions(FuegoTor PRIVATE
         _WIN32_WINNT=0x0601
-        WIN32_LEAN_AND_MEAN
         NOMINMAX
-        _WINSOCK2API_
+        _CRT_SECURE_NO_WARNINGS
+        _WINSOCK_DEPRECATED_NO_WARNINGS
     )
 elseif(APPLE)
-    target_compile_definitions(Fuegotor PRIVATE
+    target_compile_definitions(FuegoTor PRIVATE
         __MACOSX__
         _DARWIN_C_SOURCE
     )
 else()
-    target_compile_definitions(Fuegotor PRIVATE
+    target_compile_definitions(FuegoTor PRIVATE
         _GNU_SOURCE
         _POSIX_C_SOURCE=200809L
     )
@@ -139,19 +144,19 @@ endif()
 
 # Feature-specific definitions
 if(ENABLE_TOR_LIB)
-    target_compile_definitions(Fuegotor PRIVATE FUEGOTOR_USE_LIBTOR=1)
+    target_compile_definitions(FuegoTor PRIVATE FUEGOTOR_USE_LIBTOR=1)
 endif()
 
 if(ENABLE_HIDDEN_SERVICE)
-    target_compile_definitions(Fuegotor PRIVATE FUEGOTOR_ENABLE_HIDDEN_SERVICE=1)
+    target_compile_definitions(FuegoTor PRIVATE FUEGOTOR_ENABLE_HIDDEN_SERVICE=1)
 endif()
 
 if(ENABLE_TOR_CONTROL)
-    target_compile_definitions(Fuegotor PRIVATE FUEGOTOR_ENABLE_CONTROL=1)
+    target_compile_definitions(FuegoTor PRIVATE FUEGOTOR_ENABLE_CONTROL=1)
 endif()
 
 # Link libraries
-target_link_libraries(Fuegotor PRIVATE
+target_link_libraries(FuegoTor PRIVATE
     Threads::Threads
     ${FUEGOTOR_PLATFORM_LIBS}
     ${FUEGOTOR_EXTRA_LIBS}
@@ -159,30 +164,30 @@ target_link_libraries(Fuegotor PRIVATE
 
 # Ensure Windows libraries are properly linked on Windows
 if(WIN32)
-    target_link_libraries(Fuegotor PRIVATE ws2_32 wsock32 iphlpapi)
+    target_link_libraries(FuegoTor PRIVATE ws2_32 iphlpapi)
 endif()
 
 # Conditional Tor library linking
 if(ENABLE_TOR_LIB AND HAVE_TOR_LIB)
-    target_link_libraries(Fuegotor PRIVATE ${TOR_LIB})
-    target_compile_definitions(Fuegotor PRIVATE FUEGOTOR_HAVE_TOR=1)
+    target_link_libraries(FuegoTor PRIVATE ${TOR_LIB})
+    target_compile_definitions(FuegoTor PRIVATE FUEGOTOR_HAVE_TOR=1)
 endif()
 
 # Link OpenSSL if available
 if(OpenSSL_FOUND)
-    target_link_libraries(Fuegotor PRIVATE OpenSSL::SSL OpenSSL::Crypto)
-    target_compile_definitions(Fuegotor PRIVATE FUEGOTOR_HAVE_OPENSSL=1)
+    target_link_libraries(FuegoTor PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+    target_compile_definitions(FuegoTor PRIVATE FUEGOTOR_HAVE_OPENSSL=1)
 endif()
 
 # Export configuration
 configure_file(
-    ${CMAKE_CURRENT_SOURCE_DIR}/config/FuegotorConfig.h.in
-    ${CMAKE_CURRENT_BINARY_DIR}/FuegotorConfig.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/config/FuegoTorConfig.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/FuegoTorConfig.h
     @ONLY
 )
 
 # Installation rules
-install(TARGETS Fuegotor
+install(TARGETS FuegoTor
     EXPORT FuegoTorTargets
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib

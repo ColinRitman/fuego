@@ -1,5 +1,5 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2012-2018 The CryptoNote developers
-// Copyright (c) 2017-2025 Fuego Elder Council
 //
 // This file is part of Fuego.
 //
@@ -17,6 +17,9 @@
 
 #include <stdint.h>
 #include <string.h>
+
+// Max N for MembershipProof — covers 4 amount tiers AND 4 deposit terms.
+#define FUEGO_MEMBERSHIP_N 4
 
 #ifdef __cplusplus
 namespace Crypto {
@@ -58,6 +61,16 @@ struct KeyImage {
 
 struct Signature {
   uint8_t data[64];
+};
+
+// 1-of-N OR proof (Cramer-Damgard-Schoenmakers sigma protocol) proving a
+// Pedersen commitment C = v*H + mask*G hides one of N known values.
+// Used for both amount privacy (v ∈ {TIER_0..TIER_3}) and term privacy
+// (v ∈ {3mo, 1yr, FOREVER, EFier}).
+// Proof size: N * 64 bytes = 256 bytes for N=4.
+struct MembershipProof {
+  struct EllipticCurveScalar e[FUEGO_MEMBERSHIP_N]; // challenge shares (sum = Fiat-Shamir challenge)
+  struct EllipticCurveScalar s[FUEGO_MEMBERSHIP_N]; // Schnorr responses
 };
 
 const struct EllipticCurveScalar I = {{0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00} };

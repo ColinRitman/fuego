@@ -117,4 +117,8 @@ bool parseIpAddressAndPort(uint32_t& ip, uint32_t& port, const std::string& addr
 
 std::string timeIntervalToString(uint64_t intervalInSeconds);
 
+std::string makeCenteredString(size_t width, const std::string& text);
+
+std::string formatTimestamp(time_t timestamp);
+
 }

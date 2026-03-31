@@ -67,6 +67,18 @@ namespace CryptoNote
           (void)r; //just to make compiler to shut up
           assert(r.second);
         }
+        else if (in.type() == typeid(TransactionInputCommitmentSpend))
+        {
+          auto r = m_keyImages.insert(boost::get<TransactionInputCommitmentSpend>(in).keyImage);
+          (void)r;
+          assert(r.second);
+        }
+        else if (in.type() == typeid(TransactionInputCommitmentTransfer))
+        {
+          auto r = m_keyImages.insert(boost::get<TransactionInputCommitmentTransfer>(in).keyImage);
+          (void)r;
+          assert(r.second);
+        }
         else if (in.type() == typeid(MultisignatureInput))
         {
           const auto &msig = boost::get<MultisignatureInput>(in);
@@ -93,6 +105,20 @@ namespace CryptoNote
         if (in.type() == typeid(KeyInput))
         {
           if (m_keyImages.count(boost::get<KeyInput>(in).keyImage))
+          {
+            return false;
+          }
+        }
+        else if (in.type() == typeid(TransactionInputCommitmentSpend))
+        {
+          if (m_keyImages.count(boost::get<TransactionInputCommitmentSpend>(in).keyImage))
+          {
+            return false;
+          }
+        }
+        else if (in.type() == typeid(TransactionInputCommitmentTransfer))
+        {
+          if (m_keyImages.count(boost::get<TransactionInputCommitmentTransfer>(in).keyImage))
           {
             return false;
           }
@@ -196,6 +222,16 @@ namespace CryptoNote
       }
     }
 
+    // Check minimum fee based on current block version
+    // For mempool transactions, use the latest version rules
+    if (!isFusionTransaction && fee < m_currency.minimumFee()) {
+      logger(DEBUGGING) << "transaction fee is not enough: " << m_currency.formatAmount(fee) <<
+        ", minimum fee: " << m_currency.formatAmount(m_currency.minimumFee());
+      tvc.m_verification_failed = true;
+      tvc.m_tx_fee_too_small = true;
+      return false;
+    }
+
     //check key images for transaction if it is not kept by block
     if (!keptByBlock)
     {
@@ -239,8 +275,14 @@ namespace CryptoNote
 
     std::lock_guard<std::recursive_mutex> lock(m_transactions_lock);
 
-    // REMOVED: Recently deleted transactions tracking (memory optimization)
-    // This check was removed to save memory - transactions can be re-added immediately
+    if (!keptByBlock && m_recentlyDeletedTransactions.find(id) != m_recentlyDeletedTransactions.end())
+    {
+      logger(DEBUGGING) << "Trying to add recently deleted transaction. Ignore: " << id;
+      tvc.m_verification_failed = false;
+      tvc.m_should_be_relayed = false;
+      tvc.m_added_to_pool = false;
+      return true;
+    }
 
     // add to pool
     {
@@ -262,9 +304,8 @@ namespace CryptoNote
         logger(WARNING, BRIGHT_YELLOW) << " Transaction already exists at inserting in memory pool";
         return false;
       }
-      // REMOVED: Index updates (memory optimization)
-      // m_paymentIdIndex.add(txd.tx);
-      // m_timestampIndex.add(txd.receiveTime, txd.id);
+      m_paymentIdIndex.add(txd.tx);
+      m_timestampIndex.add(txd.receiveTime, txd.id);
 
       if (ttl.ttl != 0)
       {
@@ -276,7 +317,7 @@ namespace CryptoNote
 
     if (height >= parameters::UPGRADE_HEIGHT_V8) {
       tvc.m_added_to_pool = true;
-      tvc.m_should_be_relayed = inputsValid && (fee == CryptoNote::parameters::MINIMUM_FEE || isFusionTransaction || isWithdrawalTransaction || ttl.ttl != 0);
+      tvc.m_should_be_relayed = inputsValid && (fee >= m_currency.minimumFee() || isFusionTransaction || isWithdrawalTransaction || ttl.ttl != 0);
       tvc.m_verification_failed = true;
     } else {
       tvc.m_added_to_pool = true;
@@ -549,9 +590,8 @@ namespace CryptoNote
       m_spent_key_images.clear();
       m_spentOutputs.clear();
 
-      // REMOVED: Index clearing (memory optimization)
-      // m_paymentIdIndex.clear();
-      // m_timestampIndex.clear();
+      m_paymentIdIndex.clear();
+      m_timestampIndex.clear();
       m_ttlIndex.clear();
     }
     else
@@ -580,9 +620,8 @@ namespace CryptoNote
       logger(INFO) << "Failed to serialize memory pool to file " << state_file_path;
     }
 
-    // REMOVED: Index clearing (memory optimization)
-    // m_paymentIdIndex.clear();
-    // m_timestampIndex.clear();
+    m_paymentIdIndex.clear();
+    m_timestampIndex.clear();
     m_ttlIndex.clear();
 
     return true;
@@ -630,8 +669,7 @@ namespace CryptoNote
 
     KV_MEMBER(m_spent_key_images);
     KV_MEMBER(m_spentOutputs);
-    // REMOVED: Recently deleted transactions serialization (memory optimization)
-    // KV_MEMBER(m_recentlyDeletedTransactions);
+    KV_MEMBER(m_recentlyDeletedTransactions);
   }
 
   //---------------------------------------------------------------------------------
@@ -649,8 +687,18 @@ namespace CryptoNote
 
       uint64_t now = m_timeProvider.now();
 
-      // REMOVED: Recently deleted transactions cleanup (memory optimization)
-      // This functionality was removed to save memory
+      for (auto it = m_recentlyDeletedTransactions.begin(); it != m_recentlyDeletedTransactions.end();)
+      {
+        uint64_t elapsedTimeSinceDeletion = now - it->second;
+        if (elapsedTimeSinceDeletion > m_currency.numberOfPeriodsToForgetTxDeletedFromPool() * m_currency.mempoolTxLiveTime())
+        {
+          it = m_recentlyDeletedTransactions.erase(it);
+        }
+        else
+        {
+          ++it;
+        }
+      }
 
       for (auto it = m_transactions.begin(); it != m_transactions.end();)
       {
@@ -671,8 +719,7 @@ namespace CryptoNote
             logger(INFO) << "Tx " << it->id << " removed from tx pool due to outdated, age: " << txAge;
           }
 
-          // REMOVED: Recently deleted transactions tracking (memory optimization)
-          // m_recentlyDeletedTransactions.emplace(it->id, now);
+          m_recentlyDeletedTransactions.emplace(it->id, now);
           it = removeTransaction(it);
           somethingRemoved = true;
         }
@@ -694,9 +741,8 @@ namespace CryptoNote
   tx_memory_pool::tx_container_t::iterator tx_memory_pool::removeTransaction(tx_memory_pool::tx_container_t::iterator i)
   {
     removeTransactionInputs(i->id, i->tx, i->keptByBlock);
-    // REMOVED: Index removal (memory optimization)
-    // m_paymentIdIndex.remove(i->tx);
-    // m_timestampIndex.remove(i->receiveTime, i->id);
+    m_paymentIdIndex.remove(i->tx);
+    m_timestampIndex.remove(i->receiveTime, i->id);
     m_ttlIndex.erase(i->id);
     return m_transactions.erase(i);
   }
@@ -832,9 +878,8 @@ namespace CryptoNote
     std::lock_guard<std::recursive_mutex> lock(m_transactions_lock);
     for (auto it = m_transactions.begin(); it != m_transactions.end(); it++)
     {
-      // REMOVED: Index building (memory optimization)
-      // m_paymentIdIndex.add(it->tx);
-      // m_timestampIndex.add(it->receiveTime, it->id);
+      m_paymentIdIndex.add(it->tx);
+      m_timestampIndex.add(it->receiveTime, it->id);
 
       std::vector<TransactionExtraField> txExtraFields;
       parseTransactionExtra(it->tx.extra, txExtraFields);
@@ -852,34 +897,12 @@ namespace CryptoNote
   bool tx_memory_pool::getTransactionIdsByPaymentId(const Crypto::Hash &paymentId, std::vector<Crypto::Hash> &transactionIds)
   {
     std::lock_guard<std::recursive_mutex> lock(m_transactions_lock);
-    // REMOVED: Index-based search (memory optimization)
-    // Alternative implementation: scan transactions manually
-    transactionIds.clear();
-    for (const auto& tx : m_transactions) {
-      Crypto::Hash txPaymentId;
-      if (getPaymentIdFromTxExtra(tx.tx.extra, txPaymentId) && txPaymentId == paymentId) {
-        transactionIds.push_back(tx.id);
-      }
-    }
-    return !transactionIds.empty();
+    return m_paymentIdIndex.find(paymentId, transactionIds);
   }
 
   bool tx_memory_pool::getTransactionIdsByTimestamp(uint64_t timestampBegin, uint64_t timestampEnd, uint32_t transactionsNumberLimit, std::vector<Crypto::Hash> &hashes, uint64_t &transactionsNumberWithinTimestamps)
   {
     std::lock_guard<std::recursive_mutex> lock(m_transactions_lock);
-    // REMOVED: Index-based search (memory optimization)
-    // Alternative implementation: scan transactions manually
-    hashes.clear();
-    transactionsNumberWithinTimestamps = 0;
-    
-    for (const auto& tx : m_transactions) {
-      if (static_cast<uint64_t>(tx.receiveTime) >= timestampBegin && static_cast<uint64_t>(tx.receiveTime) <= timestampEnd) {
-        transactionsNumberWithinTimestamps++;
-        if (hashes.size() < transactionsNumberLimit) {
-          hashes.push_back(tx.id);
-        }
-      }
-    }
-    return !hashes.empty();
+    return m_timestampIndex.find(timestampBegin, timestampEnd, transactionsNumberLimit, hashes, transactionsNumberWithinTimestamps);
   }
 } // namespace CryptoNote

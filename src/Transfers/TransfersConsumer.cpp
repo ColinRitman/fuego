@@ -27,6 +27,7 @@
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
 #include "CryptoNoteCore/TransactionApi.h"
 #include "CryptoNoteCore/TransactionExtra.h"
+#include "CryptoNoteConfig.h"
 
 #include "IWallet.h"
 #include "INode.h"
@@ -74,7 +75,6 @@ void findMyOutputs(
     return;
   }
 
-  size_t keyIndex = 0;
   size_t outputCount = tx.getOutputCount();
 
   for (size_t idx = 0; idx < outputCount; ++idx) {
@@ -86,8 +86,9 @@ void findMyOutputs(
       uint64_t amount;
       KeyOutput out;
       tx.getOutput(idx, out, amount);
-      checkOutputKey(derivation, out.key, keyIndex, idx, spendKeys, outputs);
-      ++keyIndex;
+      // Use absolute output index (idx) for derivation — must match the sender's
+      // derivePublicKey(to, txKey, transaction.outputs.size(), ...) which uses absolute index.
+      checkOutputKey(derivation, out.key, idx, idx, spendKeys, outputs);
 
     } else if (outType == TransactionTypes::OutputType::Multisignature) {
 
@@ -96,8 +97,38 @@ void findMyOutputs(
       tx.getOutput(idx, out, amount);
       for (const auto& key : out.keys) {
         checkOutputKey(derivation, key, idx, idx, spendKeys, outputs);
-        ++keyIndex;
      }
+
+    } else if (outType == TransactionTypes::OutputType::Commitment) {
+      // Re-derive commitKey via ECDH and compare (works for COLD, HEAT, Elderfier).
+      // depositSecret = cn_fast_hash(derivation || outputIndex_LE32)
+      uint64_t amount;
+      TransactionOutputCommitment out;
+      tx.getOutput(idx, out, amount);
+
+      // All commitment types (COLD, HEAT/FOREVER, Elderfier) use deterministic ECDH:
+      // depositSecret = H(ECDH(txSecretKey, viewPubKey) || outputIndex_LE32)
+      // so all are recoverable on rescan. No term filter needed.
+      {
+        uint8_t preimage[36];
+        memcpy(preimage, &derivation, 32);
+        uint32_t outIdx = static_cast<uint32_t>(idx);
+        preimage[32] = outIdx & 0xFF;
+        preimage[33] = (outIdx >> 8) & 0xFF;
+        preimage[34] = (outIdx >> 16) & 0xFF;
+        preimage[35] = (outIdx >> 24) & 0xFF;
+        Crypto::Hash secHash = Crypto::cn_fast_hash(preimage, sizeof(preimage));
+        std::array<uint8_t, 32> depositSecret;
+        memcpy(depositSecret.data(), secHash.data, 32);
+
+        CryptoNote::DepositCommitmentKeys ck = CryptoNote::deriveCommitmentKeys(depositSecret);
+        if (ck.commitKey == out.commitKey) {
+          for (const auto& spendKey : spendKeys) {
+            outputs[spendKey].push_back(static_cast<uint32_t>(idx));
+            break;
+          }
+        }
+      }
     }
   }
 }
@@ -412,7 +443,8 @@ std::error_code createTransfers(
 
     if (
       outType != TransactionTypes::OutputType::Key &&
-      outType != TransactionTypes::OutputType::Multisignature) {
+      outType != TransactionTypes::OutputType::Multisignature &&
+      outType != TransactionTypes::OutputType::Commitment) {
       continue;
     }
 
@@ -457,7 +489,7 @@ std::error_code createTransfers(
       uint64_t amount;
       MultisignatureOutput out;
       tx.getOutput(idx, out, amount);
-	    
+
 		  for (const auto& key : out.keys) {
         std::unordered_set<Crypto::Hash>::iterator it = transactions_hash_seen.find(txHash);
         if (it == transactions_hash_seen.end()) {
@@ -476,8 +508,34 @@ std::error_code createTransfers(
       info.amount = amount;
       info.requiredSignatures = out.requiredSignatureCount;
       info.term = out.term;
+
+    } else if (outType == TransactionTypes::OutputType::Commitment) {
+      // COLD commitment deposit output.
+      // Re-derive depositSecret to get keyImage for SpentOutputDescriptor tracking.
+      uint64_t amount;
+      TransactionOutputCommitment out;
+      tx.getOutput(idx, out, amount);
+
+      // Re-derive commitment keys (same ECDH formula used at creation)
+      KeyDerivation derivation;
+      if (generate_key_derivation(txPubKey, account.viewSecretKey, derivation)) {
+        uint8_t preimage[36];
+        memcpy(preimage, &derivation, 32);
+        uint32_t outIdx = static_cast<uint32_t>(idx);
+        preimage[32] = outIdx & 0xFF;
+        preimage[33] = (outIdx >> 8) & 0xFF;
+        preimage[34] = (outIdx >> 16) & 0xFF;
+        preimage[35] = (outIdx >> 24) & 0xFF;
+        Crypto::Hash secHash = cn_fast_hash(preimage, sizeof(preimage));
+        std::array<uint8_t, 32> depositSecret;
+        memcpy(depositSecret.data(), secHash.data, 32);
+        CryptoNote::DepositCommitmentKeys ck = CryptoNote::deriveCommitmentKeys(depositSecret);
+        info.keyImage = ck.keyImage;
+      }
+      info.amount = amount;
+      info.term = out.term;
     }
-    
+
    transfers.push_back(info);
   }
 

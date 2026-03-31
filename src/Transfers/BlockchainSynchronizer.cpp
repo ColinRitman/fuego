@@ -17,7 +17,9 @@
 
 #include "BlockchainSynchronizer.h"
 
+#include <chrono>
 #include <functional>
+#include <future>
 #include <iostream>
 #include <sstream>
 #include <thread>

@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -21,23 +21,24 @@
 #include <boost/program_options/options_description.hpp>
 #include <boost/program_options/variables_map.hpp>
 
-#include "P2p/NetNodeCommon.h"
-#include "CryptoNoteProtocol/CryptoNoteProtocolHandlerCommon.h"
+#include "../P2p/NetNodeCommon.h"
+#include "../CryptoNoteProtocol/CryptoNoteProtocolHandlerCommon.h"
 #include "Currency.h"
 #include "TransactionPool.h"
 #include "Blockchain.h"
-#include "CryptoNoteCore/IMinerHandler.h"
-#include "CryptoNoteCore/MinerConfig.h"
+#include "IMinerHandler.h"
+#include "MinerConfig.h"
 #include "ICore.h"
 #include "ICoreObserver.h"
-#include "Common/ObserverManager.h"
+#include "../Common/ObserverManager.h"
 
 #include "System/Dispatcher.h"
-#include "CryptoNoteCore/MessageQueue.h"
-#include "CryptoNoteCore/BlockchainMessages.h"
-#include "CryptoNoteCore/BankingIndex.h"
+#include "MessageQueue.h"
+#include "BlockchainMessages.h"
+#include "BankingIndex.h"
+#include "CommitmentIndex.h"
 
-#include <Logging/LoggerMessage.h>
+#include "../Logging/LoggerMessage.h"
 
 namespace CryptoNote {
 
@@ -143,9 +144,10 @@ namespace CryptoNote {
     virtual bool get_tx_outputs_gindexs(const Crypto::Hash &tx_id, std::vector<uint32_t> &indexs) override;
     Crypto::Hash get_tail_id();
     virtual bool get_random_outs_for_amounts(const COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_request &req, COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_response &res) override;
+    bool get_random_commitment_outs_for_amount(uint64_t amount, uint64_t count, std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry>& result);
     void pause_mining() override;
     void update_block_template_and_resume_mining() override;
-    //Blockchain& get_blockchain_storage(){return m_blockchain;}
+    Blockchain& get_blockchain_storage(){return m_blockchain;}
     //debug functions
     void print_blockchain(uint32_t start_index, uint32_t end_index);
     void print_blockchain_index();
@@ -164,7 +166,40 @@ namespace CryptoNote {
     uint64_t fullDepositAmount() const;
     uint64_t depositAmountAtHeight(size_t height) const;
     uint64_t getBurnedXfgAtHeight(size_t height) const;
+
     uint8_t getBlockMajorVersionForHeight(uint32_t height) const;
+
+    // Commitment index accessors
+    std::optional<CommitmentEntry> getCommitmentByHash(const Crypto::Hash& commitment) const;
+    bool hasCommitment(const Crypto::Hash& commitment) const;
+    size_t getCommitmentCount() const;
+    size_t getHeatCommitmentCount() const;
+    size_t getColdCommitmentCount() const;
+    Crypto::Hash getCommitmentMerkleRoot() const;
+    std::vector<Crypto::Hash> getCommitmentMerkleProof(const Crypto::Hash& commitment) const;
+    int64_t getCommitmentLeafIndex(const Crypto::Hash& commitment) const;
+    uint64_t getCommitmentHighestBlock() const;
+
+    // Direct CommitmentIndex access (for epoch reports, slash queries)
+    const CommitmentIndex& getCommitmentIndex() const;
+
+    // Elderfier consensus accessors
+    std::vector<uint8_t> getCommitmentSignedElderfierIds() const;
+    std::vector<uint8_t> getCommitmentPendingElderfierIds() const;
+    uint64_t getCommitmentConsensusPercentage() const;
+    std::vector<CommitmentIndex::ElderfierSignatureBundle> getSignaturesForCurrentRoot() const;
+
+    // Elderfier fee tracking
+    size_t getActiveElderfierCount() const;
+
+    // Elderfier registration lifecycle proxies
+    bool canAddressRegisterElderfier(const std::string& address) const;
+
+    // @ Alias system proxies
+    bool aliasExists(const std::string& alias) const;
+    std::optional<AliasEntry> getAliasByName(const std::string& alias) const;
+    std::optional<AliasEntry> getAliasByAddress(const std::string& address) const;
+    std::vector<AliasEntry> getAllAliases() const;
 
     bool is_key_image_spent(const Crypto::KeyImage &key_im);
 
@@ -176,8 +211,8 @@ namespace CryptoNote {
 
     bool check_tx_syntax(const Transaction &tx);  //check correct values, amounts and all lightweight checks not related with database
     bool check_tx_semantic(const Transaction &tx, bool keeped_by_block, uint32_t &height); //check if tx already in memory pool or in main blockchain
-    bool check_tx_mixin(const Transaction& tx);   //check if the mixin is not too large
-    bool check_tx_fee(const Transaction& tx, size_t blobSize, tx_verification_context& tvc); //check for proper tx fee
+    bool check_tx_mixin(const Transaction& tx, uint8_t blockMajorVersion);   //check if the mixin is not too large
+    bool check_tx_fee(const Transaction& tx, size_t blobSize, uint8_t blockMajorVersion, tx_verification_context& tvc); //check for proper tx fee
 
     bool check_tx_ring_signature(const KeyInput &tx, const Crypto::Hash &tx_prefix_hash, const std::vector<Crypto::Signature> &sig);
     bool is_tx_spendtime_unlocked(uint64_t unlock_time);

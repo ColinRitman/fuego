@@ -1,3 +1,4 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2017-2025 Elderfire Privacy Council
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2014-2017 The XDN developers
@@ -30,32 +31,32 @@ public:
   using DepositInterest = uint64_t;
   using DepositHeight = uint32_t;
   using BurnedAmount = uint64_t;
-  
+
   BankingIndex();
   explicit BankingIndex(DepositHeight expectedHeight);
-  void pushBlock(DepositAmount amount, DepositInterest interest); 
-  void popBlock(); 
+  void pushBlock(DepositAmount amount, DepositInterest interest);
+  void popBlock();
   void reserve(DepositHeight expectedHeight);
-  size_t popBlocks(DepositHeight from); 
+  size_t popBlocks(DepositHeight from);
   DepositAmount depositAmountAtHeight(DepositHeight height) const;
-  DepositAmount fullDepositAmount() const; 
+  DepositAmount fullDepositAmount() const;
   DepositInterest depositInterestAtHeight(DepositHeight height) const;
-  DepositInterest fullInterestAmount() const; 
+  DepositInterest fullInterestAmount() const;
   DepositHeight size() const;
   void serialize(ISerializer& s);
 
-  // Enhanced burned XFG tracking (integrated)
+  // integrated burned XFG tracking
   BurnedAmount getBurnedXfgAmount() const;
   BurnedAmount getBurnedXfgAtHeight(DepositHeight height) const;
   void addForeverDeposit(BurnedAmount amount, DepositHeight height);
-  
+
   // Combined statistics
   struct DepositStats {
     uint64_t totalDeposits;
-    uint64_t ethernalXFG;
-    uint64_t regularDeposits;  // totalDeposits - ethernalXFG
+    uint64_t ethereal_xfg;
+    uint64_t regularDeposits;  // totalDeposits - ethereal_xfg
   };
-  
+
   DepositStats getStats() const;
 
 private:
@@ -72,7 +73,7 @@ private:
     DepositHeight height;
     BurnedAmount amount;
     BurnedAmount cumulative_burned;
-    
+
     void serialize(ISerializer& s);
   };
 
@@ -80,9 +81,9 @@ private:
   IndexType::const_iterator upperBound(DepositHeight height) const;
   IndexType index;
   DepositHeight blockCount;
-  
+
   // Integrated burned XFG tracking
   std::vector<BurnedXfgEntry> m_burnedXfgEntries;
-  BurnedAmount m_ethernalXFG;
+  BurnedAmount m_ethereal_xfg;
 };
 }
