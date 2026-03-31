@@ -1,4 +1,4 @@
-// Copyright (c) 2019-2025 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -20,26 +20,29 @@
 #include <boost/filesystem.hpp>
 #include <boost/program_options.hpp>
 
-#include "Daemon/DaemonCommandsHandler.h"
+#include "../Daemon/DaemonCommandsHandler.h"
 
-#include "Common/SignalHandler.h"
-#include "Common/PathTools.h"
-#include "crypto/hash.h"
-#include "CryptoNoteCore/Core.h"
-#include "CryptoNoteCore/CoreConfig.h"
-#include "CryptoNoteCore/CryptoNoteTools.h"
-#include "CryptoNoteCore/Currency.h"
-#include "CryptoNoteCore/MinerConfig.h"
-#include "CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
-#include "CryptoNoteProtocol/ICryptoNoteProtocolQuery.h"
-#include "P2p/NetNode.h"
-#include "P2p/NetNodeConfig.h"
-#include "Rpc/RpcServer.h"
-#include "Rpc/RpcServerConfig.h"
-#include "version.h"
+#include "../Common/SignalHandler.h"
+#include "../Common/PathTools.h"
+#include "../crypto/hash.h"
+#include "../CryptoNoteCore/Core.h"
+#include "../CryptoNoteCore/CoreConfig.h"
+#include "../CryptoNoteCore/CryptoNoteTools.h"
+#include "../CryptoNoteCore/Currency.h"
+#include "../CryptoNoteCore/MinerConfig.h"
+#include "../CryptoNoteProtocol/CryptoNoteProtocolHandler.h"
+#include "../CryptoNoteProtocol/ICryptoNoteProtocolQuery.h"
+#include "../P2p/NetNode.h"
+#include "../P2p/NetNodeConfig.h"
+#include "../Rpc/RpcServer.h"
+#include "../Rpc/RpcServerConfig.h"
+#include "../version.h.in"
 
-#include "Logging/ConsoleLogger.h"
-#include <Logging/LoggerManager.h>
+#include "../Logging/ConsoleLogger.h"
+#include "../Logging/LoggerManager.h"
+#include "../CryptoNoteCore/ElderfierSignatureBroadcaster.h"
+#include "../CryptoNoteCore/SwapOfferRelay.h"
+#include "../Common/StringTools.h"
 
 #if defined(WIN32)
 #include <crtdbg.h>
@@ -62,7 +65,10 @@ namespace
   const command_line::arg_descriptor<std::string> arg_enable_cors = { "enable-cors", "Adds header 'Access-Control-Allow-Origin' to the daemon's RPC responses. Uses the value as domain. Use * for all", "" };
   const command_line::arg_descriptor<int>         arg_log_level   = {"log-level", "", 2}; // info level
   const command_line::arg_descriptor<bool>        arg_console     = {"no-console", "Disable daemon console commands"};
-  const command_line::arg_descriptor<bool>        arg_print_genesis_tx = { "print-genesis-tx", "Prints genesis' block tx hex to insert it to config and exits" };
+    const command_line::arg_descriptor<bool>        arg_print_genesis_tx = { "print-genesis-tx", "Prints genesis' block tx hex to insert it to config and exits" };
+    const command_line::arg_descriptor<bool>        arg_generate_new_genesis = { "generate-new-genesis", "Generates a new genesis block for testnet" };
+    const command_line::arg_descriptor<std::string> arg_testifier_key = {"testifier-key", "Secret signing key (hex) for Testifier merkle root signing.", ""};
+    const command_line::arg_descriptor<std::string> arg_testifier_address = {"testifier-address", "Wallet address for receiving EFier banking fee rewards.", ""};
 }
 
 bool command_line_preprocessor(const boost::program_options::variables_map& vm, LoggerRef& logger);
@@ -74,6 +80,22 @@ void print_genesis_tx_hex() {
   std::string tx_hex = Common::toHex(txb);
 
   std::cout << "const char GENESIS_COINBASE_TX_HEX[] = \"" << tx_hex << "\";" << std::endl;
+
+  return;
+}
+
+void generate_new_testnet_genesis() {
+  Logging::ConsoleLogger logger;
+  CryptoNote::CurrencyBuilder currencyBuilder(logger);
+  currencyBuilder.testnet(true);
+
+  // Generate new genesis transaction
+  CryptoNote::Transaction tx = currencyBuilder.generateGenesisTransaction();
+  CryptoNote::BinaryArray txb = CryptoNote::toBinaryArray(tx);
+  std::string tx_hex = Common::toHex(txb);
+
+  std::cout << "New TESTNET genesis transaction:" << std::endl;
+  std::cout << "const char GENESIS_COINBASE_TX_HEX_TESTNET[] = \"" << tx_hex << "\";" << std::endl;
 
   return;
 }
@@ -130,9 +152,11 @@ int main(int argc, char* argv[])
    command_line::add_arg(desc_cmd_sett, arg_enable_cors);
 
    command_line::add_arg(desc_cmd_sett, arg_print_genesis_tx);
-   //command_line::add_arg(desc_cmd_sett, arg_genesis_block_reward_address);
+      command_line::add_arg(desc_cmd_sett, arg_generate_new_genesis);
+      command_line::add_arg(desc_cmd_sett, arg_testifier_key);
+      command_line::add_arg(desc_cmd_sett, arg_testifier_address);
 
-   RpcServerConfig::initOptions(desc_cmd_sett);
+      RpcServerConfig::initOptions(desc_cmd_sett);
    CoreConfig::initOptions(desc_cmd_sett);
    NetNodeConfig::initOptions(desc_cmd_sett);
    MinerConfig::initOptions(desc_cmd_sett);
@@ -152,11 +176,17 @@ int main(int argc, char* argv[])
      }
 
      if (command_line::get_arg(vm, arg_print_genesis_tx))
-     {
-       //print_genesis_tx_hex(vm);
-       print_genesis_tx_hex();
-       return false;
-     }
+          {
+            //print_genesis_tx_hex(vm);
+            print_genesis_tx_hex();
+            return false;
+          }
+
+          if (command_line::get_arg(vm, arg_generate_new_genesis))
+          {
+            generate_new_testnet_genesis();
+            return false;
+          }
 
      std::string data_dir = command_line::get_arg(vm, command_line::arg_data_dir);
      std::string config = command_line::get_arg(vm, arg_config_file);
@@ -198,17 +228,17 @@ int main(int argc, char* argv[])
 
     // configure logging
 	    logManager.configure(buildLoggerConfiguration(cfgLogLevel, cfgLogFile));
-		logger(INFO, BRIGHT_WHITE) <<
+		logger(INFO, WHITE) <<
 #ifdef _WIN32
-" \n"		
-"       8888888888 888     888 8888888888 .d8888b.   .d88888b.   \n" 
+" \n"
+"       8888888888 888     888 8888888888 .d8888b.   .d88888b.   \n"
 "       888        888     888 888       d88P  Y88b d88P` `Y88b  \n"
 "       888        888     888 888       888    888 888     888  \n"
 "       8888888    888     888 8888888   888        888     888  \n"
 "       888        888     888 888       888  88888 888     888  \n"
 "       888        888     888 888       888    888 888     888  \n"
 "       888        Y88b. .d88P 888       Y88b  d88P Y88b. .d88P  \n"
-"       888         `Y88888P`  8888888888 `Y8888P88  `Y88888P`   \n"                                                   
+"       888         `Y88888P`  8888888888 `Y8888P88  `Y88888P`   \n"
 #else
 " \n"
 " ░░░░░░░ ░░    ░░ ░░░░░░░  ░░░░░░   ░░░░░░  \n"
@@ -218,7 +248,7 @@ int main(int argc, char* argv[])
 " ██       ██████  ███████  ██████   ██████  \n"
 #endif
 			"\n"
-			<< "             "  PROJECT_VERSION_LONG "\n"
+			<< "             "  TESTNET_DAEMON_VERSION "\n"
 			"\n";
 
     if (command_line_preprocessor(vm, logger)) {
@@ -229,7 +259,7 @@ int main(int argc, char* argv[])
 
     bool testnet_mode = true; // Always true for TestnetDaemon
     logger(INFO) << "Starting in testnet mode!";
-    
+
     //create objects and link them
     CryptoNote::CurrencyBuilder currencyBuilder(logManager);
     currencyBuilder.testnet(testnet_mode);
@@ -249,25 +279,25 @@ int main(int argc, char* argv[])
     NetNodeConfig netNodeConfig;
     netNodeConfig.init(vm);
     netNodeConfig.setTestnet(testnet_mode);
-    
+
     // Set testnet-specific P2P port if not explicitly configured
     if (testnet_mode && netNodeConfig.getBindPort() == P2P_DEFAULT_PORT) {
       netNodeConfig.setBindPort(P2P_DEFAULT_PORT_TESTNET);
     }
-    
+
     // Set testnet-specific default ports if not explicitly configured
     if (testnet_mode) {
       if (netNodeConfig.getBindPort() == 0) {
         netNodeConfig.setBindPort(P2P_DEFAULT_PORT_TESTNET);
       }
-    } 
+    }
 
     MinerConfig minerConfig;
     minerConfig.init(vm);
     RpcServerConfig rpcConfig;
     rpcConfig.init(vm);
 
-    
+
     // Set testnet-specific RPC port if not explicitly configured
     if (testnet_mode && rpcConfig.bindPort == RPC_DEFAULT_PORT) {
       rpcConfig.bindPort = RPC_DEFAULT_PORT_TESTNET;
@@ -311,13 +341,20 @@ int main(int argc, char* argv[])
 
     logger(INFO) << "Core initialized OK";
 
+    // Initialize swap offer relay
+    auto swapRelay = std::make_unique<CryptoNote::SwapOfferRelay>(ccore, p2psrv, &p2psrv);
+    swapRelay->start();
+    rpcServer.setSwapRelay(swapRelay.get());
+    p2psrv.get_payload_object().set_swap_relay(swapRelay.get());
+    logger(INFO) << "Swap offer relay started";
+
     // start components
     if (!command_line::has_arg(vm, arg_console)) {
       dch.start_handling();
     }
 
     logger(INFO) << "Starting core rpc server on address " << rpcConfig.getBindAddress();
-  
+
     /* Set address for remote node fee */
   	if (command_line::has_arg(vm, arg_set_fee_address)) {
 	  std::string addr_str = command_line::get_arg(vm, arg_set_fee_address);
@@ -332,9 +369,9 @@ int main(int argc, char* argv[])
 
       }
 	  }
-  
+
     /* This sets the view-key so we can confirm that
-       the fee is part of the transaction blob */       
+       the fee is part of the transaction blob */
     if (command_line::has_arg(vm, arg_set_view_key)) {
       std::string vk_str = command_line::get_arg(vm, arg_set_view_key);
 	    if (!vk_str.empty()) {
@@ -342,7 +379,7 @@ int main(int argc, char* argv[])
         logger(INFO, BRIGHT_YELLOW) << "Secret view key set: " << vk_str;
       }
     }
- 
+
     rpcServer.start(rpcConfig.bindIp, rpcConfig.bindPort);
     rpcServer.restrictRPC(command_line::get_arg(vm, arg_restricted_rpc));
     rpcServer.enableCors(command_line::get_arg(vm, arg_enable_cors));
@@ -358,6 +395,13 @@ int main(int argc, char* argv[])
     logger(INFO) << "p2p net loop stopped";
 
     dch.stop_handling();
+
+    // Stop swap relay before teardown
+    if (swapRelay) {
+      logger(INFO) << "Stopping swap offer relay...";
+      swapRelay->stop();
+      swapRelay.reset();
+    }
 
     //stop components
     logger(INFO) << "Stopping core rpc server...";

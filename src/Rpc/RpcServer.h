@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -14,12 +14,14 @@
 // by third parties. See file labeled LICENSE for more details.
 // You should have received a copy of the GNU General Public License
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
-
-#include "HttpServer.h"
+#pragma once
 
 #include <functional>
 #include <unordered_map>
+#include <thread>
+#include <memory>
 
+#include "HttpServer.h"
 #include <Logging/LoggerRef.h>
 #include "Common/Math.h"
 #include "CoreRpcServerCommandsDefinitions.h"
@@ -29,10 +31,13 @@ namespace CryptoNote {
 class core;
 class NodeServer;
 class ICryptoNoteProtocolQuery;
+class SwapOfferRelay;
 
 class RpcServer : public HttpServer {
 public:
   RpcServer(System::Dispatcher& dispatcher, Logging::ILogger& log, core& c, NodeServer& p2p, const ICryptoNoteProtocolQuery& protocolQuery);
+  ~RpcServer();
+
   typedef std::function<bool(RpcServer*, const HttpRequest& request, HttpResponse& response)> HandlerFunction;
   bool setFeeAddress(const std::string& fee_address, const AccountPublicAddress& fee_acc);
   bool setViewKey(const std::string& view_key);
@@ -41,7 +46,13 @@ public:
   bool k_on_check_reserve_proof(const K_COMMAND_RPC_CHECK_RESERVE_PROOF::request& req, K_COMMAND_RPC_CHECK_RESERVE_PROOF::response& res);
   bool enableCors(const std::string domain);
   bool remotenode_check_incoming_tx(const BinaryArray& tx_blob);
-  bool on_get_peer_list(const COMMAND_RPC_GET_PEER_LIST::request& req, COMMAND_RPC_GET_PEER_LIST::response& res);
+  void setSwapRelay(SwapOfferRelay* relay);
+
+  // Start the HTTP server
+  void start(const std::string& address, uint16_t port);
+  // Stop the HTTP server
+  void stop();
+
 private:
 
   template <class Handler>
@@ -53,7 +64,7 @@ private:
   typedef void (RpcServer::*HandlerPtr)(const HttpRequest& request, HttpResponse& response);
   static std::unordered_map<std::string, RpcHandler<HandlerFunction>> s_handlers;
 
-  virtual void processRequest(const HttpRequest& request, HttpResponse& response) override;
+  void processRequest(const HttpRequest& request, HttpResponse& response);
   bool processJsonRpcRequest(const HttpRequest& request, HttpResponse& response);
   bool isCoreReady();
 
@@ -63,6 +74,7 @@ private:
   bool on_query_blocks_lite(const COMMAND_RPC_QUERY_BLOCKS_LITE::request& req, COMMAND_RPC_QUERY_BLOCKS_LITE::response& res);
   bool on_get_indexes(const COMMAND_RPC_GET_TX_GLOBAL_OUTPUTS_INDEXES::request& req, COMMAND_RPC_GET_TX_GLOBAL_OUTPUTS_INDEXES::response& res);
   bool on_get_random_outs(const COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::request& req, COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::response& res);
+  bool on_get_random_commitment_outs(const COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::request& req, COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::response& res);
 
   bool onGetPoolChanges(const COMMAND_RPC_GET_POOL_CHANGES::request& req, COMMAND_RPC_GET_POOL_CHANGES::response& rsp);
   bool onGetPoolChangesLite(const COMMAND_RPC_GET_POOL_CHANGES_LITE::request& req, COMMAND_RPC_GET_POOL_CHANGES_LITE::response& rsp);
@@ -70,8 +82,51 @@ private:
   // json handlers
   bool on_get_info(const COMMAND_RPC_GET_INFO::request& req, COMMAND_RPC_GET_INFO::response& res);
   bool on_get_height(const COMMAND_RPC_GET_HEIGHT::request& req, COMMAND_RPC_GET_HEIGHT::response& res);
+  bool on_get_ethereal_flame(const COMMAND_RPC_GET_ETHERNAL_FLAME::request& req, COMMAND_RPC_GET_ETHERNAL_FLAME::response& res);
+
+  // Swap orderbook RPC endpoints
+  bool on_get_swap_offers(const COMMAND_RPC_GET_SWAP_OFFERS::request& req, COMMAND_RPC_GET_SWAP_OFFERS::response& res);
+  bool on_get_swap_price(const COMMAND_RPC_GET_SWAP_PRICE::request& req, COMMAND_RPC_GET_SWAP_PRICE::response& res);
+  bool on_get_swap_trades(const COMMAND_RPC_GET_SWAP_TRADES::request& req, COMMAND_RPC_GET_SWAP_TRADES::response& res);
+  bool on_submit_swap_offer(const COMMAND_RPC_SUBMIT_SWAP_OFFER::request& req, COMMAND_RPC_SUBMIT_SWAP_OFFER::response& res);
+  bool on_cancel_swap_offer(const COMMAND_RPC_CANCEL_SWAP_OFFER::request& req, COMMAND_RPC_CANCEL_SWAP_OFFER::response& res);
+
+  // CD fee pool RPC endpoints
+  bool on_get_fee_pool(const COMMAND_RPC_GET_FEE_POOL::request& req, COMMAND_RPC_GET_FEE_POOL::response& res);
+  bool on_get_cd_info(const COMMAND_RPC_GET_CD_INFO::request& req, COMMAND_RPC_GET_CD_INFO::response& res);
+  bool on_get_cd_interest(const COMMAND_RPC_GET_CD_INTEREST::request& req, COMMAND_RPC_GET_CD_INTEREST::response& res);
+
   bool on_get_deposits(const COMMAND_RPC_GET_DEPOSITS::request& req, COMMAND_RPC_GET_DEPOSITS::response& res);
   bool on_get_transactions(const COMMAND_RPC_GET_TRANSACTIONS::request& req, COMMAND_RPC_GET_TRANSACTIONS::response& res);
+  // Commitment Index RPC endpoints (Fuego → EVM bridge)
+  bool on_get_commitment(const COMMAND_RPC_GET_COMMITMENT::request& req, COMMAND_RPC_GET_COMMITMENT::response& res);
+  bool on_get_commitment_stats(const COMMAND_RPC_GET_COMMITMENT_STATS::request& req, COMMAND_RPC_GET_COMMITMENT_STATS::response& res);
+  bool on_get_commitment_merkle_root(const COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_ROOT::response& res);
+  bool on_get_commitment_merkle_proof(const COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::request& req, COMMAND_RPC_GET_COMMITMENT_MERKLE_PROOF::response& res);
+  bool on_check_commitment_exists(const COMMAND_RPC_CHECK_COMMITMENT_EXISTS::request& req, COMMAND_RPC_CHECK_COMMITMENT_EXISTS::response& res);
+  bool on_get_epoch_report(const COMMAND_RPC_GET_EPOCH_REPORT::request& req, COMMAND_RPC_GET_EPOCH_REPORT::response& res);
+
+  // Elderfier RPC endpoints
+  bool on_get_elderfier_signatures(const COMMAND_RPC_GET_ELDERFIER_SIGNATURES::request& req,
+                                    COMMAND_RPC_GET_ELDERFIER_SIGNATURES::response& res);
+  bool on_get_elderfier_consensus_status(const COMMAND_RPC_GET_ELDERFIER_CONSENSUS_STATUS::request& req,
+                                          COMMAND_RPC_GET_ELDERFIER_CONSENSUS_STATUS::response& res);
+  bool on_get_elderfier_fee_balance(const COMMAND_RPC_GET_ELDERFIER_FEE_BALANCE::request& req,
+                                     COMMAND_RPC_GET_ELDERFIER_FEE_BALANCE::response& res);
+  bool on_get_elderfier_network_stats(const COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::request& req,
+                                       COMMAND_RPC_GET_ELDERFIER_NETWORK_STATS::response& res);
+  bool on_check_elderfier_eligibility(const COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::request& req,
+                                       COMMAND_RPC_CHECK_ELDERFIER_ELIGIBILITY::response& res);
+  bool on_get_elderfier_by_pubkey(const COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY::request& req,
+                                   COMMAND_RPC_GET_ELDERFIER_BY_PUBKEY::response& res);
+  bool on_get_alias(const COMMAND_RPC_GET_ALIAS::request& req,
+                     COMMAND_RPC_GET_ALIAS::response& res);
+  bool on_get_alias_by_address(const COMMAND_RPC_GET_ALIAS_BY_ADDRESS::request& req,
+                                COMMAND_RPC_GET_ALIAS_BY_ADDRESS::response& res);
+  bool on_get_all_aliases(const COMMAND_RPC_GET_ALL_ALIASES::request& req,
+                           COMMAND_RPC_GET_ALL_ALIASES::response& res);
+
+  bool on_get_peer_list(const COMMAND_RPC_GET_PEER_LIST::request& req, COMMAND_RPC_GET_PEER_LIST::response& res);
   bool on_prove_collateral(const COMMAND_RPC_PROVE_COLLATERAL::request& req, COMMAND_RPC_PROVE_COLLATERAL::response& res);
   bool on_send_raw_tx(const COMMAND_RPC_SEND_RAW_TX::request& req, COMMAND_RPC_SEND_RAW_TX::response& res);
   bool on_start_mining(const COMMAND_RPC_START_MINING::request& req, COMMAND_RPC_START_MINING::response& res);
@@ -108,6 +163,8 @@ private:
   std::string m_fee_address;
   Crypto::SecretKey m_view_key = NULL_SECRET_KEY;
   AccountPublicAddress m_fee_acc;
+  SwapOfferRelay* m_swapRelay = nullptr;
+
 };
 
 }

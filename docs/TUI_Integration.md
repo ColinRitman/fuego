@@ -20,7 +20,7 @@ fuego-fresh/
 - **CMake 3.16+** for the build system
 - **Go 1.20+** for the TUI component (automatic detection)
 - **GCC 4.7.3+** or **Clang** for the C++ components
-- **Boost 1.55+** for the C++ components
+- **Boost 1.86++** for the C++ components
 
 ### Building with CMake
 
@@ -172,8 +172,8 @@ go test
 
 The TUI interfaces with the C++ components via these RPC endpoints:
 
-- `localhost:18081` - Node RPC
-- `localhost:18082` - Wallet RPC
+- `localhost:18180` - Node RPC
+- `localhost:28280` - Wallet RPC
 
 No direct compilation dependencies exist between the Go TUI and C++ components.
 

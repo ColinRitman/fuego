@@ -135,7 +135,12 @@ void wallet_rpc_server::processRequest(const CryptoNote::HttpRequest& request, C
       { "get_height", makeMemberMethod(&wallet_rpc_server::on_get_height) },
       { "get_outputs", makeMemberMethod(&wallet_rpc_server::on_get_outputs) },
       { "get_tx_proof"     , makeMemberMethod(&wallet_rpc_server::on_get_tx_proof)      },
-      { "get_reserve_proof", makeMemberMethod(&wallet_rpc_server::on_get_reserve_proof) },      
+      { "get_reserve_proof", makeMemberMethod(&wallet_rpc_server::on_get_reserve_proof) },
+      { "getaddress", makeMemberMethod(&wallet_rpc_server::on_get_address) },
+      { "initiate_swap", makeMemberMethod(&wallet_rpc_server::on_initiate_swap) },
+      { "complete_swap", makeMemberMethod(&wallet_rpc_server::on_complete_swap) },
+      { "refund_swap", makeMemberMethod(&wallet_rpc_server::on_refund_swap) },
+      { "sign_offer", makeMemberMethod(&wallet_rpc_server::on_sign_offer) },
       { "optimize", makeMemberMethod(&wallet_rpc_server::on_optimize) },
       { "estimate_fusion"  , makeMemberMethod(&wallet_rpc_server::on_estimate_fusion) },
       { "send_fusion"      , makeMemberMethod(&wallet_rpc_server::on_send_fusion) },
@@ -208,7 +213,7 @@ bool wallet_rpc_server::on_transfer(const wallet_rpc::COMMAND_RPC_TRANSFER::requ
     ttl = static_cast<uint64_t>(time(nullptr)) + req.ttl;
   }
 
-  uint64_t actualFee = CryptoNote::parameters::MINIMUM_FEE_V2;
+  uint64_t actualFee = m_currency.minimumFee();
 
   std::string extraString;
   std::copy(extra.begin(), extra.end(), std::back_inserter(extraString));
@@ -306,7 +311,7 @@ bool wallet_rpc_server::on_optimize(const wallet_rpc::COMMAND_RPC_OPTIMIZE::requ
   std::vector<CryptoNote::WalletLegacyTransfer> transfers;
   std::vector<CryptoNote::TransactionMessage> messages;
   std::string extraString;
-  uint64_t fee = CryptoNote::parameters::MINIMUM_FEE_V2;
+  uint64_t fee = m_currency.minimumFee();
   uint64_t mixIn = 0;
   uint64_t unlockTimestamp = 0;
   uint64_t ttl = 0;
@@ -565,6 +570,57 @@ bool wallet_rpc_server::on_get_outputs(const wallet_rpc::COMMAND_RPC_GET_OUTPUTS
 
 bool wallet_rpc_server::on_reset(const wallet_rpc::COMMAND_RPC_RESET::request& req, wallet_rpc::COMMAND_RPC_RESET::response& res) {
   m_wallet.reset();
+  return true;
+}
+
+bool wallet_rpc_server::on_get_address(const wallet_rpc::COMMAND_RPC_GET_ADDRESS::request& req, wallet_rpc::COMMAND_RPC_GET_ADDRESS::response& res) {
+  res.address = m_wallet.getAddress();
+  return true;
+}
+
+bool wallet_rpc_server::on_sign_offer(const wallet_rpc::COMMAND_RPC_SIGN_OFFER::request& req, wallet_rpc::COMMAND_RPC_SIGN_OFFER::response& res) {
+  CryptoNote::AccountPublicAddress addr;
+  if (!m_currency.parseAccountAddressString(m_wallet.getAddress(), addr)) {
+    res.status = "Internal error: could not parse wallet address";
+    return true;
+  }
+
+  res.maker_pubkey = Common::podToHex(addr.spendPublicKey);
+  res.timestamp = static_cast<uint64_t>(time(nullptr));
+
+  // offerId = H(maker_pubkey || pair || xfg_amount || rate_num || is_sell || timestamp)
+  std::string offer_data = res.maker_pubkey + std::to_string(req.pair) + 
+                           std::to_string(req.xfg_amount) + std::to_string(req.rate_num) + 
+                           std::to_string(req.is_sell) + std::to_string(res.timestamp);
+  
+  Crypto::Hash offer_hash;
+  cn_fast_hash(offer_data.data(), offer_data.size(), offer_hash);
+  res.offer_id = Common::podToHex(offer_hash);
+
+  // Sign the offerId hash
+  Crypto::Signature sig;
+  m_wallet.sign_hash(offer_hash, sig);
+  res.signature = Common::podToHex(sig);
+
+  res.status = WALLET_RPC_STATUS_OK;
+  return true;
+}
+
+bool wallet_rpc_server::on_initiate_swap(const wallet_rpc::COMMAND_RPC_INITIATE_SWAP::request& req, wallet_rpc::COMMAND_RPC_INITIATE_SWAP::response& res) {
+  // TODO: Start Musig2 session, generate adaptor secret t, adaptor point T = t*G
+  res.status = WALLET_RPC_STATUS_OK;
+  return true;
+}
+
+bool wallet_rpc_server::on_complete_swap(const wallet_rpc::COMMAND_RPC_COMPLETE_SWAP::request& req, wallet_rpc::COMMAND_RPC_COMPLETE_SWAP::response& res) {
+  // TODO: Extract secret from counterparty sig, complete XFG spend
+  res.status = WALLET_RPC_STATUS_OK;
+  return true;
+}
+
+bool wallet_rpc_server::on_refund_swap(const wallet_rpc::COMMAND_RPC_REFUND_SWAP::request& req, wallet_rpc::COMMAND_RPC_REFUND_SWAP::response& res) {
+  // TODO: Cooperatively or unilaterally refund
+  res.status = WALLET_RPC_STATUS_OK;
   return true;
 }
 

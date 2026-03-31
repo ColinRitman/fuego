@@ -11,6 +11,7 @@
 #include "CryptoNoteProtocolHandler.h"
 
 #include <future>
+#include <boost/scope_exit.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <System/Dispatcher.h>
 #include <boost/optional.hpp>
@@ -20,6 +21,7 @@
 #include "CryptoNoteCore/Currency.h"
 #include "CryptoNoteCore/VerificationContext.h"
 #include "P2p/LevinProtocol.h"
+#include "CryptoNoteCore/SwapOfferRelay.h"
 
 using namespace Logging;
 using namespace Common;
@@ -72,6 +74,11 @@ void CryptoNoteProtocolHandler::set_p2p_endpoint(IP2pEndpoint *p2p)
     m_p2p = p2p;
   else
     m_p2p = &m_p2p_stub;
+}
+
+void CryptoNoteProtocolHandler::set_swap_relay(SwapOfferRelay *relay)
+{
+  m_swap_relay = relay;
 }
 
 void CryptoNoteProtocolHandler::onConnectionOpened(CryptoNoteConnectionContext &context)
@@ -199,7 +206,7 @@ bool CryptoNoteProtocolHandler::process_payload_sync_data(const CORE_SYNC_DATA &
 
     logger(diff >= 0 ? (is_inital ? Logging::INFO : DEBUGGING) : Logging::TRACE)  << context << "Unknown top block: " << get_current_blockchain_height() << " -> " << hshd.current_height
                                                                                           << std::endl
-                                                                                          
+
                                                                                           << "Synchronization started";
 
     logger(DEBUGGING) << "Remote top block height: " << hshd.current_height << ", id: " << hshd.top_id;
@@ -268,6 +275,8 @@ int CryptoNoteProtocolHandler::handleCommand(bool is_notify, int command, const 
     HANDLE_NOTIFY(NOTIFY_REQUEST_TX_POOL, &CryptoNoteProtocolHandler::handle_request_tx_pool)
     HANDLE_NOTIFY(NOTIFY_NEW_LITE_BLOCK, &CryptoNoteProtocolHandler::handle_notify_new_lite_block)
     HANDLE_NOTIFY(NOTIFY_MISSING_TXS, &CryptoNoteProtocolHandler::handle_notify_missing_txs)
+    HANDLE_NOTIFY(COMMAND_SWAP_OFFER, &CryptoNoteProtocolHandler::handle_swap_offer)
+    HANDLE_NOTIFY(COMMAND_SWAP_CANCEL, &CryptoNoteProtocolHandler::handle_swap_cancel)
 
   default:
     handled = false;
@@ -383,10 +392,43 @@ int CryptoNoteProtocolHandler::handle_notify_new_transactions(int command, NOTIF
       }
     }
 
+    if (!m_core.getCurrentBlockMajorVersion() >= BLOCK_MAJOR_VERSION_10) {
+        // Dandelion is only active for block major version 10 and above.
+        // Fallback to standard relay.
+        relay_post_notify<NOTIFY_NEW_TRANSACTIONS>(*m_p2p, arg, &context.m_connection_id);
+        return 1;
+    }
+
     if (arg.txs.size())
     {
-      //TODO: add announce usage here
-      relay_post_notify<NOTIFY_NEW_TRANSACTIONS>(*m_p2p, arg, &context.m_connection_id);
+      if (arg.dandelion_stem) {
+        arg.hop_count++;
+        bool stay_stem = (arg.hop_count < 10) && (Crypto::rand<uint32_t>() % 100 < 90);
+        
+        if (stay_stem) {
+          logger(Logging::TRACE, Logging::BRIGHT_MAGENTA) << context << "Relaying transactions in Dandelion STEM mode (hop " << arg.hop_count << ")";
+          
+          // Track for fluff timer if we haven't seen it before
+          {
+            std::lock_guard<std::mutex> lock(m_stem_mutex);
+            for (const auto& tx_blob : arg.txs) {
+              Crypto::Hash tx_hash = Crypto::cn_fast_hash(tx_blob.data(), tx_blob.size());
+              if (m_stem_transactions.find(tx_hash) == m_stem_transactions.end()) {
+                m_stem_transactions[tx_hash] = {arg, time(nullptr)};
+              }
+            }
+          }
+
+          auto buf = LevinProtocol::encode(arg);
+          m_p2p->relay_notify_stem(NOTIFY_NEW_TRANSACTIONS::ID, buf, &context.m_connection_id);
+        } else {
+          logger(Logging::TRACE, Logging::BRIGHT_CYAN) << context << "Dandelion transition: STEM -> FLUFF (hop " << arg.hop_count << ")";
+          arg.dandelion_stem = false;
+          relay_transactions(arg);
+        }
+      } else {
+        relay_post_notify<NOTIFY_NEW_TRANSACTIONS>(*m_p2p, arg, &context.m_connection_id);
+      }
     }
   }
 
@@ -517,13 +559,12 @@ int CryptoNoteProtocolHandler::handle_response_get_objects(int command, NOTIFY_R
       ++dismiss;
     }
 
+    BOOST_SCOPE_EXIT_ALL(this) { m_core.update_block_template_and_resume_mining(); };
+
     int result = processObjects(context, parsed_blocks);
     if (result != 0) {
       return result;
     }
-    
-    // Cleanup: update block template and resume mining
-    m_core.update_block_template_and_resume_mining();
   }
 
   m_core.get_blockchain_top(height, top);
@@ -596,6 +637,30 @@ int CryptoNoteProtocolHandler::processObjects(CryptoNoteConnectionContext& conte
 
 bool CryptoNoteProtocolHandler::on_idle()
 {
+  // Dandelion fluff timer
+  {
+    std::lock_guard<std::mutex> lock(m_stem_mutex);
+    time_t now = time(nullptr);
+    for (auto it = m_stem_transactions.begin(); it != m_stem_transactions.end(); ) {
+      // If transaction is in mempool or blockchain, we can stop tracking it for fluffing
+      Transaction tx;
+      if (m_core.getTransaction(it->first, tx, true)) {
+         it = m_stem_transactions.erase(it);
+         continue;
+      }
+
+      // If it's been in stem phase for too long (e.g. 30s), fluff it
+      if (now - it->second.time_added > 30) {
+        logger(Logging::INFO) << "Fluffing stem transaction " << it->first << " after timeout";
+        it->second.request.dandelion_stem = false;
+        relay_transactions(it->second.request);
+        it = m_stem_transactions.erase(it);
+      } else {
+        ++it;
+      }
+    }
+  }
+
   return m_core.on_idle();
 }
 
@@ -685,17 +750,18 @@ bool CryptoNoteProtocolHandler::on_connection_synchronized()
 {
   bool val_expected = false;
   if (m_synchronized.compare_exchange_strong(val_expected, true)) {
+    std::string networkName = m_core.currency().isTestnet() ? "Fuego TESTNET" : "Fuego Network";
+    std::string walletName = m_core.currency().isTestnet() ? "test_wallet" : "fire_wallet";
     logger(Logging::INFO, Logging::BRIGHT_CYAN)
       << "**********************************************************************" << ENDL
-      << "You are synchronized with the Fuego network." << ENDL
-      << "fuego-wallet-cli is now at your service, m'lorde." << ENDL
-      << "Type \"help\" to see Fango daemon commands." << ENDL
+      << "You are synchronized with " << networkName << "." << ENDL
+      << walletName << " is at your service now, m'lorde." << ENDL
+      << "Type \"help\" to see available daemon commands." << ENDL
       << ENDL
-      << "Please note, the Fuego blockchain will only be saved after" << ENDL
+      << "Please note, " << networkName << " blockchain will only be saved after" << ENDL
       << "you quit the daemon with \"exit\" command" << ENDL
       << "Better yet use the \"save\" command." << ENDL
-      << "Otherwise, it may be necessary to re-sync.";
-      logger(Logging::INFO, Logging::BRIGHT_CYAN)
+      << "Otherwise, it may be necessary to re-sync." << ENDL
       << "**********************************************************************";
     m_core.on_synchronized();
 
@@ -881,8 +947,21 @@ void CryptoNoteProtocolHandler::relay_block(NOTIFY_NEW_BLOCK::request &arg)
 
 void CryptoNoteProtocolHandler::relay_transactions(NOTIFY_NEW_TRANSACTIONS::request &arg)
 {
-  auto buf = LevinProtocol::encode(arg);
-  m_p2p->externalRelayNotifyToAll(NOTIFY_NEW_TRANSACTIONS::ID, buf, nullptr);
+  if (!m_core.getCurrentBlockMajorVersion() >= BLOCK_MAJOR_VERSION_10) {
+    // Dandelion is only active for block major version 10 and above.
+    // Fallback to standard relay.
+    auto buf = LevinProtocol::encode(arg);
+    m_p2p->externalRelayNotifyToAll(NOTIFY_NEW_TRANSACTIONS::ID, buf, nullptr);
+    return;
+  }
+
+  if (arg.dandelion_stem) {
+    auto buf = LevinProtocol::encode(arg);
+    m_p2p->externalRelayNotifyToStem(NOTIFY_NEW_TRANSACTIONS::ID, buf, nullptr);
+  } else {
+    auto buf = LevinProtocol::encode(arg);
+    m_p2p->externalRelayNotifyToAll(NOTIFY_NEW_TRANSACTIONS::ID, buf, nullptr);
+  }
 }
 
 void CryptoNoteProtocolHandler::requestMissingPoolTransactions(const CryptoNoteConnectionContext &context)
@@ -1119,6 +1198,64 @@ int CryptoNoteProtocolHandler::doPushLiteBlock(NOTIFY_NEW_LITE_BLOCK::request ar
     }
   }
 
+  return 1;
+}
+
+int CryptoNoteProtocolHandler::handle_swap_offer(int command, COMMAND_SWAP_OFFER::request& arg, CryptoNoteConnectionContext& context)
+{
+  if (!m_core.getCurrentBlockMajorVersion() >= BLOCK_MAJOR_VERSION_10) {
+    // Dandelion is only active for block major version 10 and above.
+    // Fallback to standard relay.
+    auto buf = LevinProtocol::encode(arg);
+    m_p2p->relay_notify_to_all(COMMAND_SWAP_OFFER::ID, buf, &context.m_connection_id);
+    return 1;
+  }
+
+  if (!m_swap_relay) return 1;
+
+  SwapOfferMsg offer;
+  offer.offerId = arg.offerId;
+  offer.xfgAmount = arg.xfgAmount;
+  offer.rateNum = arg.rateNum;
+  offer.pair = arg.pair;
+  offer.makerPubKey = arg.makerPubKey;
+  offer.signature = arg.signature;
+  offer.timestamp = arg.timestamp;
+  offer.ttlBlocks = arg.ttlBlocks;
+  offer.postedHeight = arg.postedHeight;
+
+  m_swap_relay->handleOfferMessage(offer);
+
+  // Dandelion logic for swap offers
+  if (arg.dandelion_stem) {
+    arg.hop_count++;
+    bool stay_stem = (arg.hop_count < 5) && (Crypto::rand<uint32_t>() % 100 < 80); // Swap offers have shorter stem
+    
+    if (stay_stem) {
+      logger(Logging::TRACE, Logging::BRIGHT_MAGENTA) << context << "Relaying swap offer in STEM mode (hop " << arg.hop_count << ")";
+      auto buf = LevinProtocol::encode(arg);
+      m_p2p->relay_notify_stem(COMMAND_SWAP_OFFER::ID, buf, &context.m_connection_id);
+    } else {
+      logger(Logging::TRACE, Logging::BRIGHT_CYAN) << context << "Swap offer transition: STEM -> FLUFF (hop " << arg.hop_count << ")";
+      arg.dandelion_stem = false;
+      auto buf = LevinProtocol::encode(arg);
+      m_p2p->relay_notify_to_all(COMMAND_SWAP_OFFER::ID, buf, &context.m_connection_id);
+    }
+  } else {
+    auto buf = LevinProtocol::encode(arg);
+    m_p2p->relay_notify_to_all(COMMAND_SWAP_OFFER::ID, buf, &context.m_connection_id);
+  }
+
+  return 1;
+}
+
+int CryptoNoteProtocolHandler::handle_swap_cancel(int command, COMMAND_SWAP_CANCEL::request& arg, CryptoNoteConnectionContext& context)
+{
+  if (!m_swap_relay) return 1;
+  m_swap_relay->handleCancelMessage(arg.offerId, arg.makerPubKey, arg.signature);
+  
+  auto buf = LevinProtocol::encode(arg);
+  m_p2p->relay_notify_to_all(COMMAND_SWAP_CANCEL::ID, buf, &context.m_connection_id);
   return 1;
 }
 

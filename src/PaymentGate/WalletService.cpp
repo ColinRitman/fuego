@@ -616,7 +616,7 @@ namespace PaymentService
     // Initialize staged unlock storage with a path based on the wallet file
     std::string stagedUnlockStoragePath = config.walletFile + ".stagedunlock";
     m_stagedUnlockStorage.init(stagedUnlockStoragePath);
-    
+
     readyEvent.set();
   }
 
@@ -1320,7 +1320,7 @@ namespace PaymentService
       uint32_t knownBlockCount = node.getKnownBlockCount();
       transaction.confirmations = knownBlockCount - transaction.blockIndex;
 
-      /* Cycle through all the transfers in the transaction and extract the address, 
+      /* Cycle through all the transfers in the transaction and extract the address,
        amount, and pull any messages from Extra */
       std::vector<std::string> messages;
       std::vector<uint8_t> extraBin = Common::fromHex(transaction.extra);
@@ -1422,7 +1422,7 @@ namespace PaymentService
       sendParams.sourceAddresses = request.sourceAddresses;
       sendParams.destinations = convertWalletRpcOrdersToWalletOrders(request.transfers);
       sendParams.messages = convertWalletRpcMessagesToWalletMessages(messages);
-      sendParams.fee = CryptoNote::parameters::MINIMUM_FEE;
+      sendParams.fee = currency.minimumFee();
       // Use dynamic ring sizing for optimal privacy (aim for 18, fallback to 8 minimum)
       sendParams.mixIn = parameters::MIN_TX_MIXIN_SIZE_V10;
       sendParams.unlockTimestamp = request.unlockTime;
@@ -1448,51 +1448,7 @@ namespace PaymentService
     return std::error_code();
   }
 
-  std::error_code WalletService::submitBurnTransaction(const SubmitBurnTransaction::Request &request, std::string &transactionHash, std::string &burnSecretKey) {
-    try
-    {
-      System::EventLock lk(readyEvent);
 
-      validateAddresses(request.sourceAddresses, currency, logger);
-
-      CryptoNote::TransactionParameters sendParams;
-      sendParams.extra = Common::asString(Common::fromHex(request.extra));
-
-      sendParams.sourceAddresses = request.sourceAddresses;
-      
-      // Create a burn transaction with a special destination address
-      // and the specified amount to be burned
-      WalletRpcOrder burnOrder;
-      burnOrder.amount = request.amount;
-      burnOrder.address = request.address;  // This will be the burn destination
-      sendParams.destinations = convertWalletRpcOrdersToWalletOrders({burnOrder});
-      
-      sendParams.fee = request.fee;
-      sendParams.mixIn = request.anonymity;
-      sendParams.unlockTimestamp = request.unlockTime;
-
-      size_t transactionId = wallet.makeTransaction(sendParams);
-      const auto& tx = wallet.getTransaction(transactionId);
-      transactionHash = Common::podToHex(tx.hash);
-      
-      // Extract the transaction secret key
-      burnSecretKey = Common::podToHex(tx.secretKey);
-
-      logger(Logging::DEBUGGING) << "Burn transaction " << transactionHash << " has been created";
-    }
-    catch (std::system_error &x)
-    {
-      logger(Logging::WARNING) << "Error while creating delayed transaction: " << x.what();
-      return x.code();
-    }
-    catch (std::exception &x)
-    {
-      logger(Logging::WARNING) << "Error while creating delayed transaction: " << x.what();
-      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
-    }
-
-    return std::error_code();
-  }
 
   std::error_code WalletService::createDelayedTransaction(const CreateDelayedTransaction::Request &request, std::string &transactionHash)
   {
@@ -1751,36 +1707,36 @@ namespace PaymentService
   }
 
   std::error_code WalletService::getStatus(
-      uint32_t &blockCount,
-      uint32_t &knownBlockCount,
-      std::string &lastBlockHash,
-      uint32_t &peerCount,
-      uint32_t &depositCount,
-      uint32_t &transactionCount,
-      uint32_t &addressCount,
-      std::string &networkId)
-  {
-    try
+        uint32_t &blockCount,
+        uint32_t &knownBlockCount,
+        std::string &lastBlockHash,
+        uint32_t &peerCount,
+        uint32_t &depositCount,
+        uint32_t &transactionCount,
+        uint32_t &addressCount,
+        std::string &networkId)
     {
-      System::EventLock lk(readyEvent);
-
-      auto estimateResult = fusionManager.estimate(1000000, {});
-      knownBlockCount = node.getKnownBlockCount();
-      peerCount = static_cast<uint32_t>(node.getPeerCount());
-      blockCount = wallet.getBlockCount();
-      depositCount = static_cast<uint32_t>(wallet.getWalletDepositCount());
-      transactionCount = static_cast<uint32_t>(wallet.getTransactionCount());
-      addressCount = static_cast<uint32_t>(wallet.getAddressCount());
-      auto lastHashes = wallet.getBlockHashes(blockCount - 1, 1);
-      lastBlockHash = Common::podToHex(lastHashes.back());
-              networkId = "93385046440755750514194170694064996624";
-    }
-      catch (std::system_error &x)
+      try
       {
-        logger(Logging::WARNING) << "Error while getting status: " << x.what();
-        return x.code();
+        System::EventLock lk(readyEvent);
+
+        auto estimateResult = fusionManager.estimate(1000000, {});
+        knownBlockCount = node.getKnownBlockCount();
+        peerCount = static_cast<uint32_t>(node.getPeerCount());
+        blockCount = wallet.getBlockCount();
+        depositCount = static_cast<uint32_t>(wallet.getWalletDepositCount());
+        transactionCount = static_cast<uint32_t>(wallet.getTransactionCount());
+        addressCount = static_cast<uint32_t>(wallet.getAddressCount());
+        auto lastHashes = wallet.getBlockHashes(blockCount - 1, 1);
+        lastBlockHash = Common::podToHex(lastHashes.back());
+                networkId = currency.getFuegoNetworkIdString();
       }
-      catch (std::exception &x)
+        catch (std::system_error &x)
+        {
+          logger(Logging::WARNING) << "Error while getting status: " << x.what();
+          return x.code();
+        }
+        catch (std::exception &x)
       {
         logger(Logging::WARNING) << "Error while getting status: " << x.what();
         return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
@@ -1798,7 +1754,7 @@ namespace PaymentService
         const CryptoNote::DepositCommitment& commitment,
         bool useStagedUnlock)
     {
-    
+
       try
       {
 
@@ -1810,7 +1766,7 @@ namespace PaymentService
           logger(Logging::WARNING) << "Daemon is not synchronized";
           return make_error_code(CryptoNote::error::DAEMON_NOT_SYNCED);
         }
-        
+
         System::EventLock lk(readyEvent);
 
         /* Validate the source addresse if it is are not empty */
@@ -1821,27 +1777,37 @@ namespace PaymentService
 
         /* Now validate the deposit term and the amount */
 
-        /* Check if this is a FOREVER term (burn deposit) */
+        /* Check if this is a FOREVER term (burn deposit) or a stake term (0xEF) */
         bool isForeverTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
-        
-        if (!isForeverTerm) {
+        bool isStakeTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING ||
+                            term == CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING);
+
+        if (!isForeverTerm && !isStakeTerm) {
           /* For regular deposits, validate term constraints */
-          
-          /* Deposits should be multiples of DEPOSIT_MIN_TERM blocks */
-          if (term % CryptoNote::parameters::DEPOSIT_MIN_TERM != 0)
-          {
+
+          /* Use testnet or mainnet term limits */
+          bool isTestnet = this->currency.isTestnet();
+          uint32_t min_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;
+          uint32_t max_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;
+
+          /* Deposits should be either min_term, max_term, or a special term */
+          bool isValidTerm = (term == min_term ||
+                             term == max_term ||
+                             term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER ||
+                             term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING ||
+                             term == CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING);
+
+          if (!isValidTerm) {
             return make_error_code(CryptoNote::error::DEPOSIT_WRONG_TERM);
           }
 
-          /* The minimum term should be DEPOSIT_MIN_TERM */
-          if (term < CryptoNote::parameters::DEPOSIT_MIN_TERM)
-          {
+          /* The minimum term should be min_term */
+          if (term < min_term) {
             return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_SMALL);
           }
 
-          /* Current deposit rates are for a maximum term of DEPOSIT_MAX_TERM */
-          if (term > CryptoNote::parameters::DEPOSIT_MAX_TERM)
-          {
+          /* Current deposit rates are for a maximum term of max_term */
+          if (term > max_term) {
             return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_BIG);
           }
         }
@@ -1854,7 +1820,7 @@ namespace PaymentService
           minAmount = CryptoNote::parameters::BURN_DEPOSIT_MIN_AMOUNT;
         } else {
           /* Yield deposits (0x07) use lower minimum: 8 XFG (no maximum) */
-          minAmount = CryptoNote::parameters::YIELD_DEPOSIT_MIN_AMOUNT;
+          minAmount = CryptoNote::parameters::DEPOSIT_MIN_AMOUNT;
         }
 
         /* Validate minimum deposit amount */
@@ -1865,7 +1831,7 @@ namespace PaymentService
 
         /* Create or send the deposit */
         wallet.createDeposit(amount, term, sourceAddress, sourceAddress, transactionHash, commitment);
-        
+
         /* Handle staged unlock if requested */
         if (useStagedUnlock && !isBurnDeposit) {
           // Store staged unlock preference for this deposit
@@ -1912,7 +1878,7 @@ namespace PaymentService
         System::EventLock lk(readyEvent);
 
         /* Validate both the source and destination addresses
-       if they are not empty */
+         if they are not empty */
 
         if (!sourceAddress.empty())
         {
@@ -1928,16 +1894,21 @@ namespace PaymentService
 
         /* Check if this is a FOREVER term (burn deposit) */
         bool isForeverTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
-        
+
         if (!isForeverTerm) {
           /* For regular deposits, validate term constraints */
-          
-          if (term < CryptoNote::parameters::DEPOSIT_MIN_TERM)
+
+          /* Use testnet or mainnet term limits */
+          bool isTestnet = this->currency.isTestnet();
+          uint32_t min_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;
+          uint32_t max_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;
+
+          if (term < min_term)
           {
             return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_SMALL);
           }
 
-          if (term > CryptoNote::parameters::DEPOSIT_MAX_TERM)
+          if (term > max_term)
           {
             return make_error_code(CryptoNote::error::DEPOSIT_TERM_TOO_BIG);
           }
@@ -1951,7 +1922,7 @@ namespace PaymentService
           minAmount = CryptoNote::parameters::BURN_DEPOSIT_MIN_AMOUNT;
         } else {
           /* Yield deposits (0x07) use lower minimum: 8 XFG (no maximum) */
-          minAmount = CryptoNote::parameters::YIELD_DEPOSIT_MIN_AMOUNT;
+          minAmount = CryptoNote::parameters::DEPOSIT_MIN_AMOUNT;
         }
 
         /* Validate minimum deposit amount */
@@ -2266,9 +2237,9 @@ namespace PaymentService
       try
       {
         response.baseMoneySupply = currency.getBaseMoneySupply();
-        response.ethernalXFG = currency.getEternalFlame();
+        response.ethereal_xfg = currency.getEternalFlame();
         response.burnPercentage = currency.getBurnPercentage();
-        
+
         return std::error_code();
       }
       catch (std::exception &e)
@@ -2300,13 +2271,13 @@ namespace PaymentService
       {
         // Calculate circulating supply using base money supply and ethernal XFG
         uint64_t baseTotalSupply = currency.getBaseMoneySupply();
-        uint64_t ethernalXFG = currency.getEternalFlame();
+        uint64_t ethereal_xfg = currency.getEternalFlame();
         uint64_t currentDepositAmount = wallet.getLockedDepositBalance();
-        
-        uint64_t realTotalSupply = baseTotalSupply - ethernalXFG;
-        uint64_t totalDepositAmount = currentDepositAmount - ethernalXFG;
+
+        uint64_t realTotalSupply = baseTotalSupply - ethereal_xfg;
+        uint64_t totalDepositAmount = currentDepositAmount - ethereal_xfg;
         circulatingSupply = realTotalSupply - totalDepositAmount;
-        
+
         return std::error_code();
       }
       catch (std::exception &e)
@@ -2316,11 +2287,11 @@ namespace PaymentService
       }
     }
 
-    std::error_code WalletService::getEternalFlame(uint64_t &ethernalXFG)
+    std::error_code WalletService::getEternalFlame(uint64_t &ethereal_xfg)
     {
       try
       {
-        ethernalXFG = currency.getEternalFlame();
+        ethereal_xfg = currency.getEternalFlame();
         return std::error_code();
       }
       catch (std::exception &e)
@@ -2330,7 +2301,6 @@ namespace PaymentService
       }
     }
 
-    // Removed getTotalRebornXfg - no longer needed
 
     std::error_code WalletService::getBurnPercentage(double &burnPercentage)
     {
@@ -2346,19 +2316,12 @@ namespace PaymentService
       }
     }
 
-    // Removed getRebornPercentage - no longer needed
-
-    // Removed getSupplyIncreasePercentage - no longer needed
-
-
-        
-
   std::error_code WalletService::storeBurnDepositSecret(
       const std::string& transactionHash,
       const Crypto::SecretKey& secret,
       uint64_t amount,
       const std::vector<uint8_t>& metadata) {
-    
+
     try {
       // Store burn deposit secret locally in wallet (never on blockchain)
       // Note: This requires casting to WalletGreen to access burn deposit methods
@@ -2376,7 +2339,7 @@ namespace PaymentService
       Crypto::SecretKey& secret,
       uint64_t& amount,
       std::vector<uint8_t>& metadata) {
-    
+
     try {
       auto& walletGreen = static_cast<CryptoNote::WalletGreen&>(wallet);
       bool found = walletGreen.getBurnDepositSecret(transactionHash, secret, amount, metadata);
@@ -2392,7 +2355,7 @@ namespace PaymentService
 
   std::error_code WalletService::markBurnDepositBPDFGenerated(
       const std::string& transactionHash) {
-    
+
     try {
       auto& walletGreen = static_cast<CryptoNote::WalletGreen&>(wallet);
       walletGreen.markBurnDepositBPDFGenerated(transactionHash);
@@ -2411,7 +2374,7 @@ namespace PaymentService
       uint64_t amount,
       const std::vector<uint8_t>& metadata,
       const std::string& networkId) {
-    
+
     try {
       // Use BurnProofDataFileGenerator to create BPDF
       std::error_code bpdfResult = CryptoNote::BurnProofDataFileGenerator::generateBPDF(
@@ -2421,7 +2384,7 @@ namespace PaymentService
         amount,
         outputPath
       );
-      
+
       if (!bpdfResult) {
         logger(Logging::INFO) << "Generated BPDF successfully";
       } else {
@@ -2439,7 +2402,7 @@ namespace PaymentService
       const std::string& recipientAddress,
       const std::string& outputPath,
       const std::string& networkId) {
-    
+
     try {
       // For manual mode, we need to get transaction data and extract commitment
       // User will provide secret separately (not through RPC for security)
@@ -2448,11 +2411,11 @@ namespace PaymentService
       uint64_t amount;
       std::error_code extractResult = CryptoNote::BurnProofDataFileGenerator::extractSecretFromTransaction(
         transactionHash, secret, amount);
-      
+
       if (extractResult) {
         return extractResult;
       }
-      
+
       std::error_code bpdfResult = CryptoNote::BurnProofDataFileGenerator::generateBPDF(
         transactionHash,
         secret,
@@ -2460,7 +2423,7 @@ namespace PaymentService
         amount,
         outputPath
       );
-      
+
       if (!bpdfResult) {
         logger(Logging::INFO) << "Generated BPDF (manual) successfully";
       } else {
@@ -2488,10 +2451,10 @@ namespace PaymentService
     {
       // baseTotalSupply = All XFG created (base money supply)
       response.baseTotalSupply = currency.getBaseMoneySupply();
-      
+
       // Format amount for display
       response.formattedAmount = formatAmount(response.baseTotalSupply);
-      
+
       return std::error_code();
     }
     catch (std::exception &e)
@@ -2505,17 +2468,17 @@ namespace PaymentService
   {
     try
     {
-      // realTotalSupply = baseTotalSupply - ethernalXFG
+      // realTotalSupply = baseTotalSupply - ethereal_xfg
       uint64_t baseTotalSupply = currency.getBaseMoneySupply();
-      uint64_t ethernalXFG = currency.getEternalFlame();
-      
+      uint64_t ethereal_xfg = currency.getEternalFlame();
+
       response.baseTotalSupply = baseTotalSupply;
-      response.ethernalXFG = ethernalXFG;
-      response.realTotalSupply = baseTotalSupply - ethernalXFG;
-      
+      response.ethereal_xfg = ethereal_xfg;
+      response.realTotalSupply = baseTotalSupply - ethereal_xfg;
+
       // Format amount for display
       response.formattedAmount = formatAmount(response.realTotalSupply);
-      
+
       return std::error_code();
     }
     catch (std::exception &e)
@@ -2529,17 +2492,17 @@ namespace PaymentService
   {
     try
     {
-      // totalDepositAmount = currentAmount in deposits - ethernalXFG
+      // totalDepositAmount = currentAmount in deposits - ethereal_xfg
       uint64_t currentDepositAmount = wallet.getLockedDepositBalance();
-      uint64_t ethernalXFG = currency.getEternalFlame();
-      
+      uint64_t ethereal_xfg = currency.getEternalFlame();
+
       response.currentDepositAmount = currentDepositAmount;
-      response.ethernalXFG = ethernalXFG;
-      response.totalDepositAmount = currentDepositAmount - ethernalXFG;
-      
+      response.ethereal_xfg = ethereal_xfg;
+      response.totalDepositAmount = currentDepositAmount - ethereal_xfg;
+
       // Format amount for display
       response.formattedAmount = formatAmount(response.totalDepositAmount);
-      
+
       return std::error_code();
     }
     catch (std::exception &e)
@@ -2555,20 +2518,20 @@ namespace PaymentService
     {
       // circulatingSupply = realTotalSupply - totalDepositAmount
       uint64_t baseTotalSupply = currency.getBaseMoneySupply();
-      uint64_t ethernalXFG = currency.getEternalFlame();
+      uint64_t ethereal_xfg = currency.getEternalFlame();
       uint64_t currentDepositAmount = wallet.getLockedDepositBalance();
-      
-      uint64_t realTotalSupply = baseTotalSupply - ethernalXFG;
-      uint64_t totalDepositAmount = currentDepositAmount - ethernalXFG;
+
+      uint64_t realTotalSupply = baseTotalSupply - ethereal_xfg;
+      uint64_t totalDepositAmount = currentDepositAmount - ethereal_xfg;
       uint64_t circulatingSupply = realTotalSupply - totalDepositAmount;
-      
+
       response.realTotalSupply = realTotalSupply;
       response.totalDepositAmount = totalDepositAmount;
       response.circulatingSupply = circulatingSupply;
-      
+
       // Format amount for display
       response.formattedAmount = formatAmount(response.circulatingSupply);
-      
+
       return std::error_code();
     }
     catch (std::exception &e)
@@ -2582,12 +2545,12 @@ namespace PaymentService
   {
     try
     {
-      // ethernalXFG = Total burned XFG
-      response.ethernalXFG = currency.getEternalFlame();
-      
+      // ethereal_xfg = Total burned XFG
+      response.ethereal_xfg = currency.getEternalFlame();
+
       // Format amount for display
-      response.formattedAmount = formatAmount(response.ethernalXFG);
-      
+      response.formattedAmount = formatAmount(response.ethereal_xfg);
+
       return std::error_code();
     }
     catch (std::exception &e)
@@ -2603,35 +2566,35 @@ namespace PaymentService
     {
       // Get all supply components
       uint64_t baseTotalSupply = currency.getBaseMoneySupply();
-      uint64_t ethernalXFG = currency.getEternalFlame();
+      uint64_t ethereal_xfg = currency.getEternalFlame();
       uint64_t currentDepositAmount = wallet.getLockedDepositBalance();
-      
+
       // Calculate derived values
-      uint64_t realTotalSupply = baseTotalSupply - ethernalXFG;
-      uint64_t totalDepositAmount = currentDepositAmount - ethernalXFG;
+      uint64_t realTotalSupply = baseTotalSupply - ethereal_xfg;
+      uint64_t totalDepositAmount = currentDepositAmount - ethereal_xfg;
       uint64_t circulatingSupply = realTotalSupply - totalDepositAmount;
-      
+
       // Set raw values
       response.baseTotalSupply = baseTotalSupply;
       response.realTotalSupply = realTotalSupply;
       response.totalDepositAmount = totalDepositAmount;
       response.circulatingSupply = circulatingSupply;
-      response.ethernalXFG = ethernalXFG;
+      response.ethereal_xfg = ethereal_xfg;
       response.currentDepositAmount = currentDepositAmount;
-      
+
       // Format amounts for display
       response.baseTotalSupplyFormatted = formatAmount(baseTotalSupply);
       response.realTotalSupplyFormatted = formatAmount(realTotalSupply);
       response.totalDepositAmountFormatted = formatAmount(totalDepositAmount);
       response.circulatingSupplyFormatted = formatAmount(circulatingSupply);
-      response.ethernalXFGFormatted = formatAmount(ethernalXFG);
+      response.ethereal_xfgFormatted = formatAmount(ethereal_xfg);
       response.currentDepositAmountFormatted = formatAmount(currentDepositAmount);
-      
+
       // Calculate percentages
-      response.burnPercentage = (baseTotalSupply > 0) ? (ethernalXFG * 100.0 / baseTotalSupply) : 0.0;
+      response.burnPercentage = (baseTotalSupply > 0) ? (ethereal_xfg * 100.0 / baseTotalSupply) : 0.0;
       response.depositPercentage = (realTotalSupply > 0) ? (totalDepositAmount * 100.0 / realTotalSupply) : 0.0;
       response.circulatingPercentage = (realTotalSupply > 0) ? (circulatingSupply * 100.0 / realTotalSupply) : 0.0;
-      
+
       return std::error_code();
     }
     catch (std::exception &e)
@@ -2645,7 +2608,7 @@ namespace PaymentService
   {
     // Convert atomic units to XFG with 8 decimal places
     double xfgAmount = static_cast<double>(amount) / 100000000.0;
-    
+
     std::stringstream ss;
     ss << std::fixed << std::setprecision(8) << xfgAmount << " XFG";
     return ss.str();

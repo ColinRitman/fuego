@@ -397,5 +397,137 @@ using CryptoNote::ISerializer;
       }
     };
   };
+
+  struct COMMAND_RPC_INITIATE_SWAP
+  {
+    struct request
+    {
+      std::string offer_id;
+      uint8_t pair;
+      uint64_t amount;
+      std::string maker_pubkey; // hex
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(offer_id)
+        KV_MEMBER(pair)
+        KV_MEMBER(amount)
+        KV_MEMBER(maker_pubkey)
+      }
+    };
+
+    struct response
+    {
+      std::string joint_address;
+      std::string adaptor_point; // T = t*G
+      std::string dleq_proof;
+      std::string status;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(joint_address)
+        KV_MEMBER(adaptor_point)
+        KV_MEMBER(dleq_proof)
+        KV_MEMBER(status)
+      }
+    };
+  };
+
+  struct COMMAND_RPC_COMPLETE_SWAP
+  {
+    struct request
+    {
+      std::string swap_id;
+      std::string counterparty_signature; // revealed secret scalar inside
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(swap_id)
+        KV_MEMBER(counterparty_signature)
+      }
+    };
+
+    struct response
+    {
+      std::string tx_hash;
+      std::string status;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(tx_hash)
+        KV_MEMBER(status)
+      }
+    };
+  };
+
+  struct COMMAND_RPC_REFUND_SWAP
+  {
+    struct request
+    {
+      std::string swap_id;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(swap_id)
+      }
+    };
+
+    struct response
+    {
+      std::string tx_hash;
+      std::string status;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(tx_hash)
+        KV_MEMBER(status)
+      }
+    };
+  };
+
+  struct COMMAND_RPC_SIGN_OFFER
+  {
+    struct request
+    {
+      uint64_t xfg_amount;
+      uint64_t rate_num;
+      uint8_t pair;
+      uint32_t ttl_blocks;
+      bool is_sell;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(xfg_amount)
+        KV_MEMBER(rate_num)
+        KV_MEMBER(pair)
+        KV_MEMBER(ttl_blocks)
+        KV_MEMBER(is_sell)
+      }
+    };
+
+    struct response
+    {
+      std::string offer_id;
+      std::string maker_pubkey;
+      std::string signature;
+      uint64_t timestamp;
+      std::string status;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(offer_id)
+        KV_MEMBER(maker_pubkey)
+        KV_MEMBER(signature)
+        KV_MEMBER(timestamp)
+        KV_MEMBER(status)
+      }
+    };
+  };
+
+  struct COMMAND_RPC_GET_ADDRESS
+  {
+    typedef CryptoNote::EMPTY_STRUCT request;
+
+    struct response
+    {
+      std::string address;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(address)
+      }
+    };
+  };
 }
 }

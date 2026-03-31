@@ -40,6 +40,11 @@ struct TransactionOutputMultisignatureDetails {
   uint32_t requiredSignatures;
 };
 
+struct TransactionOutputCommitmentDetails {
+  Crypto::PublicKey commitKey;
+  uint32_t term;
+};
+
 struct TransactionOutputDetails {
   uint64_t amount;
   uint32_t globalIndex;
@@ -47,7 +52,8 @@ struct TransactionOutputDetails {
 
   boost::variant<
     TransactionOutputToKeyDetails,
-    TransactionOutputMultisignatureDetails> output;
+    TransactionOutputMultisignatureDetails,
+    TransactionOutputCommitmentDetails> output;
 };
 
 struct TransactionOutputReferenceDetails {
@@ -71,13 +77,20 @@ struct TransactionInputMultisignatureDetails {
   TransactionOutputReferenceDetails output;
 };
 
+struct TransactionInputCommitmentSpendDetails {
+  std::vector<uint32_t> outputIndexes;
+  Crypto::KeyImage keyImage;
+  uint64_t ringSize;
+};
+
 struct TransactionInputDetails {
   uint64_t amount;
 
   boost::variant<
     TransactionInputGenerateDetails,
     TransactionInputToKeyDetails,
-    TransactionInputMultisignatureDetails> input;
+    TransactionInputMultisignatureDetails,
+    TransactionInputCommitmentSpendDetails> input;
 };
 
 struct TransactionExtraDetails {

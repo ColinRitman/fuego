@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2014-2017 XDN developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
@@ -20,29 +20,29 @@
 
 #include <atomic>
 
-#include "google/sparse_hash_set"
-#include "google/sparse_hash_map"
-#include <parallel_hashmap/phmap.h>
+#include "../../external/parallel_hashmap/phmap.h"
 
-#include "Common/ObserverManager.h"
-#include "Common/Util.h"
-#include "CryptoNoteCore/BlockIndex.h"
-#include "CryptoNoteCore/Checkpoints.h"
-#include "CryptoNoteCore/Currency.h"
-#include "CryptoNoteCore/BankingIndex.h"
-#include "CryptoNoteCore/IBlockchainStorageObserver.h"
-#include "CryptoNoteCore/ITransactionValidator.h"
-#include "CryptoNoteCore/SwappedVector.h"
-#include "CryptoNoteCore/UpgradeDetector.h"
-#include "CryptoNoteCore/CryptoNoteFormatUtils.h"
-#include "CryptoNoteCore/TransactionPool.h"
-#include "CryptoNoteCore/BlockchainIndices.h"
+#include "../Common/ObserverManager.h"
+#include "../Common/Util.h"
+#include "BlockIndex.h"
+#include "Checkpoints.h"
+#include "Currency.h"
+#include "BankingIndex.h"
+#include "CommitmentIndex.h"
+#include "IBlockchainStorageObserver.h"
+#include "ITransactionValidator.h"
+#include "SwappedVector.h"
+#include "UpgradeDetector.h"
+#include "CryptoNoteFormatUtils.h"
+#include "TransactionPool.h"
+#include "AliasIndex.h"
+#include "BlockchainIndices.h"
 
-#include "CryptoNoteCore/MessageQueue.h"
-#include "CryptoNoteCore/BlockchainMessages.h"
-#include "CryptoNoteCore/IntrusiveLinkedList.h"
+#include "MessageQueue.h"
+#include "BlockchainMessages.h"
+#include "IntrusiveLinkedList.h"
 
-#include <Logging/LoggerRef.h>
+#include "../Logging/LoggerRef.h"
 
 #undef ERROR
 using phmap::parallel_flat_hash_map;
@@ -52,6 +52,7 @@ namespace CryptoNote {
   struct COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_request;
   struct COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_response;
   struct COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_outs_for_amount;
+  struct COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry;
 
   using CryptoNote::BlockInfo;
   class Blockchain : public CryptoNote::ITransactionValidator {
@@ -76,7 +77,7 @@ namespace CryptoNote {
     bool getLowerBound(uint64_t timestamp, uint64_t startOffset, uint32_t& height);
     std::vector<Crypto::Hash> getBlockIds(uint32_t startHeight, uint32_t maxCount);
 
-    void setCheckpoints(Checkpoints&& chk_pts) { m_checkpoints = chk_pts; }
+    void setCheckpoints(Checkpoints&& chk_pts) { m_checkpoints = std::move(chk_pts); }
     bool getBlocks(uint32_t start_offset, uint32_t count, std::list<Block>& blocks, std::list<Transaction>& txs);
     bool getBlocks(uint32_t start_offset, uint32_t count, std::list<Block>& blocks);
     bool getAlternativeBlocks(std::list<Block>& blocks);
@@ -97,6 +98,14 @@ namespace CryptoNote {
     difficulty_type getDifficultyForNextBlock();
     uint64_t getBlockTimestamp(uint32_t height);
     uint64_t getCoinsInCirculation();
+    uint64_t getFeePoolBalance() const { return m_feePoolBalance; }
+    uint64_t getCurrentEpochSwapFees() const { return m_currentEpochSwapFees; }
+    uint64_t getTotalCdLocked() const { return m_totalCdLocked; }
+    uint64_t getTotalXfgCdLocked() const { return m_totalXfgCdLocked; }
+    uint64_t getTreasuryBalance() const { return m_treasuryBalance; }
+    uint64_t getTotalSwapFeesCollected() const { return m_totalSwapFeesCollected; }
+    uint64_t getTotalCdInterestPaid() const { return m_totalCdInterestPaid; }
+    uint64_t getTotalTreasuryAccrued() const { return m_totalTreasuryAccrued; }
     uint8_t getBlockMajorVersionForHeight(uint32_t height) const;
     uint8_t blockMajorVersion;
     bool addNewBlock(const Block& bl_, block_verification_context& bvc);
@@ -110,6 +119,7 @@ namespace CryptoNote {
       uint32_t& totalBlockCount, uint32_t& startBlockIndex);
     bool handleGetObjects(NOTIFY_REQUEST_GET_OBJECTS_request& arg, NOTIFY_RESPONSE_GET_OBJECTS_request& rsp); //Deprecated. Should be removed with CryptoNoteProtocolHandler.
     bool getRandomOutsByAmount(const COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_request& req, COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_response& res);
+    bool getRandomCommitmentOutputsForAmount(uint64_t amount, uint64_t count, std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry>& result);
     bool getBackwardBlocksSize(size_t from_height, std::vector<size_t>& sz, size_t count);
     bool getTransactionOutputGlobalIndexes(const Crypto::Hash& tx_id, std::vector<uint32_t>& indexs);
     bool get_out_by_msig_gindex(uint64_t amount, uint64_t gindex, MultisignatureOutput& out);
@@ -129,9 +139,33 @@ namespace CryptoNote {
     uint64_t depositAmountAtHeight(size_t height) const;
     uint64_t depositInterestAtHeight(size_t height) const;
     uint64_t getBurnedXfgAtHeight(size_t height) const;
+
     uint64_t coinsEmittedAtHeight(uint64_t height);
     uint64_t difficultyAtHeight(uint64_t height);
     bool isInCheckpointZone(const uint32_t height);
+
+    // Commitment index accessors
+    std::optional<CommitmentEntry> getCommitmentByHash(const Crypto::Hash& commitment) const;
+    bool hasCommitment(const Crypto::Hash& commitment) const;
+    size_t getCommitmentCount() const;
+    size_t getHeatCommitmentCount() const;
+    size_t getColdCommitmentCount() const;
+    Crypto::Hash getCommitmentMerkleRoot() const;
+    std::vector<Crypto::Hash> getCommitmentMerkleProof(const Crypto::Hash& commitment) const;
+    int64_t getCommitmentLeafIndex(const Crypto::Hash& commitment) const;
+    bool getElderfierSigningPubkey(uint8_t efid, Crypto::PublicKey& pubkey_out) const;
+    bool getElderfierBySigningPubkey(const Crypto::PublicKey& pubkey, ElderfierRegistration& out) const;
+    CommitmentIndex::Height getCommitmentHighestBlock() const;
+
+    // Banking fee computation: scan transactions for HEAT/COLD commitments, 0.1% per active EFier
+    static uint64_t computeBankingFeesFromTransactions(const std::vector<Transaction>& txs);
+
+    // Access CommitmentIndex for epoch boundary checks and fee tracking
+    CommitmentIndex& getCommitmentIndex() { return m_commitmentIndex; }
+    const CommitmentIndex& getCommitmentIndex() const { return m_commitmentIndex; }
+
+    // Data directory (for broadcaster sign-lock file placement)
+    const std::string& getConfigFolder() const { return m_config_folder; }
 
     template <class visitor_t>
     bool scanOutputKeysForIndexes(const KeyInput &tx_in_to_key, visitor_t &vis, uint32_t *pmax_related_block_height = NULL);
@@ -148,7 +182,7 @@ namespace CryptoNote {
         if (!m_blockIndex.getBlockHeight(bl_id, height)) {
           missed_bs.push_back(bl_id);
         } else {
-          if (!(height < m_blocks.size())) { logger(static_cast<Logging::Level>(1), Logging::BRIGHT_RED) << "Internal error: bl_id=" << Common::podToHex(bl_id)
+          if (!(height < m_blocks.size())) { logger(Logging::ERROR, Logging::BRIGHT_RED) << "Internal error: bl_id=" << Common::podToHex(bl_id)
             << " have index record with offset=" << height << ", bigger then m_blocks.size()=" << m_blocks.size(); return false; }
             blocks.push_back(m_blocks[height].bl);
         }
@@ -205,6 +239,31 @@ namespace CryptoNote {
     bool rollbackBlockchainTo(uint32_t height);
     bool have_tx_keyimg_as_spent(const Crypto::KeyImage &key_im);
 
+    // Elderfier consensus accessors
+    std::vector<uint8_t> getCommitmentSignedElderfierIds() const;
+    std::vector<uint8_t> getCommitmentPendingElderfierIds() const;
+    uint64_t getCommitmentConsensusPercentage() const;
+    std::vector<CommitmentIndex::ElderfierSignatureBundle> getSignaturesForCurrentRoot() const;
+
+    // Elderfier fee tracking
+    size_t getActiveElderfierCount() const;
+
+    // Elderfier registration lifecycle
+    bool canAddressRegisterElderfier(const std::string& address) const;
+
+    // @ Alias system
+    bool aliasExists(const std::string& alias) const;
+    std::optional<AliasEntry> getAliasByName(const std::string& alias) const;
+    std::optional<AliasEntry> getAliasByAddress(const std::string& address) const;
+    std::vector<AliasEntry> getAllAliases() const;
+
+    // Elderfier signature cache accessors
+    void addSignatureToCache(const CachedElderfierSignature& sig);
+    void updateCurrentMerkleRoot(const Crypto::Hash& root);
+    uint64_t getConsensusPercentageForCurrentRoot() const;
+    std::vector<uint8_t> getSignedElderfierIds() const;
+    std::vector<uint8_t> getPendingElderfierIds() const;
+
   private:
 
     struct MultisignatureOutputUsage {
@@ -252,6 +311,28 @@ namespace CryptoNote {
     typedef parallel_flat_hash_map<uint64_t, std::vector<std::pair<TransactionIndex, uint16_t>>> outputs_container; //Crypto::Hash - tx hash, size_t - index of out in transaction
     typedef parallel_flat_hash_map<uint64_t, std::vector<MultisignatureOutputUsage>> MultisignatureOutputsContainer;
 
+    // Fuego commitment output index for ring-signature deposit/burn outputs.
+    // indexed by amount (like m_outputs for KeyOutput ring sigs).
+    // stores the commitKey cached for ring signature verification.
+    struct CommitmentOutputRef {
+      TransactionIndex  transactionIndex;
+      uint16_t          outputInTransaction;
+      Crypto::PublicKey commitKey;  // cached for ring signature verification
+      uint32_t          term;       // lock term in blocks; 0xFFFFFFFF = FOREVER (HEAT burns, never unlocked)
+      bool              isSlashed = false;  // true = forbidden ring member (slashed EFier stake)
+      bool              isXfgCd   = false;  // true = xfgCD (on-chain yield eligible, no COLD/HEAT/EFier extra)
+
+      void serialize(ISerializer& s) {
+        s(transactionIndex, "txindex");
+        s(outputInTransaction, "outindex");
+        s(commitKey, "commitKey");
+        s(term, "term");
+        s(isSlashed, "is_slashed");
+        s(isXfgCd, "is_xfg_cd");
+      }
+    };
+    typedef parallel_flat_hash_map<uint64_t, std::vector<CommitmentOutputRef>> CommitmentOutputsContainer;
+
     const Currency& m_currency;
     tx_memory_pool& m_tx_pool;
     mutable std::recursive_mutex m_blockchain_lock; // TODO: add here reader/writer lock
@@ -278,8 +359,25 @@ namespace CryptoNote {
     Blocks m_blocks;
     CryptoNote::BlockIndex m_blockIndex;
     CryptoNote::BankingIndex m_bankingIndex;
+    CryptoNote::CommitmentIndex m_commitmentIndex;
+    CryptoNote::AliasIndex m_aliasIndex;
     TransactionMap m_transactionMap;
     MultisignatureOutputsContainer m_multisignatureOutputs;
+    CommitmentOutputsContainer     m_commitmentOutputs;
+
+    // Fee pool: accumulates swap fees, distributed as interest to CD holders.
+    uint64_t m_feePoolBalance = 0;        // total XFG available for CD interest payouts
+    uint64_t m_currentEpochSwapFees = 0;  // fees accumulated in current epoch (reset each epoch boundary)
+    uint64_t m_totalCdLocked = 0;         // total XFG in ALL commitment outputs (ring pool bookkeeping)
+    uint64_t m_totalXfgCdLocked = 0;      // XFG in xfgCD deposits only (no COLD/HEAT/EFier — fee pool rate denominator)
+
+    // Cumulative fee pool accounting (lifetime totals, never reset)
+    uint64_t m_totalSwapFeesCollected = 0;    // all swap fees ever entering the pool
+    uint64_t m_totalCdInterestPaid = 0;       // total interest paid out to CD holders
+    uint64_t m_totalTreasuryAccrued = 0;      // total 10% accumulated to treasury
+
+    // Treasury: 10% of swap fees accumulates for protocol use
+    uint64_t m_treasuryBalance = 0;
     UpgradeDetector m_upgradeDetectorV2;
     UpgradeDetector m_upgradeDetectorV3;
     UpgradeDetector m_upgradeDetectorV4;
@@ -308,7 +406,7 @@ namespace CryptoNote {
     difficulty_type get_next_difficulty_for_alternative_chain(const std::list<blocks_ext_by_hash::iterator> &alt_chain, BlockEntry &bei);
     void pushToBankingIndex(const BlockEntry &block, uint64_t interest);
     bool prevalidate_miner_transaction(const Block &b, uint32_t height);
-    bool validate_miner_transaction(const Block &b, uint32_t height, size_t cumulativeBlockSize, uint64_t alreadyGeneratedCoins, uint64_t fee, uint64_t &reward, int64_t &emissionChange);
+    bool validate_miner_transaction(const Block &b, uint32_t height, size_t cumulativeBlockSize, uint64_t alreadyGeneratedCoins, uint64_t fee, uint64_t &reward, int64_t &emissionChange, const std::vector<Transaction>& blockTransactions = {});
     bool rollback_blockchain_switching(std::list<Block> &original_chain, size_t rollback_height);
     bool get_last_n_blocks_sizes(std::vector<size_t> &sz, size_t count);
     bool add_out_to_get_random_outs(std::vector<std::pair<TransactionIndex, uint16_t>> &amount_outs, COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_outs_for_amount &result_outs, uint64_t amount, size_t i);
@@ -317,7 +415,7 @@ namespace CryptoNote {
     bool check_block_timestamp_main(const Block &b);
     bool check_block_timestamp(std::vector<uint64_t> timestamps, const Block &b);
     uint64_t get_adjusted_time();
-    bool complete_timestamps_vector(uint8_t blockMajorVersion, uint64_t start_height, std::vector<uint64_t>& timestamps); 
+    bool complete_timestamps_vector(uint8_t blockMajorVersion, uint64_t start_height, std::vector<uint64_t>& timestamps);
     bool checkBlockVersion(const Block& b, const Crypto::Hash& blockHash);
     bool checkParentBlockSize(const Block& b, const Crypto::Hash& blockHash);
     bool checkCumulativeBlockSize(const Crypto::Hash& blockId, size_t cumulativeBlockSize, uint64_t height);
@@ -337,6 +435,7 @@ namespace CryptoNote {
     void popTransaction(const Transaction &transaction, const Crypto::Hash &transactionHash);
     void popTransactions(const BlockEntry &block, const Crypto::Hash &minerTransactionHash);
     bool validateInput(const MultisignatureInput &input, const Crypto::Hash &transactionHash, const Crypto::Hash &transactionPrefixHash, const std::vector<Crypto::Signature> &transactionSignatures);
+    bool checkCommitmentSpendInput(const TransactionInputCommitmentSpend& txin, const Crypto::Hash& tx_prefix_hash, const std::vector<Crypto::Signature>& sig, uint32_t* pmax_related_block_height = nullptr);
     bool removeLastBlock();
     bool checkCheckpoints(uint32_t &lastValidCheckpointHeight);
     bool checkUpgradeHeight(const UpgradeDetector& upgradeDetector);
@@ -389,7 +488,7 @@ namespace CryptoNote {
       const TransactionEntry& tx = transactionByIndex(amount_outs_vec[i].first);
 
       if (!(amount_outs_vec[i].second < tx.tx.outputs.size())) {
-        logger(static_cast<Logging::Level>(1), Logging::BRIGHT_RED)
+        logger(Logging::ERROR, Logging::BRIGHT_RED)
             << "Wrong index in transaction outputs: "
             << amount_outs_vec[i].second << ", expected less then "
             << tx.tx.outputs.size();

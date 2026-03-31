@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2022 Fuego Developers
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2018-2019 Conceal Network & Conceal Devs
 // Copyright (c) 2016-2019 The Karbowanec developers
 // Copyright (c) 2012-2018 The CryptoNote developers
@@ -21,7 +21,7 @@
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
-#include <Common/StreamTools.h>
+#include "../Common/StreamTools.h"
 #include "KVBinaryCommon.h"
 
 using namespace Common;
@@ -207,4 +207,3 @@ bool KVBinaryInputStreamSerializer::binary(void* value, size_t size, Common::Str
 bool KVBinaryInputStreamSerializer::binary(std::string& value, Common::StringView name) {
   return (*this)(value, name); // load as string
 }
-

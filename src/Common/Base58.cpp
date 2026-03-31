@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-#include "crypto/hash.h"
+#include "../crypto/hash.h"
 #include "int-util.h"
 #include "Varint.h"
 

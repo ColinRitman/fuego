@@ -56,7 +56,7 @@ Full Elder Council access with read/write capabilities:
 **3-Step Interactive Wizard:**
 
 **Step 1: Create Stake Deposit**
-- Minimum stake: **10,000 XFG**
+- Minimum stake: **800 XFG**
 - Creates `elderfier_stake` transaction type
 - Returns transaction hash for tracking
 
@@ -76,7 +76,7 @@ Full Elder Council access with read/write capabilities:
 🎉 ELDERFYRE STAYKING COMPLETE!
 
 Summary:
-  • Stake: 10000.00 XFG
+  • Stake: 800.00 XFG
   • Elderfier ID: ELDER001
   • TX Hash: abc123...
   • ENindex: Registered

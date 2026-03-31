@@ -1,5 +1,5 @@
+// Copyright (c) 2017-2026 Fuego Developers
 // Copyright (c) 2012-2018 The CryptoNote developers
-// Copyright (c) 2017-2022 Fuego Developers
 //
 // This file is part of Fuego.
 //
@@ -17,7 +17,7 @@
 #include <cstdint>
 #include <limits>
 #include <vector>
-#include "crypto/hash.h"
+#include "../src/crypto/hash.h"
 #include "ITransaction.h"
 #include "IObservable.h"
 #include "IStreamSerializable.h"
@@ -85,7 +85,7 @@ namespace CryptoNote
       IncludeStateUnlocked = 0x01,
       IncludeStateLocked = 0x02,
       IncludeStateSoftLocked = 0x04,
-      IncludeStateSpent = 0x08,
+      IncludeStateSpent = 0x24,
       // output type
       IncludeTypeKey = 0x100,
       IncludeTypeMultisignature = 0x200,

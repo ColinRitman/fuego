@@ -34,6 +34,9 @@ bool checkInputsKeyimagesDiff(const CryptoNote::TransactionPrefix& tx) {
     if (in.type() == typeid(KeyInput)) {
       if (!ki.insert(boost::get<KeyInput>(in).keyImage).second)
         return false;
+    } else if (in.type() == typeid(TransactionInputCommitmentSpend)) {
+      if (!ki.insert(boost::get<TransactionInputCommitmentSpend>(in).keyImage).second)
+        return false;
     }
   }
   return true;
@@ -48,6 +51,9 @@ size_t getRequiredSignaturesCount(const TransactionInput& in) {
   if (in.type() == typeid(MultisignatureInput)) {
     return boost::get<MultisignatureInput>(in).signatureCount;
   }
+  if (in.type() == typeid(TransactionInputCommitmentSpend)) {
+    return boost::get<TransactionInputCommitmentSpend>(in).outputIndexes.size();
+  }
   return 0;
 }
 
@@ -58,6 +64,9 @@ uint64_t getTransactionInputAmount(const TransactionInput& in) {
   if (in.type() == typeid(MultisignatureInput)) {
     // TODO calculate interest
     return boost::get<MultisignatureInput>(in).amount;
+  }
+  if (in.type() == typeid(TransactionInputCommitmentSpend)) {
+    return boost::get<TransactionInputCommitmentSpend>(in).amount;
   }
   return 0;
 }
@@ -71,6 +80,9 @@ TransactionTypes::InputType getTransactionInputType(const TransactionInput& in) 
   }
   if (in.type() == typeid(BaseInput)) {
     return TransactionTypes::InputType::Generating;
+  }
+  if (in.type() == typeid(TransactionInputCommitmentSpend)) {
+    return TransactionTypes::InputType::CommitmentSpend;
   }
   return TransactionTypes::InputType::Invalid;
 }
@@ -98,6 +110,9 @@ TransactionTypes::OutputType getTransactionOutputType(const TransactionOutputTar
   }
   if (out.type() == typeid(MultisignatureOutput)) {
     return TransactionTypes::OutputType::Multisignature;
+  }
+  if (out.type() == typeid(TransactionOutputCommitment)) {
+    return TransactionTypes::OutputType::Commitment;
   }
   return TransactionTypes::OutputType::Invalid;
 }
@@ -140,7 +155,8 @@ bool findOutputsToAccount(const CryptoNote::TransactionPrefix& transaction, cons
   generate_key_derivation(txPubKey, keys.viewSecretKey, derivation);
 
   for (const TransactionOutput& o : transaction.outputs) {
-    assert(o.target.type() == typeid(KeyOutput) || o.target.type() == typeid(MultisignatureOutput));
+    assert(o.target.type() == typeid(KeyOutput) || o.target.type() == typeid(MultisignatureOutput) ||
+           o.target.type() == typeid(TransactionOutputCommitment));
     if (o.target.type() == typeid(KeyOutput)) {
       if (is_out_to_acc(keys, boost::get<KeyOutput>(o.target), derivation, keyIndex)) {
         out.push_back(outputIndex);

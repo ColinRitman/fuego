@@ -18,6 +18,7 @@
 #include "IWalletLegacy.h"
 
 #include "crypto/hash.h"
+#include "CryptoNoteConfig.h"
 #include "CryptoNoteCore/TransactionExtra.h"
 #include "Wallet/WalletErrors.h"
 #include "WalletLegacy/WalletUserTransactionsCache.h"
@@ -333,6 +334,9 @@ std::deque<std::unique_ptr<WalletLegacyEvent>> WalletUserTransactionsCache::onTr
     tr.blockHeight = txInfo.blockHeight;
     tr.timestamp = txInfo.timestamp;
     tr.state = WalletLegacyTransactionState::Active;
+    // Update totalAmount — cross-container transactions (e.g. subaddress spend)
+    // may arrive with a more complete aggregate balance on subsequent calls.
+    tr.totalAmount = txBalance;
     // notification event
     events.push_back(std::unique_ptr<WalletLegacyEvent>(new WalletTransactionUpdatedEvent(id)));
 
@@ -427,8 +431,13 @@ std::vector<DepositId> WalletUserTransactionsCache::unlockDeposits(const std::ve
     }
 
     auto id = it->second;
-    unlockedDeposits.push_back(id);
 
+    // FOREVER (burn) deposits are permanently locked — never unlock them
+    if (m_deposits[id].deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER) {
+      continue;
+    }
+
+    unlockedDeposits.push_back(id);
     m_deposits[id].deposit.locked = false;
   }
 
@@ -497,6 +506,24 @@ bool WalletUserTransactionsCache::getDeposit(DepositId depositId, Deposit& depos
   }
 
   deposit = m_deposits[depositId].deposit;
+
+  // Populate transactionHash, height, and extra from the creating transaction
+  // (these fields aren't serialized to maintain backward compat with old wallet caches)
+  if (deposit.creatingTransactionId < m_transactions.size()) {
+    const auto& tx = m_transactions[deposit.creatingTransactionId];
+    deposit.transactionHash = tx.hash;
+    deposit.height = static_cast<uint64_t>(tx.blockHeight);
+    // FOREVER burns have no unlock height; unconfirmed txs use sentinel height (UINT32_MAX)
+    bool isForever = (deposit.term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
+    bool isPending = (tx.blockHeight == static_cast<int32_t>(WALLET_LEGACY_UNCONFIRMED_TRANSACTION_HEIGHT));
+    deposit.unlockHeight = (isForever || isPending) ? 0 : deposit.height + deposit.term;
+    // Recover deposit extra from the transaction extra (Deposit::extra is not serialized
+    // so it's lost on wallet reload; the transaction extra IS serialized).
+    if (deposit.extra.empty() && !tx.extra.empty()) {
+      deposit.extra = tx.extra;
+    }
+  }
+
   return true;
 }
 
@@ -613,16 +640,29 @@ std::vector<DepositId> WalletUserTransactionsCache::createNewDeposits(Transactio
 
 DepositId WalletUserTransactionsCache::insertNewDeposit(const TransactionOutputInformation& depositOutput, TransactionId creatingTransactionId,
   const Currency& currency, uint32_t height) {
-  assert(depositOutput.type == TransactionTypes::OutputType::Multisignature);
+  assert(depositOutput.type == TransactionTypes::OutputType::Multisignature ||
+         depositOutput.type == TransactionTypes::OutputType::Commitment);
   assert(depositOutput.term != 0);
-  assert(m_transactionOutputToBankingIndex.find(std::tie(depositOutput.transactionHash, depositOutput.outputInTransaction)) == m_transactionOutputToBankingIndex.end());
+  // Guard against duplicate insertion (can happen when wallet re-syncs after daemon restart).
+  // Return the existing deposit id rather than crashing.
+  {
+    auto existing = m_transactionOutputToBankingIndex.find(std::tie(depositOutput.transactionHash, depositOutput.outputInTransaction));
+    if (existing != m_transactionOutputToBankingIndex.end()) {
+      return existing->second;
+    }
+  }
 
   Deposit deposit;
   deposit.amount = depositOutput.amount;
   deposit.creatingTransactionId = creatingTransactionId;
   deposit.term = depositOutput.term;
   deposit.spendingTransactionId = WALLET_LEGACY_INVALID_TRANSACTION_ID;
+  deposit.interest = 0;
+  deposit.height = height;
+  deposit.unlockHeight = (depositOutput.term == parameters::DEPOSIT_TERM_FOREVER) ? 0 : height + depositOutput.term;
   deposit.locked = true;
+  deposit.outputInTransaction = depositOutput.outputInTransaction;
+  deposit.transactionHash = depositOutput.transactionHash;
 
   return insertDeposit(deposit, depositOutput.outputInTransaction, depositOutput.transactionHash);
 }

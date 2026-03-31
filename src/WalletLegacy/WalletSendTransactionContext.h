@@ -23,6 +23,7 @@
 #include "CryptoNoteCore/CryptoNoteBasic.h"
 #include "IWalletLegacy.h"
 #include "ITransfersContainer.h"
+#include "Rpc/CoreRpcServerCommandsDefinitions.h"
 
 namespace CryptoNote {
 
@@ -47,6 +48,11 @@ struct SendTransactionContext
   std::vector<tx_message_entry> messages;
   uint64_t ttl;
   uint32_t depositTerm;
+  std::string extra;
+  bool dynamicRingSize = false; // true: select optimal ring size from actual daemon-returned outs
+  std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry> commitmentOuts; // ring decoys for CommitmentSpend
+  uint64_t claimedInterest = 0; // fee pool interest to claim on CommitmentSpend withdrawal
+
 };
 
 } //namespace CryptoNote
