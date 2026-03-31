@@ -588,10 +588,10 @@ bool wallet_rpc_server::on_sign_offer(const wallet_rpc::COMMAND_RPC_SIGN_OFFER::
   res.maker_pubkey = Common::podToHex(addr.spendPublicKey);
   res.timestamp = static_cast<uint64_t>(time(nullptr));
 
-  // offerId = H(maker_pubkey || pair || xfg_amount || rate_num || timestamp)
+  // offerId = H(maker_pubkey || pair || xfg_amount || rate_num || is_sell || timestamp)
   std::string offer_data = res.maker_pubkey + std::to_string(req.pair) + 
                            std::to_string(req.xfg_amount) + std::to_string(req.rate_num) + 
-                           std::to_string(res.timestamp);
+                           std::to_string(req.is_sell) + std::to_string(res.timestamp);
   
   Crypto::Hash offer_hash;
   cn_fast_hash(offer_data.data(), offer_data.size(), offer_hash);

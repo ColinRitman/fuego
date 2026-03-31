@@ -487,12 +487,14 @@ using CryptoNote::ISerializer;
       uint64_t rate_num;
       uint8_t pair;
       uint32_t ttl_blocks;
+      bool is_sell;
 
       void serialize(ISerializer& s) {
         KV_MEMBER(xfg_amount)
         KV_MEMBER(rate_num)
         KV_MEMBER(pair)
         KV_MEMBER(ttl_blocks)
+        KV_MEMBER(is_sell)
       }
     };
 

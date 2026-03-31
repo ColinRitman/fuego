@@ -110,7 +110,7 @@ struct PoolSourceConfig {
 // Swap offer relay service
 // ============================================================================
 
-// Swap offer relay service — runs alongside ElderfierSignatureBroadcaster in fuegod
+// Swap offer relay service — manages P2P gossip of swap offers and trades
 class SwapOfferRelay {
 public:
   SwapOfferRelay(core& ccore, NodeServer& p2psrv, IP2pEndpoint* p2pEndpoint = nullptr);

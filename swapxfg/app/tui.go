@@ -75,6 +75,7 @@ func newTuiModel(cfg Config) tuiModel {
 			Trades: make(map[uint8][]SwapTrade),
 		},
 		cursorOn: true,
+		afkMode:  cfg.StartAFK,
 	}
 	if cfg.WalletRPC != "" {
 		m.wallet = NewWalletClient(cfg.WalletRPC)
@@ -252,11 +253,11 @@ func (m *tuiModel) handleCommand(cmd string) tea.Cmd {
 			}
 		}
 	case "pool":
-		if m.data.FeePool != nil {
+		if (m.data.FeePool != nil) {
 			fp := m.data.FeePool
-			m.statusMsg = fmt.Sprintf("Pool: %s XFG | CD Locked: %s XFG | Epoch Fees: %s XFG | EFiers: %d",
+			m.statusMsg = fmt.Sprintf("Pool: %s XFG | CD Locked: %s XFG | Epoch Fees: %s XFG",
 				FormatXfg(fp.FeePoolBalance), FormatXfg(fp.TotalCdLocked),
-				FormatXfg(fp.CurrentEpochSwapFees), fp.ActiveEfierCount)
+				FormatXfg(fp.CurrentEpochSwapFees))
 		} else {
 			m.statusMsg = "fee pool data unavailable"
 		}
@@ -289,6 +290,7 @@ func (m *tuiModel) handleCommand(cmd string) tea.Cmd {
 				RateNum:   rateNum,
 				Pair:      pair,
 				TTLBlocks: 180, // ~24h
+				IsSell:    isSell,
 			})
 			if err != nil {
 				return commandResultMsg{err: err}
@@ -444,7 +446,16 @@ func (m tuiModel) View() string {
 	if m.wallet != nil {
 		balStr = FormatXfg(m.walletBalance)
 	}
+	
+	afkStatus := ""
+	if m.afkMode {
+		afkStatus = StyleActiveTab.Render(" AFK AUTO-COMPLETE: ON ")
+	}
+	
 	inputBar := RenderInputBar(m.cmdBuf, m.cursorOn && m.cmdFocus, balStr, m.cfg.DaemonRPC, m.connected, w)
+	if afkStatus != "" {
+		inputBar = afkStatus + "  " + inputBar
+	}
 
 	// ── Status ──
 	status := ""

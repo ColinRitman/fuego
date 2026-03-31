@@ -128,9 +128,7 @@ type FeePoolInfo struct {
 	CurrentEpochSwapFees uint64 `json:"current_epoch_swap_fees"`
 	TotalCdLocked        uint64 `json:"total_cd_locked"`
 	CurrentEpochFeeRate  uint64 `json:"current_epoch_fee_rate"`
-	ActiveEfierCount     uint32 `json:"active_efier_count"`
 	BankingFeeRateBps    uint64 `json:"banking_fee_rate_bps"`
-	EfierSwapRewardPerBlock uint64 `json:"efier_swap_reward_per_block"`
 	TreasuryBalance      uint64 `json:"treasury_balance"`
 	TotalSwapFeesCollected uint64 `json:"total_swap_fees_collected"`
 	TotalCdInterestPaid  uint64 `json:"total_cd_interest_paid"`

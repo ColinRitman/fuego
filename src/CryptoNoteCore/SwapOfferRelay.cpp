@@ -120,6 +120,17 @@ bool SwapOfferRelay::validateOffer(const SwapOfferMsg& offer) const {
   if (offer.ttlBlocks == 0 || offer.ttlBlocks > 1080) return false;  // max ~6 days at 8min blocks
 
   // Verify signature: maker signs the offerId hash
+  // offerId = H(maker_pubkey || pair || xfg_amount || rate_num || timestamp)
+ // re-verify offerId matches content to prevent tampering.
+
+  std::string offer_data = Common::podToHex(offer.makerPubKey) + std::to_string(offer.pair) +
+                           std::to_string(offer.xfgAmount) + std::to_string(offer.rateNum) +
+                           std::to_string(offer.isSell) + std::to_string(offer.timestamp);
+
+  Crypto::Hash expected_hash;
+  cn_fast_hash(offer_data.data(), offer_data.size(), expected_hash);
+  if (Common::podToHex(expected_hash) != offer.offerId) return false;
+
   Crypto::Hash offerHash;
   cn_fast_hash(offer.offerId.data(), offer.offerId.size(), offerHash);
   return Crypto::check_signature(offerHash, offer.makerPubKey, offer.signature);
@@ -262,7 +273,7 @@ bool SwapOfferRelay::submitOffer(const SwapOfferMsg& offer) {
 
     // Spam prevention: Rate limit submissions
     uint64_t now = static_cast<uint64_t>(std::time(nullptr));
-    if (m_lastOfferTime.count(offer.makerPubKey) && 
+    if (m_lastOfferTime.count(offer.makerPubKey) &&
         (now - m_lastOfferTime[offer.makerPubKey] < OFFER_RATE_LIMIT_SEC)) {
       return false;
     }

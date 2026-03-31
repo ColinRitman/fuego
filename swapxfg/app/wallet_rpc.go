@@ -41,6 +41,7 @@ type SignOfferRequest struct {
 	RateNum   uint64 `json:"rate_num"`
 	Pair      uint8  `json:"pair"`
 	TTLBlocks uint32 `json:"ttl_blocks"`
+	IsSell    bool   `json:"is_sell"`
 }
 
 type SignOfferResponse struct {

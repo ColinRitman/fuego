@@ -35,8 +35,9 @@ namespace XfgSwap {
 static const double SEED_XFG_USD = 0.01;
 static const double SEED_SOL_USD = 170.0;
 static const double SEED_ETH_USD = 2140.0;
-static const double SEED_BCH_USD = 469.0;
 static const double SEED_XMR_USD = 343.0;
+static const double SEED_HEAT_USD = 0.01;
+static const double SEED_LUSD_USD = 1.00;
 
 // Minimum completed swaps before TWAP replaces seed rate
 static const size_t TWAP_MIN_TRADES = 5;
@@ -62,11 +63,12 @@ double PriceOracle::getSeedXfgUsd() {
 double PriceOracle::getSeedRate(SwapPair pair) {
   // Returns: how many XFG per 1 whole counterparty coin
   switch (pair) {
-    case SwapPair::SOL: return SEED_SOL_USD / SEED_XFG_USD;  //  17,000
-    case SwapPair::ETH: return SEED_ETH_USD / SEED_XFG_USD;  // 214,000
-    case SwapPair::BCH: return SEED_BCH_USD / SEED_XFG_USD;  //  46,900
-    case SwapPair::XMR: return SEED_XMR_USD / SEED_XFG_USD;  //  34,300
-    default:            return 0.0;
+    case SwapPair::SOL:  return SEED_SOL_USD / SEED_XFG_USD;   // 17,000
+    case SwapPair::ETH:  return SEED_ETH_USD / SEED_XFG_USD;   // 214,000
+    case SwapPair::XMR:  return SEED_XMR_USD / SEED_XFG_USD;   // 34,300
+    case SwapPair::HEAT: return SEED_HEAT_USD / SEED_XFG_USD;  // 1
+    case SwapPair::LUSD: return SEED_LUSD_USD / SEED_XFG_USD;  // 100
+    default:             return 0.0;
   }
 }
 
@@ -76,11 +78,12 @@ double PriceOracle::getSeedRate(SwapPair pair) {
 
 double PriceOracle::ctrDivisor(SwapPair pair) {
   switch (pair) {
-    case SwapPair::SOL: return 1e9;   // lamports (1 SOL = 1e9 lamports)
-    case SwapPair::ETH: return 1e18;  // wei
-    case SwapPair::BCH: return 1e8;   // satoshi
-    case SwapPair::XMR: return 1e12;  // piconero
-    default:            return 1e8;
+    case SwapPair::SOL:  return 1e9;   // lamports (1 SOL = 1e9 lamports)
+    case SwapPair::ETH:  return 1e18;  // wei
+    case SwapPair::XMR:  return 1e12;  // piconero
+    case SwapPair::HEAT: return 1e7;   // HEAT has 7 decimals matching XFG
+    case SwapPair::LUSD: return 1e18;  // LUSD is standard ERC-20 (18 decimals)
+    default:             return 1e8;
   }
 }
 
