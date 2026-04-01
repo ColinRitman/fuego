@@ -1898,4 +1898,116 @@ struct COMMAND_RPC_GET_CD_INTEREST {
   };
  };
 
+// ============================================================================
+// FEE POOL ANALYTICS & TREASURY DASHBOARD RPC ENDPOINTS
+// ============================================================================
+
+struct COMMAND_RPC_GET_FEE_POOL_INFO {
+  typedef EMPTY_STRUCT request;
+
+  struct response {
+    uint64_t pool_balance;
+    uint64_t epoch_number;
+    uint64_t current_epoch_fees;
+    uint64_t total_fees_collected;
+    uint64_t total_interest_paid;
+    uint64_t xfg_cd_locked;
+    uint64_t total_cd_locked;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(pool_balance)
+      KV_MEMBER(epoch_number)
+      KV_MEMBER(current_epoch_fees)
+      KV_MEMBER(total_fees_collected)
+      KV_MEMBER(total_interest_paid)
+      KV_MEMBER(xfg_cd_locked)
+      KV_MEMBER(total_cd_locked)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_EPOCH_HISTORY {
+  struct request {
+    uint64_t from_epoch;
+    uint64_t count;
+
+    request() : from_epoch(0), count(10) {}
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(from_epoch)
+      KV_MEMBER(count)
+    }
+  };
+
+  struct response {
+    struct EpochEntry {
+      uint64_t epoch;
+      uint64_t fee_rate_fixed_point;
+      uint64_t fees_collected;
+      uint64_t cd_locked_at_start;
+      uint64_t treasury_share;
+
+      void serialize(ISerializer& s) {
+        KV_MEMBER(epoch)
+        KV_MEMBER(fee_rate_fixed_point)
+        KV_MEMBER(fees_collected)
+        KV_MEMBER(cd_locked_at_start)
+        KV_MEMBER(treasury_share)
+      }
+    };
+
+    std::vector<EpochEntry> epochs;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(epochs)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_ESTIMATE_CD_YIELD {
+  struct request {
+    uint64_t amount;
+    uint64_t creation_height;
+
+    request() : amount(0), creation_height(0) {}
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(amount)
+      KV_MEMBER(creation_height)
+    }
+  };
+
+  struct response {
+    uint64_t estimated_interest;
+    uint64_t pool_balance;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(estimated_interest)
+      KV_MEMBER(pool_balance)
+      KV_MEMBER(status)
+    }
+  };
+};
+
+struct COMMAND_RPC_GET_TREASURY_INFO {
+  typedef EMPTY_STRUCT request;
+
+  struct response {
+    uint64_t treasury_balance;
+    uint64_t total_accrued;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(treasury_balance)
+      KV_MEMBER(total_accrued)
+      KV_MEMBER(status)
+    }
+  };
+};
+
 }

@@ -29,6 +29,7 @@
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
 #include "CryptoNoteCore/Core.h"
 #include "CryptoNoteCore/IBlock.h"
+#include "CryptoNoteConfig.h"
 #include "CryptoNoteCore/Miner.h"
 #include "CryptoNoteCore/TransactionExtra.h"
 #include "CryptoNoteProtocol/ICryptoNoteProtocolQuery.h"
@@ -113,6 +114,12 @@ std::unordered_map<std::string, RpcServer::RpcHandler<RpcServer::HandlerFunction
   { "/getfeepool", { jsonMethod<COMMAND_RPC_GET_FEE_POOL>(&RpcServer::on_get_fee_pool), true } },
   { "/getcdinfo", { jsonMethod<COMMAND_RPC_GET_CD_INFO>(&RpcServer::on_get_cd_info), true } },
   { "/getcdinterest", { jsonMethod<COMMAND_RPC_GET_CD_INTEREST>(&RpcServer::on_get_cd_interest), true } },
+
+  // Fee pool analytics and treasury dashboard endpoints
+  { "/get_fee_pool_info", { jsonMethod<COMMAND_RPC_GET_FEE_POOL_INFO>(&RpcServer::on_get_fee_pool_info), true } },
+  { "/get_epoch_history", { jsonMethod<COMMAND_RPC_GET_EPOCH_HISTORY>(&RpcServer::on_get_epoch_history), true } },
+  { "/estimate_cd_yield", { jsonMethod<COMMAND_RPC_ESTIMATE_CD_YIELD>(&RpcServer::on_estimate_cd_yield), true } },
+  { "/get_treasury_info", { jsonMethod<COMMAND_RPC_GET_TREASURY_INFO>(&RpcServer::on_get_treasury_info), true } },
 
   // output index lookup (JSON mirror of /get_o_indexes.bin)
   { "/get_o_indexes", { jsonMethod<COMMAND_RPC_GET_TX_GLOBAL_OUTPUTS_INDEXES>(&RpcServer::on_get_indexes), true } },
@@ -2287,6 +2294,83 @@ bool RpcServer::on_get_cd_info(const COMMAND_RPC_GET_CD_INFO::request& req,
   res.active_efier_count = bc.getActiveEfierCount();
   res.banking_fee_rate_bps = bc.getBankingFeeRateBps();
 
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_fee_pool_info(const COMMAND_RPC_GET_FEE_POOL_INFO::request& req,
+                                      COMMAND_RPC_GET_FEE_POOL_INFO::response& res) {
+  auto& bc = m_core.get_blockchain_storage();
+
+  res.pool_balance = bc.getFeePoolBalance();
+  res.current_epoch_fees = bc.getCurrentEpochSwapFees();
+  res.total_fees_collected = bc.getTotalSwapFeesCollected();
+  res.total_interest_paid = bc.getTotalCdInterestPaid();
+  res.xfg_cd_locked = bc.getTotalXfgCdLocked();
+  res.total_cd_locked = bc.getTotalCdLocked();
+
+  uint32_t height = bc.getCurrentBlockchainHeight();
+  uint64_t epochDuration = m_core.currency().isTestnet()
+    ? CryptoNote::parameters::TESTNET_EPOCH_DURATION_BLOCKS
+    : CryptoNote::parameters::EPOCH_DURATION_BLOCKS;
+  res.epoch_number = (epochDuration > 0) ? (height / epochDuration) : 0;
+
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_epoch_history(const COMMAND_RPC_GET_EPOCH_HISTORY::request& req,
+                                      COMMAND_RPC_GET_EPOCH_HISTORY::response& res) {
+  uint64_t count = (req.count > 100) ? 100 : req.count;
+  auto& ci = m_core.getCommitmentIndex();
+  uint64_t epochCount = ci.getEpochCount();
+
+  for (uint64_t i = req.from_epoch; i < req.from_epoch + count; ++i) {
+    if (i >= epochCount) break;
+    auto report = ci.getEpochReport(i);
+    if (!report) continue;
+
+    COMMAND_RPC_GET_EPOCH_HISTORY::response::EpochEntry entry;
+    entry.epoch = report->epochNumber;
+    entry.fee_rate_fixed_point = report->feeRateFixedPoint;
+    entry.fees_collected = report->swapFeesCollected;
+    entry.cd_locked_at_start = report->totalCdLockedAtStart;
+    entry.treasury_share = (report->swapFeesCollected * 10) / 100;
+    res.epochs.push_back(entry);
+  }
+
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_estimate_cd_yield(const COMMAND_RPC_ESTIMATE_CD_YIELD::request& req,
+                                      COMMAND_RPC_ESTIMATE_CD_YIELD::response& res) {
+  auto& bc = m_core.get_blockchain_storage();
+  uint32_t currentHeight = bc.getCurrentBlockchainHeight();
+
+  uint64_t interest = m_core.currency().calculateCdInterest(
+    req.amount,
+    static_cast<uint32_t>(req.creation_height),
+    currentHeight,
+    m_core.getCommitmentIndex());
+
+  uint64_t poolBalance = bc.getFeePoolBalance();
+  if (interest > poolBalance) {
+    interest = poolBalance;
+  }
+
+  res.estimated_interest = interest;
+  res.pool_balance = poolBalance;
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_get_treasury_info(const COMMAND_RPC_GET_TREASURY_INFO::request& req,
+                                      COMMAND_RPC_GET_TREASURY_INFO::response& res) {
+  auto& bc = m_core.get_blockchain_storage();
+
+  res.treasury_balance = bc.getTreasuryBalance();
+  res.total_accrued = bc.getTotalTreasuryAccrued();
   res.status = CORE_RPC_STATUS_OK;
   return true;
 }

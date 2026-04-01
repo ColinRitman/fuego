@@ -96,6 +96,12 @@ private:
   bool on_get_cd_info(const COMMAND_RPC_GET_CD_INFO::request& req, COMMAND_RPC_GET_CD_INFO::response& res);
   bool on_get_cd_interest(const COMMAND_RPC_GET_CD_INTEREST::request& req, COMMAND_RPC_GET_CD_INTEREST::response& res);
 
+  // Fee pool analytics and treasury dashboard endpoints
+  bool on_get_fee_pool_info(const COMMAND_RPC_GET_FEE_POOL_INFO::request& req, COMMAND_RPC_GET_FEE_POOL_INFO::response& res);
+  bool on_get_epoch_history(const COMMAND_RPC_GET_EPOCH_HISTORY::request& req, COMMAND_RPC_GET_EPOCH_HISTORY::response& res);
+  bool on_estimate_cd_yield(const COMMAND_RPC_ESTIMATE_CD_YIELD::request& req, COMMAND_RPC_ESTIMATE_CD_YIELD::response& res);
+  bool on_get_treasury_info(const COMMAND_RPC_GET_TREASURY_INFO::request& req, COMMAND_RPC_GET_TREASURY_INFO::response& res);
+
   bool on_get_deposits(const COMMAND_RPC_GET_DEPOSITS::request& req, COMMAND_RPC_GET_DEPOSITS::response& res);
   bool on_get_transactions(const COMMAND_RPC_GET_TRANSACTIONS::request& req, COMMAND_RPC_GET_TRANSACTIONS::response& res);
   // Commitment Index RPC endpoints (Fuego → EVM bridge)
