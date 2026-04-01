@@ -33,6 +33,7 @@
 #include "P2p/ConnectionContext.h"
 
 #include <Logging/LoggerRef.h>
+#include "CryptoNoteCore/SwapOfferRelay.h"
 
 namespace System {
   class Dispatcher;

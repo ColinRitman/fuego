@@ -26,7 +26,11 @@ AdaptorSignature generateAdaptorSignature(const SecretKey& sk, const Hash& messa
 
     // 1. Alice signs the message with her secret key: s = sk * messageHash
     //    (Using simplified notation; actual signing involves nonce generation, etc.)
-    Ed25519Signature messageSig = sign(sk, messageHash); // Assuming sign(sk, hash) returns Ed25519Signature
+    // Derive public key from secret key
+    PublicKey pk;
+    secret_key_to_public_key(sk, pk);
+    Ed25519Signature messageSig;
+    generate_signature(messageHash, pk, sk, messageSig);
 
     // 2. Alice constructs the adaptor signature. The exact method depends on the specific
     //    adaptor signature scheme used (e.g., with DLEQ proofs). A common approach is:

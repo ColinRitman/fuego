@@ -11,6 +11,9 @@ namespace Crypto {
 
 // Represents an adaptor signature, which is a Schnorr signature encrypted under a public key.
 // The secret key is revealed only when the public key is used in a specific way (e.g., in an HTLC).
+// Ed25519Signature is the same as Crypto::Signature (64-byte Ed25519 signature)
+using Ed25519Signature = Signature;
+
 struct AdaptorSignature {
     Ed25519Signature signature;
     PublicKey adaptorPoint; // The public key under which the signature is encrypted
