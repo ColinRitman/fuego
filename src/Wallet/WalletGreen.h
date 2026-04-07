@@ -51,6 +51,17 @@ public:
   virtual void withdrawDeposit(DepositId depositId, std::string &transactionHash) override;
   std::vector<MultisignatureInput> prepareMultisignatureInputs(const std::vector<TransactionOutputInformation> &selectedTransfers);
 
+  // Phase 5: Wallet Auto-Rollover + Compound Interest
+  // Returns deposits whose unlock height is <= (currentHeight + maturingIn)
+  std::vector<DepositId> getMaturingDeposits(uint32_t currentHeight, uint32_t maturingIn = 0) const;
+
+  // Rollover a mature CD to reinvest interest
+  // Spends the CD (including claimedInterest) and creates a new CD with amount + interest
+  // Requires CommitmentIndex reference for interest calculation
+  bool rolloverDeposit(DepositId depositId, uint32_t newTerm,
+                       const CommitmentIndex& commitmentIndex,
+                       std::string &txHashOut);
+
   // Burn deposit information for local secret storage
   struct BurnDepositInfo {
     std::string transactionHash;
