@@ -36,6 +36,8 @@
 namespace CryptoNote
 {
 
+class CommitmentIndex;  // Forward declaration for rolloverDeposit()
+
 class WalletGreen : public IWallet,
                     ITransfersObserver,
                     IBlockchainSynchronizerObserver,
