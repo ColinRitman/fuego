@@ -64,6 +64,7 @@ public:
       std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::outs_for_amount>& result, const Callback& callback) override;
   virtual void getRandomCommitmentOutsForAmount(uint64_t amount, uint64_t outsCount,
       std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry>& result, const Callback& callback) override;
+  virtual void getCdInterest(uint64_t amount, uint32_t creationHeight, uint32_t currentHeight, uint64_t& result, const Callback& callback) override;
   virtual void relayTransaction(const CryptoNote::Transaction& transaction, const Callback& callback) override;
   virtual void queryBlocks(std::vector<Crypto::Hash>&& knownBlockIds, uint64_t timestamp, std::vector<BlockShortEntry>& newBlocks,
     uint32_t& startHeight, const Callback& callback) override;

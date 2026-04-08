@@ -310,6 +310,18 @@ void InProcessNode::getRandomCommitmentOutsForAmountAsync(uint64_t amount, uint6
   callback(ec);
 }
 
+void InProcessNode::getCdInterest(uint64_t amount, uint32_t creationHeight, uint32_t currentHeight, uint64_t& result, const Callback& callback) {
+  std::unique_lock<std::mutex> lock(mutex);
+  if (state != INITIALIZED) {
+    lock.unlock();
+    callback(make_error_code(CryptoNote::error::NOT_INITIALIZED));
+    return;
+  }
+  lock.unlock();
+  result = core.calculateCdInterest(amount, creationHeight, currentHeight);
+  callback(std::error_code());
+}
+
 std::error_code InProcessNode::doGetRandomCommitmentOutsForAmount(uint64_t amount, uint64_t outsCount,
     std::vector<CryptoNote::COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry>& result)
 {

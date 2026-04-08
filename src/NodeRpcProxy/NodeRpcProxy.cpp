@@ -498,6 +498,32 @@ std::error_code NodeRpcProxy::doGetRandomOutsByAmounts(std::vector<uint64_t>& am
   return ec;
 }
 
+void NodeRpcProxy::getCdInterest(uint64_t amount, uint32_t creationHeight, uint32_t currentHeight, uint64_t& result, const Callback& callback) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+  if (m_state != STATE_INITIALIZED) {
+    callback(make_error_code(error::NOT_INITIALIZED));
+    return;
+  }
+
+  scheduleRequest(std::bind(&NodeRpcProxy::doGetCdInterest, this, amount, creationHeight, currentHeight, std::ref(result)),
+    callback);
+}
+
+std::error_code NodeRpcProxy::doGetCdInterest(uint64_t amount, uint32_t creationHeight, uint32_t currentHeight, uint64_t& result) {
+  COMMAND_RPC_CALCULATE_CD_INTEREST::request req = AUTO_VAL_INIT(req);
+  COMMAND_RPC_CALCULATE_CD_INTEREST::response rsp = AUTO_VAL_INIT(rsp);
+  req.amount = amount;
+  req.creation_height = creationHeight;
+  req.current_height = currentHeight;
+
+  std::error_code ec = jsonCommand("/calculate_cd_interest", req, rsp);
+  if (!ec) {
+    result = rsp.interest;
+  }
+
+  return ec;
+}
+
 void NodeRpcProxy::getRandomCommitmentOutsForAmount(uint64_t amount, uint64_t outsCount,
                                                     std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry>& result,
                                                     const Callback& callback) {

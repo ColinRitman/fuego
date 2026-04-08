@@ -67,6 +67,7 @@ public:
   virtual void relayTransaction(const CryptoNote::Transaction& transaction, const Callback& callback) override;
   virtual void getRandomOutsByAmounts(std::vector<uint64_t>&& amounts, uint64_t outsCount, std::vector<COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::outs_for_amount>& result, const Callback& callback) override;
   virtual void getRandomCommitmentOutsForAmount(uint64_t amount, uint64_t outsCount, std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry>& result, const Callback& callback) override;
+  virtual void getCdInterest(uint64_t amount, uint32_t creationHeight, uint32_t currentHeight, uint64_t& result, const Callback& callback) override;
   virtual void getNewBlocks(std::vector<Crypto::Hash>&& knownBlockIds, std::vector<CryptoNote::block_complete_entry>& newBlocks, uint32_t& startHeight, const Callback& callback) override;
   virtual void getTransactionOutsGlobalIndices(const Crypto::Hash& transactionHash, std::vector<uint32_t>& outsGlobalIndices, const Callback& callback) override;
   virtual void queryBlocks(std::vector<Crypto::Hash>&& knownBlockIds, uint64_t timestamp, std::vector<BlockShortEntry>& newBlocks, uint32_t& startHeight, const Callback& callback) override;
@@ -101,6 +102,7 @@ private:
                                            std::vector<COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS::outs_for_amount>& result);
   std::error_code doGetRandomCommitmentOutsForAmount(uint64_t amount, uint64_t outsCount,
                                                      std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS::out_entry>& result);
+  std::error_code doGetCdInterest(uint64_t amount, uint32_t creationHeight, uint32_t currentHeight, uint64_t& result);
   std::error_code doGetNewBlocks(std::vector<Crypto::Hash>& knownBlockIds,
     std::vector<CryptoNote::block_complete_entry>& newBlocks, uint32_t& startHeight);
   std::error_code doGetTransactionOutsGlobalIndices(const Crypto::Hash& transactionHash,

@@ -146,6 +146,7 @@ std::unordered_map<std::string, RpcServer::RpcHandler<RpcServer::HandlerFunction
   // ZK prover data endpoints
   { "/get_block_range", { jsonMethod<COMMAND_RPC_GET_BLOCK_RANGE>(&RpcServer::on_get_block_range), false } },
   { "/get_commitment_leaves", { jsonMethod<COMMAND_RPC_GET_COMMITMENT_LEAVES>(&RpcServer::on_get_commitment_leaves), false } },
+  { "/calculate_cd_interest", { jsonMethod<COMMAND_RPC_CALCULATE_CD_INTEREST>(&RpcServer::on_calculate_cd_interest), true } },
 
   // Commitment Index endpoints (bridge support)
   { "/get_commitment", { jsonMethod<COMMAND_RPC_GET_COMMITMENT>(&RpcServer::on_get_commitment), true } },
@@ -2564,6 +2565,12 @@ bool RpcServer::on_get_block_range(const COMMAND_RPC_GET_BLOCK_RANGE::request& r
     res.blocks.push_back(std::move(entry));
   }
 
+  res.status = CORE_RPC_STATUS_OK;
+  return true;
+}
+
+bool RpcServer::on_calculate_cd_interest(const COMMAND_RPC_CALCULATE_CD_INTEREST::request& req, COMMAND_RPC_CALCULATE_CD_INTEREST::response& res) {
+  res.interest = m_core.calculateCdInterest(req.amount, req.creation_height, req.current_height);
   res.status = CORE_RPC_STATUS_OK;
   return true;
 }

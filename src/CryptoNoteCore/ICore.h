@@ -124,6 +124,8 @@ public:
 
   virtual bool addMessageQueue(MessageQueue<BlockchainMessage>& messageQueue) = 0;
   virtual bool removeMessageQueue(MessageQueue<BlockchainMessage>& messageQueue) = 0;
+
+  virtual uint64_t calculateCdInterest(uint64_t amount, uint32_t creationHeight, uint32_t currentHeight) const = 0;
 };
 
 } //namespace CryptoNote

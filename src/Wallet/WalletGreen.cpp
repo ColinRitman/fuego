@@ -43,7 +43,6 @@
 #include "CryptoNoteCore/TransactionApi.h"
 #include <CryptoNoteCore/TransactionExtra.h>
 #include "CryptoNoteCore/DepositCommitment.h"
-#include "CryptoNoteCore/CommitmentIndex.h"
 #include "crypto/crypto.h"
 #include "Transfers/TransfersContainer.h"
 #include "WalletSerializationV1.h"
@@ -566,7 +565,6 @@ namespace CryptoNote
   bool WalletGreen::rolloverDeposit(
       DepositId depositId,
       uint32_t newTerm,
-      const CommitmentIndex& commitmentIndex,
       std::string &txHashOut)
   {
     throwIfNotInitialized();
@@ -610,12 +608,23 @@ namespace CryptoNote
       return false;
     }
 
-    // Calculate accumulated interest
-    uint64_t interest = m_currency.calculateCdInterest(
-        deposit.amount,
-        deposit.height,           // creation height
-        currentHeight,
-        commitmentIndex);
+    // Calculate accumulated interest via node (works both in-process and remote)
+    uint64_t interest = 0;
+    {
+      System::Event interestFinished(m_dispatcher);
+      std::error_code interestError;
+      throwIfStopped();
+      m_node.getCdInterest(deposit.amount, deposit.height, currentHeight, interest,
+        [&interestFinished, &interestError, this](std::error_code ec) {
+          interestError = ec;
+          this->m_dispatcher.remoteSpawn(std::bind(asyncRequestCompletion, std::ref(interestFinished)));
+        });
+      interestFinished.wait();
+      if (interestError) {
+        m_logger(ERROR) << "Rollover failed: could not calculate interest: " << interestError.message();
+        return false;
+      }
+    }
 
     m_logger(DEBUGGING, BRIGHT_WHITE) << "Rollover deposit id=" << depositId
       << " amount=" << deposit.amount
@@ -633,11 +642,17 @@ namespace CryptoNote
     m_logger(DEBUGGING, BRIGHT_GREEN) << "Creating new CD with amount=" << reinvestedAmount
       << " term=" << newTerm << " from rollover";
 
-    // Create new COLD commitment output (will accumulate interest on reinvestedAmount)
-    DepositCommitment newCommitment;
-    newCommitment.term = newTerm;
+    // Generate a fresh deposit secret for the new CD output
+    std::array<uint8_t, 32> newDepositSecret;
+    generate_random_bytes(sizeof(newDepositSecret), newDepositSecret.data());
+    CryptoNote::DepositCommitmentKeys newCommitKeys = CryptoNote::deriveCommitmentKeys(newDepositSecret);
 
-    transaction->addOutput(reinvestedAmount, account.address, TransactionTypes::OutputType::Commitment, newCommitment);
+    // Create new COLD commitment output (reinvested amount minus fee)
+    CryptoNote::TransactionOutputCommitment newCommitOut;
+    newCommitOut.commitKey = newCommitKeys.commitKey;
+    newCommitOut.term = newTerm;
+
+    transaction->addOutput(reinvestedAmount - fee, newCommitOut);
     transaction->setUnlockTime(0);
 
     // Add commitment spend input with claimed interest
@@ -751,6 +766,8 @@ namespace CryptoNote
     try {
       sendTransaction(*transaction);
       txHashOut = Common::podToHex(transaction->getTransactionHash());
+      // Store the new CD's deposit secret so the output can be spent later
+      addBurnDepositSecret(txHashOut, newCommitKeys.keyScalar, reinvestedAmount - fee, std::vector<uint8_t>());
       m_logger(INFO) << "Rollover transaction sent: " << txHashOut;
       return true;
     } catch (const std::exception& e) {

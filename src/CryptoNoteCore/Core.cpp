@@ -1353,6 +1353,10 @@ const CommitmentIndex& core::getCommitmentIndex() const {
   return m_blockchain.getCommitmentIndex();
 }
 
+uint64_t core::calculateCdInterest(uint64_t amount, uint32_t creationHeight, uint32_t currentHeight) const {
+  return m_currency.calculateCdInterest(amount, creationHeight, currentHeight, m_blockchain.getCommitmentIndex());
+}
+
 size_t core::getCommitmentCount() const {
   return m_blockchain.getCommitmentCount();
 }

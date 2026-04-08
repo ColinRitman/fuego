@@ -2213,4 +2213,28 @@ struct COMMAND_RPC_GET_COMMITMENT_LEAVES {
   };
 };
 
+struct COMMAND_RPC_CALCULATE_CD_INTEREST {
+  struct request {
+    uint64_t amount;
+    uint32_t creation_height;
+    uint32_t current_height;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(amount)
+      KV_MEMBER(creation_height)
+      KV_MEMBER(current_height)
+    }
+  };
+
+  struct response {
+    uint64_t interest;
+    std::string status;
+
+    void serialize(ISerializer& s) {
+      KV_MEMBER(interest)
+      KV_MEMBER(status)
+    }
+  };
+};
+
 }

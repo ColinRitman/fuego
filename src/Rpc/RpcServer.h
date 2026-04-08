@@ -111,6 +111,7 @@ private:
   // ZK prover data endpoints
   bool on_get_block_range(const COMMAND_RPC_GET_BLOCK_RANGE::request& req, COMMAND_RPC_GET_BLOCK_RANGE::response& res);
   bool on_get_commitment_leaves(const COMMAND_RPC_GET_COMMITMENT_LEAVES::request& req, COMMAND_RPC_GET_COMMITMENT_LEAVES::response& res);
+  bool on_calculate_cd_interest(const COMMAND_RPC_CALCULATE_CD_INTEREST::request& req, COMMAND_RPC_CALCULATE_CD_INTEREST::response& res);
 
   // Commitment Index RPC endpoints (Fuego → EVM bridge)
   bool on_get_commitment(const COMMAND_RPC_GET_COMMITMENT::request& req, COMMAND_RPC_GET_COMMITMENT::response& res);

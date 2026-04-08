@@ -753,11 +753,11 @@ bool wallet_rpc_server::on_create_cd(const wallet_rpc::COMMAND_RPC_CREATE_CD::re
     }
 
     std::string txHash;
-    std::string addr = wg->getAddress();
+    std::string addr = wg->getAddress(0);
     wg->createDeposit(req.amount, static_cast<uint64_t>(req.term), addr, addr, txHash);
 
     // Deposit ID is the new last index after creation
-    size_t depositId = wg->getDepositCount() - 1;
+    size_t depositId = wg->getWalletDepositCount() - 1;
     CryptoNote::Deposit dep;
     wg->getDeposit(static_cast<CryptoNote::DepositId>(depositId), dep);
 
@@ -816,17 +816,12 @@ bool wallet_rpc_server::on_rollover_cd(const wallet_rpc::COMMAND_RPC_ROLLOVER_CD
     uint32_t newTerm = (req.new_term == 0) ? dep.term : req.new_term;
     std::string txHash;
 
-    // rolloverDeposit requires CommitmentIndex from the Core layer.
-    // WalletRpcServer does not currently have Core access — this must be called
-    // from a walletd instance that is co-located with the daemon (not remote).
-    // TODO: expose CommitmentIndex via INode interface to remove this limitation.
-    throw JsonRpc::JsonRpcError(WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR,
-      "rollover_cd requires Core access not yet exposed via INode. "
-      "Use the daemon /rollover_deposit RPC endpoint instead.");
-    (void)wg; (void)newTerm; (void)txHash;
+    if (!wg->rolloverDeposit(depId, newTerm, txHash)) {
+      throw JsonRpc::JsonRpcError(WALLET_RPC_ERROR_CODE_UNKNOWN_ERROR, "rolloverDeposit failed");
+    }
 
-    // Get new deposit info (last created)
-    size_t newDepId = m_wallet.getDepositCount() - 1;
+    // Get new deposit info (last created after rollover)
+    size_t newDepId = wg->getWalletDepositCount() - 1;
     CryptoNote::Deposit newDep;
     m_wallet.getDeposit(static_cast<CryptoNote::DepositId>(newDepId), newDep);
 

@@ -184,6 +184,8 @@ namespace CryptoNote {
     // Direct CommitmentIndex access (for epoch reports, slash queries)
     const CommitmentIndex& getCommitmentIndex() const;
 
+    virtual uint64_t calculateCdInterest(uint64_t amount, uint32_t creationHeight, uint32_t currentHeight) const override;
+
     // Elderfier consensus accessors
     std::vector<uint8_t> getCommitmentSignedElderfierIds() const;
     std::vector<uint8_t> getCommitmentPendingElderfierIds() const;
