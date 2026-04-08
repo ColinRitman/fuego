@@ -4,5 +4,6 @@ members = [
     "fuego-cn",
     "fuego-circuit",
     "fuego-prover-cli",
+    "fuego-lp-circuit",
 ]
 resolver = "2"
