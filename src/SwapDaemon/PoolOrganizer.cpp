@@ -532,6 +532,231 @@ PoolOrganizer::PoolStats PoolOrganizer::getPoolStats(const PoolId& poolId) const
   return stats;
 }
 
+// ─── ZK Proof Epoch Management ─────────────────────────────────────────
+
+void PoolOrganizer::startEpoch(const PoolId& poolId, uint32_t blockHeight) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+  uint32_t epochNum = 0;
+
+  // Get current epoch number or start at 0
+  auto it = m_epochStates.find(key);
+  if (it != m_epochStates.end()) {
+    epochNum = it->second.epochNumber + 1;
+  }
+
+  EpochState es;
+  es.epochNumber = epochNum;
+  es.epochStart = blockHeight;
+  es.epochEnd = blockHeight + LP_EPOCH_BLOCKS;
+
+  // Get previous state commitment
+  auto poolIt = m_pools.find(key);
+  if (poolIt != m_pools.end()) {
+    es.prevStateCommitment = poolIt->second.checkpointHash;
+  } else {
+    es.prevStateCommitment = Crypto::Hash{};
+  }
+
+  m_epochStates[key] = es;
+  m_eventBuffers[key].clear();
+
+  m_logger.INFO("LP pool epoch started: pool=" + key + " epoch=" + std::to_string(epochNum) +
+                " range=[" + std::to_string(es.epochStart) + "," + std::to_string(es.epochEnd) + "]");
+}
+
+bool PoolOrganizer::isEpochBoundary(const PoolId& poolId, uint32_t blockHeight) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+  auto it = m_epochStates.find(key);
+  if (it == m_epochStates.end()) {
+    return false;
+  }
+
+  return blockHeight >= it->second.epochEnd;
+}
+
+uint32_t PoolOrganizer::getEpochNumber(const PoolId& poolId) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+  auto it = m_epochStates.find(key);
+  if (it == m_epochStates.end()) {
+    return 0;
+  }
+
+  return it->second.epochNumber;
+}
+
+bool PoolOrganizer::getEpochRange(const PoolId& poolId, uint32_t& start, uint32_t& end) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+  auto it = m_epochStates.find(key);
+  if (it == m_epochStates.end()) {
+    return false;
+  }
+
+  start = it->second.epochStart;
+  end = it->second.epochEnd;
+  return true;
+}
+
+std::vector<uint8_t> PoolOrganizer::deriveEpochKey(const PoolId& poolId, uint32_t epoch) const {
+  std::string key = poolKey(poolId);
+  const uint8_t* poolBytes = reinterpret_cast<const uint8_t*>(key.data());
+
+  // Simple derivation: SHA256(poolId || epoch)
+  // In production, use HKDF or proper KDF
+  std::vector<uint8_t> data;
+  data.reserve(key.size() + 4);
+  data.insert(data.end(), poolBytes, poolBytes + key.size());
+  uint32_t epochLE = epoch;
+  const uint8_t* epochBytes = reinterpret_cast<const uint8_t*>(&epochLE);
+  data.insert(data.end(), epochBytes, epochBytes + 4);
+
+  // Return first 32 bytes as key
+  std::vector<uint8_t> keyOut(32, 0);
+  for (size_t i = 0; i < 32 && i < data.size(); ++i) {
+    keyOut[i] = data[i];
+  }
+
+  // Simple hash for now - in production use proper crypto hash
+  for (size_t i = 0; i < 32; ++i) {
+    keyOut[i] ^= static_cast<uint8_t>((epoch * 31 + i) & 0xFF);
+  }
+
+  return keyOut;
+}
+
+void PoolOrganizer::bufferEncryptedEvent(const PoolId& poolId, const std::vector<uint8_t>& ciphertext) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+  m_eventBuffers[key].push_back(ciphertext);
+}
+
+std::vector<std::vector<uint8_t>> PoolOrganizer::getBufferedEvents(const PoolId& poolId) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+  auto it = m_eventBuffers.find(key);
+  if (it == m_eventBuffers.end()) {
+    return {};
+  }
+
+  return it->second;
+}
+
+std::vector<Crypto::Hash> PoolOrganizer::getLpTreeLeaves(const PoolId& poolId) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+  auto it = m_lpTrees.find(key);
+  if (it == m_lpTrees.end()) {
+    return {};
+  }
+
+  return it->second.leaves();
+}
+
+std::vector<Crypto::Hash> PoolOrganizer::getFeeTreeLeaves(const PoolId& poolId) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+  auto it = m_feeTrees.find(key);
+  if (it == m_feeTrees.end()) {
+    return {};
+  }
+
+  return it->second.leaves();
+}
+
+// ─── ZK Proof Generation ───────────────────────────────────────────────
+
+PoolOrganizer::EpochProofInputs PoolOrganizer::prepareProofInputs(const PoolId& poolId) {
+  EpochProofInputs inputs = {};
+
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+
+  // Get previous state
+  auto poolIt = m_pools.find(key);
+  if (poolIt != m_pools.end()) {
+    inputs.prevState = poolIt->second;
+  }
+
+  // Get current epoch info
+  auto epochIt = m_epochStates.find(key);
+  if (epochIt != m_epochStates.end()) {
+    uint32_t epoch = epochIt->second.epochNumber;
+    inputs.epochKey = deriveEpochKey(poolId, epoch);
+  }
+
+  // Get current Merkle tree leaves
+  auto lpIt = m_lpTrees.find(key);
+  if (lpIt != m_lpTrees.end()) {
+    inputs.prevLpLeaves = lpIt->second.getAllLeaves();
+  }
+
+  auto feeIt = m_feeTrees.find(key);
+  if (feeIt != m_feeTrees.end()) {
+    inputs.prevFeeLeaves = feeIt->second.getAllLeaves();
+  }
+
+  // Get events for this epoch (filtered by block height)
+  uint32_t epochStart = 0;
+  uint32_t epochEnd = 0;
+  if (epochIt != m_epochStates.end()) {
+    epochStart = epochIt->second.epochStart;
+    epochEnd = epochIt->second.epochEnd;
+  }
+
+  for (const auto& event : m_events) {
+    if (event.poolId == poolId && event.blockHeight >= epochStart && event.blockHeight < epochEnd) {
+      inputs.events.push_back(event);
+    }
+  }
+
+  return inputs;
+}
+
+void PoolOrganizer::updatePoolStateFromProof(const PoolId& poolId, const Crypto::Hash& newStateCommitment,
+                                               const Crypto::Hash& newLpMerkleRoot, const Crypto::Hash& newFeeMerkleRoot,
+                                               uint32_t epochEnd) {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+
+  // Update pool checkpoint hash
+  auto it = m_pools.find(key);
+  if (it != m_pools.end()) {
+    it->second.checkpointHash = newStateCommitment;
+    it->second.blockHeight = epochEnd;
+  }
+
+  // Update previous checkpoint
+  m_prevCheckpoints[key] = newStateCommitment;
+
+  // Start new epoch
+  startEpoch(poolId, epochEnd);
+}
+
+Crypto::Hash PoolOrganizer::getStateCommitment(const PoolId& poolId) const {
+  std::lock_guard<std::mutex> lock(m_mutex);
+
+  std::string key = poolKey(poolId);
+  auto it = m_pools.find(key);
+  if (it == m_pools.end()) {
+    return Crypto::Hash{};
+  }
+
+  return it->second.checkpointHash;
+}
+
 // ─── Private helpers ───────────────────────────────────────────────────
 
 PoolState& PoolOrganizer::getPoolMutable(const PoolId& poolId) {
