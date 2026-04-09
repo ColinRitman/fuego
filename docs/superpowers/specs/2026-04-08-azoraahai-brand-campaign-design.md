@@ -18,8 +18,9 @@ Fuego (XFG) is approaching block 1,000,000 — the AzorAhai Release. This is the
 - EFiers / Elderfiers (deprecated — replaced by ZK proofs of Merkle trees)
 - COLD deposit (deprecated CLI command — superseded by XFG CDs)
 - Burn2Mint (dropped)
-- HEAT token as a v10 feature (v11 only — but HEAT burn deposits DO still function as permanent decoys in the v10 commitment pool)
+- HEAT token (ERC-20) as a v10 feature — the ERC-20 minting contract is v11
 - COLDAO as a v10 feature (v11 only)
+- NOTE: HEAT commitment burns ARE v10 — burning XFG creates a `HEAT_commitment` tx_extra that permanently pads the decoy pool. The ERC-20 side (minting HEAT tokens on Ethereum via ZK proof) is v11.
 
 ---
 
@@ -144,8 +145,8 @@ Frame every feature through the lens of individual sovereignty — not technolog
 | FuCIA | Internal code designation: "Fuego Untraceable Custom Interest Assets." Not required in public copy, but may be surfaced as a product concept. |
 | COLDAO Note | v11 governance bond product. Deposit XFG, earn COLDAO governance tokens as yield (PIK structure). |
 | COLDAO | v11 governance token. Inflation-funded. Not a v10 feature. |
-| HEAT | v11 token. Each token permanently collateralized by ZK-proven burned XFG. Not a v10 consumer product. |
-| HEAT burn deposit | v10 feature: burned XFG permanently seeded into the commitment decoy pool. Distinct from HEAT token. |
+| HEAT commitment / HEAT burn | The on-chain XFG burn mechanism. Burning XFG creates a `HEAT_commitment` in `tx_extra` — permanently unspendable, so it pads the commitment decoy pool forever. This is a v10 feature. |
+| HEAT token (ERC-20) | v11. The Ethereum-side ERC-20 minted only after ZK proof of an on-chain `HEAT_commitment` is verified by the prover contract. Each HEAT token is forever collateralized by the permanently destroyed XFG that triggered it. Requires commitment Merkle proof generation (v11). |
 | OSPEAD | Adaptive decoy selection algorithm. Always capitalize as acronym. |
 | ring size 8–18 | Dynamic ring size range for public copy. Use total ring size, not mixin count. |
 | CommitmentI/O | Internal technical term for deposit transaction structure. Appears in protocol-level docs only — not used in any campaign asset or user-facing copy. |
@@ -170,7 +171,7 @@ Frame every feature through the lens of individual sovereignty — not technolog
 |------|------|
 | COLDAO Note | v11. Governance bond. PIK structure. |
 | COLDAO token | v11. Inflationary governance token. |
-| HEAT token | v11. ZK-proven burn collateral, inflation-minted. |
+| HEAT token (ERC-20) | v11. Minted on Ethereum only after ZK proof of on-chain `HEAT_commitment` burn is verified by prover contract. Each token forever collateralized by permanently destroyed XFG. Requires commitment Merkle proof generation. |
 
 ### 2.9 What to Avoid
 
