@@ -1,8 +1,8 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
 use fuego_core::{
-    compute_checkpoint_hash, compute_merkle_root, parse_heat_commitments, CircuitWitness,
-    ProofPublicValues, RpcBlock,
+    compute_checkpoint_hash, compute_merkle_root, parse_heat_commitments, CircuitWitness, LpEvent,
+    LpPoolState, ProofPublicValues, RpcBlock,
 };
 use serde::{Deserialize, Serialize};
 use sp1_sdk::{ProverClient, SP1Stdin};
@@ -23,6 +23,18 @@ fn load_circuit_elf() -> Result<Vec<u8>> {
         .with_context(|| format!("Failed to load circuit ELF from {}", path.display()))
 }
 
+/// Load the LP circuit ELF binary at runtime.
+fn load_lp_circuit_elf() -> Result<Vec<u8>> {
+    let path = std::env::var("LP_CIRCUIT_ELF_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../fuego-lp-circuit/elf/riscv32im-succinct-zkvm-elf")
+        });
+    std::fs::read(&path)
+        .with_context(|| format!("Failed to load LP circuit ELF from {}", path.display()))
+}
+
 // ---------------------------------------------------------------------------
 // CLI definition
 // ---------------------------------------------------------------------------
@@ -40,6 +52,8 @@ enum Commands {
     Prove(ProveArgs),
     /// Produce claim calldata for a HEAT commitment preimage
     Claim(ClaimArgs),
+    /// Generate a ZK proof for an LP pool epoch
+    ProveLp(ProveLpArgs),
 }
 
 #[derive(Parser)]
@@ -90,6 +104,37 @@ struct ClaimArgs {
     recipient: String,
 
     /// Output file path for the JSON claim data
+    #[arg(long)]
+    out: String,
+}
+
+#[derive(Parser)]
+struct ProveLpArgs {
+    /// RPC base URL (e.g. http://localhost:8080)
+    #[arg(long)]
+    rpc: String,
+
+    /// Pool ID as a hex string
+    #[arg(long)]
+    pool_id: String,
+
+    /// Epoch number
+    #[arg(long)]
+    epoch: u32,
+
+    /// Previous state commitment (64-char hex)
+    #[arg(long)]
+    prev_state_commitment: String,
+
+    /// Previous LP Merkle root (64-char hex)
+    #[arg(long)]
+    prev_lp_root: String,
+
+    /// Previous fee Merkle root (64-char hex)
+    #[arg(long)]
+    prev_fee_root: String,
+
+    /// Output file path for the serialised proof bytes
     #[arg(long)]
     out: String,
 }
@@ -249,20 +294,22 @@ fn run_prove(args: ProveArgs) -> Result<()> {
     };
 
     // 5. Run SP1 proof.
-    let prover = ProverClient::from_env();
+    let prover = ProverClient::new();
 
-    let mut stdin = SP1Stdin::new();
-    stdin.write(&witness);
-
+    // Execute first (for testing)
+    let mut stdin_exec = SP1Stdin::new();
+    stdin_exec.write(&witness);
     let (_, _report) = prover
-        .execute(&circuit_elf, &stdin)
+        .execute(&circuit_elf, stdin_exec)
         .run()
         .context("SP1 circuit execution failed")?;
 
     // Generate the actual proof.
+    let mut stdin_prove = SP1Stdin::new();
+    stdin_prove.write(&witness);
     let (pk, _vk) = prover.setup(&circuit_elf);
     let proof = prover
-        .prove(&pk, &stdin)
+        .prove(&pk, stdin_prove)
         .run()
         .context("SP1 proof generation failed")?;
 
@@ -395,6 +442,117 @@ fn run_claim(args: ClaimArgs) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
+// `prove-lp` subcommand
+// ---------------------------------------------------------------------------
+
+fn run_prove_lp(args: ProveLpArgs) -> Result<()> {
+    // Load the LP circuit ELF
+    let circuit_elf = load_lp_circuit_elf()?;
+
+    let client = reqwest::blocking::Client::new();
+
+    // 1. Fetch pool state from RPC
+    let pool_state_url = format!("{}/get_lp_pool_state", args.rpc);
+    let pool_state_resp: serde_json::Value = client
+        .get(&pool_state_url)
+        .query(&[("pool_id", &args.pool_id)])
+        .send()
+        .with_context(|| format!("GET {pool_state_url} failed"))?
+        .error_for_status()
+        .with_context(|| format!("GET {pool_state_url} returned error status"))?
+        .json()
+        .with_context(|| format!("failed to parse response from {pool_state_url}"))?;
+
+    // 2. Fetch epoch events from RPC
+    let events_url = format!("{}/get_lp_events", args.rpc);
+    let events_resp: serde_json::Value = client
+        .get(&events_url)
+        .query(&[
+            ("pool_id", &args.pool_id),
+            ("epoch", &args.epoch.to_string()),
+        ])
+        .send()
+        .with_context(|| format!("GET {events_url} failed"))?
+        .error_for_status()
+        .with_context(|| format!("GET {events_url} returned error status"))?
+        .json()
+        .with_context(|| format!("failed to parse response from {events_url}"))?;
+
+    // 3. Fetch LP Merkle leaves from RPC
+    let lp_leaves_url = format!("{}/get_lp_merkle_leaves", args.rpc);
+    let lp_leaves_resp: serde_json::Value = client
+        .get(&lp_leaves_url)
+        .query(&[("pool_id", &args.pool_id)])
+        .send()
+        .with_context(|| format!("GET {lp_leaves_url} failed"))?
+        .error_for_status()
+        .with_context(|| format!("GET {lp_leaves_url} returned error status"))?
+        .json()
+        .with_context(|| format!("failed to parse response from {lp_leaves_url}"))?;
+
+    // 4. Fetch fee Merkle leaves from RPC
+    let fee_leaves_url = format!("{}/get_fee_merkle_leaves", args.rpc);
+    let fee_leaves_resp: serde_json::Value = client
+        .get(&fee_leaves_url)
+        .query(&[("pool_id", &args.pool_id)])
+        .send()
+        .with_context(|| format!("GET {fee_leaves_url} failed"))?
+        .error_for_status()
+        .with_context(|| format!("GET {fee_leaves_url} returned error status"))?
+        .json()
+        .with_context(|| format!("failed to parse response from {fee_leaves_url}"))?;
+
+    // For now, create mock input - in production this would come from RPC
+    let lp_input = serde_json::json!({
+        "prev_state": {
+            "pool_id": args.pool_id,
+            "reserve_a": 10000,
+            "reserve_b": 5000,
+            "total_lp_shares": 7071,
+            "fee_accum_a": 0,
+            "fee_accum_b": 0,
+            "lp_merkle_root": args.prev_lp_root,
+            "fee_merkle_root": args.prev_fee_root,
+            "epoch_start": args.epoch * 100,
+            "epoch_end": (args.epoch + 1) * 100,
+            "prev_state_commitment": args.prev_state_commitment,
+        },
+        "events": [],
+        "epoch": args.epoch,
+        "prev_lp_leaves": [],
+        "prev_fee_leaves": [],
+    });
+
+    // 5. Run SP1 proof
+    let prover = ProverClient::new();
+
+    let mut stdin = SP1Stdin::new();
+    stdin.write(&lp_input);
+
+    // Generate the proof
+    let (pk, _vk) = prover.setup(&circuit_elf);
+    let proof = prover
+        .prove(&pk, stdin)
+        .run()
+        .context("SP1 LP proof generation failed")?;
+
+    // 6. Serialize proof to output file
+    let proof_bytes = serde_json::to_vec(&proof).context("failed to serialise proof")?;
+    std::fs::write(&args.out, &proof_bytes)
+        .with_context(|| format!("failed to write proof to {}", args.out))?;
+
+    println!(
+        "LP proof written to {} ({} bytes)",
+        args.out,
+        proof_bytes.len()
+    );
+    println!("pool_id: {}", args.pool_id);
+    println!("epoch: {}", args.epoch);
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
 
@@ -403,5 +561,6 @@ fn main() -> Result<()> {
     match cli.command {
         Commands::Prove(args) => run_prove(args),
         Commands::Claim(args) => run_claim(args),
+        Commands::ProveLp(args) => run_prove_lp(args),
     }
 }
