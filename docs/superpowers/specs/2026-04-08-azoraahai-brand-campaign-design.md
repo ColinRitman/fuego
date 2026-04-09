@@ -46,7 +46,30 @@ The fire identity runs through every layer of the project: the `fire` address pr
 **Use the metaphor for:** Release naming, launch copy tone, visual identity anchoring.  
 **Do not force it:** Technical documentation does not need fire metaphors. Let it appear naturally.
 
-### 2.3 Voice Attributes
+### 2.3 Visual Brand Direction
+
+**Primary palette:**
+
+| Role | Value | Usage |
+|------|-------|-------|
+| Background / base | `#000000` — pure black | All surfaces. The brand is dark-first. No light mode. |
+| Near-black (depth) | `#0A0000` – `#180400` | Cards, panels, elevated surfaces — fire-tinted black |
+| Highlight / accent | `#FF5500` — Fuego orange | CTAs, active states, key data, fire icon fills |
+| Highlight mid | `#CC3300` | Hover states, secondary accents |
+| Text primary | `#FFFFFF` | On black backgrounds |
+| Text secondary | `#999999` | Supporting copy, metadata |
+| Fire gradient (11-stop) | `#180400` → `#FF5500` → `#FFFADD` | Flame animation, splash screen, hero backgrounds |
+
+**Design principle:** Black is the night. Orange is the fire. Every composition is dark canvas + fire accent. No grey-wash neutrals as primaries. No white backgrounds. High contrast at all times — the fire must be visible.
+
+**Application rules:**
+- Interactive elements (buttons, links, CTAs): black background + orange text or orange border
+- Data highlights, amounts, metrics: Fuego orange
+- Error / warning states: orange (not red — stays on-brand)
+- The diamond logo: always rendered on black; fire gradient fill or white outline only
+- Never use orange as a background fill behind body text — contrast fails
+
+### 2.4 Voice Attributes
 
 **1. Technically honest**  
 State limitations plainly, in the same breath as capabilities. Never overclaim privacy. If amounts are plaintext in v10, say so. This is Fuego's trust differentiator.
@@ -72,7 +95,7 @@ Frame every feature through the lens of individual sovereignty — not technolog
 > ✅ "Your XFG address begins with fire. Every address does. Only you control the keys."  
 > ❌ "Fuego uses advanced cryptographic techniques to ensure user privacy."
 
-### 2.4 Audience Personas
+### 2.5 Audience Personas
 
 **Persona A — Technical Privacy User**  
 - Runs a node, reads changelogs, understands ring signatures and CryptoNote
@@ -88,7 +111,7 @@ Frame every feature through the lens of individual sovereignty — not technolog
 - Needs: Plain-language product descriptions, benefit-before-mechanism framing
 - Tone: Direct, warm, no jargon unless immediately explained.
 
-### 2.5 Messaging Pillars (ranked for AzorAhai launch)
+### 2.6 Messaging Pillars (ranked for AzorAhai launch)
 
 1. **Trustless exchange** — SwapXFG leads. XMR ↔ XFG, ETH ↔ XFG, no exchange, no KYC. This is the headline.
 2. **Real yield, no bank** — XFG CDs. Earn interest on private money, funded by swap fees (not inflation), withdrawal ring-signature protected.
@@ -96,7 +119,7 @@ Frame every feature through the lens of individual sovereignty — not technolog
 4. **Sovereign money** — No central authority. Open-source. Community-governed. Your keys, your coins.
 5. **Roadmap credibility** — v11 teaser: COLDAO Notes (deposit XFG, earn COLDAO governance tokens as PIK yield), HEAT token (each token forever collateralized by ZK-proven burned XFG). Coming after block 1M.
 
-### 2.6 Tone by Channel
+### 2.7 Tone by Channel
 
 | Channel | Tone | Notes |
 |---------|------|-------|
@@ -107,7 +130,7 @@ Frame every feature through the lens of individual sovereignty — not technolog
 | Press / announcement | Lead with product story. Fire mythology as opener and closer. | AzorAhai narrative frame. |
 | Reddit (r/xmrtrader, r/privacy) | Technical but accessible. Acknowledge Monero comparison honestly. | Do not position as "Monero killer." |
 
-### 2.7 Terminology Bible
+### 2.8 Terminology Bible
 
 **Canonical — always use:**
 
@@ -149,7 +172,7 @@ Frame every feature through the lens of individual sovereignty — not technolog
 | COLDAO token | v11. Inflationary governance token. |
 | HEAT token | v11. ZK-proven burn collateral, inflation-minted. |
 
-### 2.8 What to Avoid
+### 2.9 What to Avoid
 
 - Direct Monero comparisons (Fuego is a different product category — banking primitives + swap infrastructure built on CryptoNote, not a Monero competitor)
 - Overclaiming privacy: v10 amounts are plaintext; hidden amounts are a v11 goal
@@ -252,7 +275,7 @@ Frame every feature through the lens of individual sovereignty — not technolog
 | Asset | ID | Owner | Description |
 |-------|----|-------|-------------|
 | SEO audit | J | Marketing / Web | `/marketing:seo-audit` on usexfg.org; keywords: "XMR atomic swap", "private crypto yield", "XFG CD", "fuego cryptocurrency" |
-| Visual brand spec | K | Engineering | Output: markdown swatches table saved to `docs/superpowers/brand-visual-spec.md`. Content: Fuego orange `#FF5500`, full 11-stop fire gradient (from styles.go), diamond geometry notes (from splash.go), typography defaults. Consumer: web team + social media templates. |
+| Visual brand spec | K | Engineering | Output: markdown swatches table saved to `docs/superpowers/brand-visual-spec.md`. Content: pure black `#000000` base, Fuego orange `#FF5500` accent, full 11-stop fire gradient (from styles.go), fire-tinted near-blacks for depth layers, diamond geometry notes (from splash.go), typography defaults. Design principle: dark-first, black canvas + orange fire. Consumer: web team + social media templates. |
 
 ---
 
