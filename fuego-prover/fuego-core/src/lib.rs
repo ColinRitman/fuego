@@ -439,3 +439,5 @@ mod tests {
         assert_eq!(parsed[0], commitment);
     }
 }
+
+pub mod lp_verification;
