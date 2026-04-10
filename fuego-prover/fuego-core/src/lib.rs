@@ -440,4 +440,6 @@ mod tests {
     }
 }
 
+pub mod config;
 pub mod lp_verification;
+pub mod privacy;

@@ -7,3 +7,8 @@ edition = "2021"
 serde = { version = "1", features = ["derive"] }
 hex = "0.4"
 tiny-keccak = { version = "2", features = ["keccak"] }
+aes-gcm = "0.10"
+bincode = "1"
+rand = "0.8"
+typenum = "1.17"
+generic-array = "0.14"
