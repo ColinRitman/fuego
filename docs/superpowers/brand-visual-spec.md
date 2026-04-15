@@ -24,6 +24,7 @@
 | Conn OK | `#00FF00` | `ColorConnOK` | Network connected indicator |
 | Conn lost | `#FF0000` | `ColorConnLost` | Network disconnected indicator |
 | Text primary | `#FFFFFF` | `ColorActiveTab` | Body text on black |
+| Text secondary | `#999999` | — | Supporting copy, metadata |
 | Text inactive | `#777777` | `ColorInactive` | Disabled / inactive labels |
 
 ---
