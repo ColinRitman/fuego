@@ -92,7 +92,7 @@ or <code>./fuegod --help</code> when outside of dæmon
 
 ### Terminal User Interface (TUI)
 
-Fuego includes a Go-based Terminal User Interface for easy management of nodes and wallets. The TUI provides full support for Elderfier Staking and Burn2Mint flows.
+Fuego includes a Go-based Terminal User Interface for easy management of nodes and wallets.
 
 #### Building the TUI
 
@@ -117,10 +117,35 @@ Navigate with arrow keys or j/k, select with Enter, quit with q or Ctrl+C.
 - Create Wallet
 - Get Balance
 - Send Transaction
-- Elderfier Menu (staking and voting)
-- Burn2Mint Menu (XFG→HEAT conversion)
 
 For detailed documentation, see `tui/README.md`.
+_________________________________________________________
+
+### AzorAhai Release — Block 1,000,000
+
+The long night is over. At block 1,000,000, Fuego ships its most significant
+upgrade: a complete sovereign money stack.
+
+**SwapXFG** — Trustless atomic swaps with no exchange and no KYC.
+Supported pairs: XMR ↔ XFG, ETH ↔ XFG, SOL ↔ XFG, wXFG ↔ XFG.
+Both XMR and XFG are Ed25519/CryptoNote — adaptor signatures on both sides.
+
+**XFG CDs** — Commitment deposits earning real yield in XFG, funded by swap
+fees (not inflation). Withdrawal is ring-signature protected. Transfer before
+maturity via the SwapXFG secondary market.
+
+**Dynamic ring size 8–18 with OSPEAD** — Ring size scales adaptively from 8
+to 18 based on available outputs. OSPEAD (adaptive decoy selection) chooses
+ring members that match real spending patterns, hardening against analysis.
+
+**New commitment deposit transaction structure** — Commitment-scheme privacy
+for deposited amounts at the protocol level (v10 feature; hidden amounts are a
+v11 goal — see roadmap).
+
+**v11 roadmap:** COLDAO Notes (deposit XFG, earn COLDAO governance tokens)
+and HEAT token (each token forever collateralized by ZK-proven burned XFG)
+are in development for after block 1M.
+
 _________________________________________________________
 For the most user-friendly graphic interface experience
 
