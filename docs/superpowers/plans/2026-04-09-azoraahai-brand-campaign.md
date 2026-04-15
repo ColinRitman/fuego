@@ -107,7 +107,7 @@ Path: `.claude/brand-voice-guidelines.md`
 
 **Rules:**
 - Never use orange as background behind body text
-- Diamond logo: always on black; fire gradient fill or white outline only
+- Fire symbol (triangle): always on black; fire gradient fill or white outline only
 - Error/warning states: orange (not red — stays on-brand)
 
 ---
@@ -257,12 +257,12 @@ git push origin xfgCdswaps
 **Files:**
 - Create: `docs/superpowers/brand-visual-spec.md`
 - Read: `swapxfg/app/styles.go` (exact color values)
-- Read: `swapxfg/app/splash.go` (diamond geometry)
+- Read: `swapxfg/app/splash.go` (fire symbol / triangle geometry)
 
 - [ ] **Step 1: Read source files for exact values**
 
 Read `swapxfg/app/styles.go` — extract all color constants.
-Read `swapxfg/app/splash.go` — extract diamond geometry and animation notes.
+Read `swapxfg/app/splash.go` — extract fire symbol (triangle) geometry and animation notes.
 
 - [ ] **Step 2: Write the visual brand spec**
 
@@ -338,11 +338,11 @@ background: linear-gradient(
 
 ---
 
-## Diamond Logo
+## Fire Symbol (Triangle)
 
 Source: `swapxfg/app/splash.go`
 
-- Geometry: ASCII diamond rendered in terminal with fire simulation
+- Geometry: ASCII triangle (🜂 alchemical fire symbol) rendered in terminal with fire simulation
 - Always rendered on black background
 - Fill: fire gradient (bottom dark, top light) or white outline on black
 - Never render on non-black background
@@ -382,7 +382,7 @@ Check the visual spec file confirms dark-first direction and correct color value
 git add docs/superpowers/brand-visual-spec.md
 git commit -m "feat(brand): add visual brand spec
 
-11-stop fire palette, full color token table, tab styles, diamond logo
+11-stop fire palette, full color token table, tab styles, fire symbol (triangle)
 rules. Dark-first: black base (#000000), Fuego orange (#FF5500) accent.
 Extracted from swapxfg/app/styles.go + splash.go.
 
@@ -606,9 +606,7 @@ The post structure:
 The long night is over.
 
 At block 1,000,000, Fuego (XFG) ships its most significant upgrade since
-launch. Not a roadmap. Not a testnet. Working software — the primary measure
-of progress.
-
+launch. Not a roadmap. Not a testnet. Working software.
 ---
 
 ## What's Shipping
@@ -623,17 +621,17 @@ of progress.
 
 ## SwapXFG — Atomic Swaps
 
-TradeOgre is dead. The small privacy coin ecosystem has no good trading
+TradeOgre is dead. The privacy coin ecosystem lacks a trading
 venue. Atomic swaps let users trade trustlessly, no exchange needed.
 
 **Supported pairs (priority order):**
 
 | Pair | Protocol | Both Ed25519? |
 |------|----------|---------------|
-| XMR ↔ XFG | COMIT adaptor sigs on both sides | Yes — most private pair |
+| XMR ↔ XFG | COMIT adaptor sigs on both sides | Yes - privacy pair |
 | ETH ↔ XFG | HashedTimelock.sol + adaptor sig on XFG | No |
 | SOL ↔ XFG | Solana HTLC + adaptor sig on XFG | Yes |
-| wXFG ↔ XFG | ERC-20 HTLC + adaptor sig on XFG | — |
+| HEAT ↔ XFG | ERC-20 HTLC + adaptor sig on XFG | — |
 | LUSD ↔ XFG | ERC-20 HTLC + adaptor sig on XFG | — |
 
 XFG swap outputs are normal `KeyOutput` to Musig2 joint addresses —
@@ -655,11 +653,9 @@ by ring signatures — an observer cannot tell which commitment you spent.
 
 Terms range from short to long. Longer terms earn higher yield. Need
 liquidity before maturity? XFG CDs are transferable: sell your position on
-the SwapXFG secondary market before the term expires.
+the SwapXFG secondary market even before the term expires.
 
-There are no accounts, no KYC, no counterparty risk. Your XFG address begins
-with `fire`. Your deposit does too.
-
+There are no accounts, no KYC, no counterparty risk. 
 Yield is real. Privacy is real. The bank is you.
 
 ---
@@ -680,7 +676,7 @@ improvement in Fuego's v10 protocol.
 | Condition | Ring size |
 |-----------|-----------|
 | Sufficient outputs available | 18 (maximum) |
-| Limited outputs | Adaptive (8–17) |
+| Limited outputs | Adaptive (8–18) |
 | Absolute minimum | 8 |
 
 ---
@@ -748,7 +744,7 @@ git add docs/superpowers/content/azoraahai-bitcointalk.md
 git commit -m "feat(content): add AzorAhai BitcoinTalk announcement draft
 
 Full technical announcement: SwapXFG pairs/protocol, XFG CDs,
-OSPEAD+ring 8-18, v10 changelog table, honest privacy limitations,
+OSPEAD+ring 8-18, v10 changelog table, honest privacy, 
 v11 teaser. Fire mythology opener and closer.
 
 Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>"
@@ -782,7 +778,7 @@ Post timing per spec content calendar:
 ## Thread 1 — Pre-launch Teaser (Block 999,900)
 
 **Tweet 1 (standalone):**
-The long night is almost over.
+The long night is over.
 
 Block 999,900. 🔥 #XFG
 
@@ -812,7 +808,7 @@ The XFG output is a normal KeyOutput — indistinguishable on-chain.
 
 **Tweet 4:**
 ETH ↔ XFG uses a HashTimeLock contract on Ethereum.
-Adaptor signature on the XFG side.
+Adaptor signature privacy on the XFG side.
 
 Swap ETH for private XFG. No KYC. No wrapped tokens on the XFG side.
 
@@ -850,7 +846,7 @@ The network pays you to hold private money.
 Withdrawal is ring-signature protected.
 
 An observer can't tell which commitment you spent.
-The bank vault is a ring sig.
+The bank vault is a ring signature set.
 
 **Tweet 4:**
 Need liquidity before your CD matures?
@@ -891,10 +887,12 @@ spending patterns. Ring size scales 8–18 based on outputs available.
 More cover. Harder to analyze. Ships now.
 
 **Tweet 4:**
-What v10 does NOT hide: amounts are plaintext.
+What v10 does NOT hide: XFG amounts are plaintext.
 
-We don't overclaim. Hidden amounts are v11. The roadmap is public.
-Working software is the primary measure of progress.
+We value honesty over hype, and feel like leaving amounts public
+while we adjust to new features is a trade we can handle- while community
+can gain confidence in network supply numbers.
+Hidden amounts are in development for v11. 
 
 **Tweet 5:**
 v11 coming after block 1M:

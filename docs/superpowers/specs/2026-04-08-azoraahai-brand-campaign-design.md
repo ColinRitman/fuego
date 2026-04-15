@@ -42,7 +42,7 @@ Fuego (XFG) is approaching block 1,000,000 — the AzorAhai Release. This is the
 
 ### 2.2 The Fire Metaphor
 
-The fire identity runs through every layer of the project: the `fire` address prefix, Fuego orange (`#FF5500`), the fire gradient in SwapXFG, upgrade names (Dracarys, Godflame), the diamond-with-fire splash, and the GoT mythology (AzorAhai = the hero who ends the Long Night with fire).
+The fire identity runs through every layer of the project: the `fire` address prefix, Fuego orange (`#FF5500`), the fire gradient in SwapXFG, upgrade names (Dracarys, Godflame), the triangle-with-fire splash (alchemical fire symbol 🜂), and the GoT mythology (AzorAhai = the hero who ends the Long Night with fire).
 
 **Use the metaphor for:** Release naming, launch copy tone, visual identity anchoring.  
 **Do not force it:** Technical documentation does not need fire metaphors. Let it appear naturally.
@@ -67,7 +67,7 @@ The fire identity runs through every layer of the project: the `fire` address pr
 - Interactive elements (buttons, links, CTAs): black background + orange text or orange border
 - Data highlights, amounts, metrics: Fuego orange
 - Error / warning states: orange (not red — stays on-brand)
-- The diamond logo: always rendered on black; fire gradient fill or white outline only
+- The fire symbol (triangle): always rendered on black; fire gradient fill or white outline only
 - Never use orange as a background fill behind body text — contrast fails
 
 ### 2.4 Voice Attributes
@@ -276,7 +276,7 @@ Frame every feature through the lens of individual sovereignty — not technolog
 | Asset | ID | Owner | Description |
 |-------|----|-------|-------------|
 | SEO audit | J | Marketing / Web | `/marketing:seo-audit` on usexfg.org; keywords: "XMR atomic swap", "private crypto yield", "XFG CD", "fuego cryptocurrency" |
-| Visual brand spec | K | Engineering | Output: markdown swatches table saved to `docs/superpowers/brand-visual-spec.md`. Content: pure black `#000000` base, Fuego orange `#FF5500` accent, full 11-stop fire gradient (from styles.go), fire-tinted near-blacks for depth layers, diamond geometry notes (from splash.go), typography defaults. Design principle: dark-first, black canvas + orange fire. Consumer: web team + social media templates. |
+| Visual brand spec | K | Engineering | Output: markdown swatches table saved to `docs/superpowers/brand-visual-spec.md`. Content: pure black `#000000` base, Fuego orange `#FF5500` accent, full 11-stop fire gradient (from styles.go), fire-tinted near-blacks for depth layers, fire symbol (triangle) geometry notes (from splash.go), typography defaults. Design principle: dark-first, black canvas + orange fire. Consumer: web team + social media templates. |
 
 ---
 
