@@ -1,0 +1,16 @@
+Fuego Backup Information
+========================
+Backup Date: Tue Sep  2 06:42:19 PM UTC 2025
+Backup Name: test_backup_20250902_184219
+Fuego Version: 1.9.3-119-gc4f3434
+System: Linux cursor 6.1.147 #1 SMP PREEMPT_DYNAMIC Tue Aug  5 21:01:56 UTC 2025 x86_64 x86_64 x86_64 GNU/Linux
+Docker Version: Docker version 27.5.1, build 27.5.1-0ubuntu3
+
+Backup Contents:
+- Data directories (blockchain, wallet, logs)
+- Configuration files
+- Environment variables
+- Docker-compose configuration
+
+Restore Command:
+./scripts/fuego-backup.sh restore test_backup_20250902_184219
