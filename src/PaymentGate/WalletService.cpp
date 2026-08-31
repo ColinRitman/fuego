@@ -2612,6 +2612,6 @@ namespace PaymentService
     std::stringstream ss;
     ss << std::fixed << std::setprecision(8) << xfgAmount << " XFG";
     return ss.str();
-  }
-
-  } //namespace PaymentService
+   }
+ }
+} //namespace PaymentService
