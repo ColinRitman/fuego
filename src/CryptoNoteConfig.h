@@ -445,6 +445,24 @@ const uint64_t HEARTH_FEE_DIVISOR = 10000;
 // savers once the depth has a track record. The two legs always sum to 100.
 const uint64_t HEARTH_CD_SHARE_PCT_V11 = 30; // v11: 30% CD yield / 70% maker
 const uint64_t HEARTH_CD_SHARE_PCT_V12 = 70; // v12: 70% CD yield / 30% maker
+
+// Share of the Hearth CD fee share (cdHearthFeeAccumulator) redirected to the
+// AuntPoL HEAT leg instead of CD yield, from v12. This is the SWF's funding
+// pipe: the SWF is no longer a tally over destroyed XFG (which can back
+// nothing — the burn it counted already paid for the minter's HEAT) but a
+// revenue-funded reserve that becomes permanent Hearth depth.
+//
+// The accumulator is the only clean source for the HEAT leg: it is HEAT that
+// ALREADY EXISTS, debited from LP reserves at swap settlement, so redirecting
+// it moves backed value rather than issuing a new claim. It must never be
+// taken from the m_cdYieldPool conversion, which mints HEAT against burned
+// XFG that already backs the minter's HEAT.
+//
+// Deliberately conservative: fee revenue cannot bootstrap depth at current
+// pool scale (~286x pool turnover to accrue 1,000 HEAT), so this is the
+// maintain-and-compound structure, not the growth engine. Raise it as volume
+// grows. It is taken from CD yield, so any change is visible to CD holders.
+const uint64_t SWF_LP_LEG_SHARE_PCT_V12 = 20; // v12: 20% of the CD fee share → AuntPoL HEAT leg
 const uint64_t ORDER_PRICE_TICK = COIN / 100; // min price granularity (1%)
 const uint64_t HEARTH_BACKSTOP_MAX_BPS =
     500; // backstop fills ≤ 5× auction volume per block
@@ -647,6 +665,17 @@ inline uint64_t hearthCdSharePct(uint8_t blockMajorVersion) {
 }
 inline uint64_t hearthMakerRebatePct(uint8_t blockMajorVersion) {
   return 100 - hearthCdSharePct(blockMajorVersion);
+}
+
+// Share of the Hearth CD fee share that funds the AuntPoL HEAT leg, for a
+// block major version. Same rule as the helpers above: consensus paths pass
+// the version of the block they are settling, never a default, so a reorg
+// replays the split that block actually settled. Zero before v12, which keeps
+// every historical block's epoch work bit-identical.
+inline uint64_t swfLpSharePct(uint8_t blockMajorVersion) {
+  return blockMajorVersion >= BLOCK_MAJOR_VERSION_12
+             ? parameters::SWF_LP_LEG_SHARE_PCT_V12
+             : 0;
 }
 
 // Mint premium for a block major version. Consensus paths pass the version of

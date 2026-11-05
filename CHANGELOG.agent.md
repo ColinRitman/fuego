@@ -1,3 +1,95 @@
+## SWF redefined: burn tally retired, Hearth fee pipe funds AuntPoL depth, XFG donation route
+
+**Started**: 2026-11-05
+**Agent**: Claude Opus 5
+**Status**: CODE DONE / BUILD NOT VERIFIED — Boost absent from the audit container, so `make -j$(nproc)` could not run. Build, tests, and wallet-side support are open; see sign-off.
+**Branch**: `claude/swf-auntpol-liquidity` (alternate — not the audit-fix branch)
+**Scope**: `src/CryptoNoteConfig.h`, `src/CryptoNoteCore/Blockchain.cpp`, `AGENTS.md`
+
+Repurposes the SWF from an unusable burn tally into a revenue pipe that becomes
+permanent Hearth depth, and adds a donation route that lets XFG land as AuntPoL
+inventory instead of being destroyed into that tally.
+
+**Why the old SWF could not be used.** `m_swfBurnedXfgPendingHeat` is credited 50%
+of `bankedBurn` — XFG the mint actually **destroyed** (`bankedBurn` excludes
+`premiumXfg` precisely because the premium is the part that is *not* destroyed).
+That burn already paid for the minter's HEAT. Converting the counter into a HEAT
+balance issues a second claim on collateral that is already spoken for: the
+counter records value already handed to every XFG holder as deflation, not a
+reserve the protocol holds. The Eternal Flame's own double-use is not a precedent
+for it — EF re-emits **XFG under a hard cap** (`MONEY_SUPPLY`, with an explicit
+`Osavvirsak > m_moneySupply` guard) to pay an **expense** (miner security) and is
+computable from the emission curve; an SWF→HEAT conversion would mint an
+**uncapped** asset to back a **liability**, off-chain where no on-chain invariant
+can see a shortfall.
+
+**Why the Hearth CD fee share is the clean source.** `cdHearthFeeAccumulator` is
+HEAT that **already exists** — debited from LP reserves at swap settlement — so
+redirecting it moves backed value. The slice is deliberately taken *only* from
+the accumulator and never from the `m_cdYieldPool` conversion in the same block,
+which mints HEAT against burned XFG that already backs the minter's HEAT.
+
+1. **Stage 0 — SWF conversion removed.** The dead `if (false && ...)` XFG→HEAT
+   block is gone. It was also the last epoch-boundary conversion priced at the
+   live `ammGetSpotPrice` rather than `twapBefore`, so a Phase 2 re-enable would
+   have shipped the manipulation hole already closed for mints and for CD yield.
+   `m_swfHeatBalance` now has no writer and stays zero (field kept for archive
+   compatibility); `addPermanentBurn` loses its only caller, which changes nothing
+   observable since the block never executed.
+2. **Stage 1 — Hearth fee pipe (v12+).** `SWF_LP_LEG_SHARE_PCT_V12 = 20` and
+   `swfLpSharePct(uint8_t)`, following the `hearthCdSharePct` pattern: zero before
+   v12, so every historical block's epoch work replays bit-identically. At the
+   epoch boundary the slice moves from `cdHearthFeeAccumulator` to
+   `m_treasuryHeatReserve`. Both counters are already in the epoch snapshot
+   (`preEpoch.treasuryHeatReserve`, `preEpoch.cdHearthFeeAccumulator`) and both are
+   restored on reorg, so this adds **no new reversal surface**. AuntPoL pairing for
+   the epoch has already run at that point, so the credit pairs at the next
+   boundary — harmless, since unpaired legs carry forward by design.
+3. **Stage 2 — `TransactionExtraTreasuryFund` asset 2 (v12+).** XFG donated as the
+   AuntPoL **XFG leg** rather than destroyed into the SWF tally. Accounted exactly
+   like the mint premium: the transaction destroys the XFG and the protocol holds
+   it as LP inventory in `m_treasuryLpPendingXfg`. Deliberately **not** routed
+   through `addTotalBurn`/EF/SWF — retained inventory is not a burn, and counting
+   it as both would claim the same XFG twice. All five tag touchpoints updated:
+   settlement asset bound (version-gated), settlement flows (`xfgSink`), settlement
+   ledger-overflow bound, connect credit, pop reversal.
+
+Stages 3–4 (epoch pairing, fee compounding) needed **no changes** — existing
+machinery at `processBlockEpochWork` handles ratio-pairing, `m_protocolLpShares`,
+the `LP_RESERVE` vault UTXO, and carry-forward.
+
+**Known limit, by design.** Fee revenue cannot bootstrap depth at current pool
+scale: ~286x cumulative pool turnover to accrue 1,000 HEAT at a 20% slice. This is
+the maintain-and-compound structure; depth has to be seeded by paired donation
+(e.g. 5,000 XFG + 500 HEAT at the 10:1 ratio takes the pool from 10k/1k to
+15k/1.5k). The slice then compounds it as volume grows. It is taken from CD yield,
+so raising it is visible to CD holders and should be disclosed, not slipped in.
+
+### Workstream 1 — SWF repurpose
+
+| # | Task | Owner | Date | Status |
+|---|------|-------|------|--------|
+| 1 | Remove the dead SWF XFG→HEAT conversion and its latent spot-price pricing | Claude Opus 5 | 2026-11-05 | DONE |
+| 2 | Add `SWF_LP_LEG_SHARE_PCT_V12` + `swfLpSharePct(uint8_t)`, zero before v12 | Claude Opus 5 | 2026-11-05 | DONE |
+| 3 | Move the slice from `cdHearthFeeAccumulator` to `m_treasuryHeatReserve` at the epoch boundary | Claude Opus 5 | 2026-11-05 | DONE |
+| 4 | `TreasuryFund` asset 2 → AuntPoL XFG leg across all five touchpoints | Claude Opus 5 | 2026-11-05 | DONE |
+| 5 | Update `AGENTS.md` (AuntPoL funding + SWF semantics) | Claude Opus 5 | 2026-11-05 | DONE |
+| 6 | Wallet/RPC support for emitting a `TreasuryFund` asset-2 donation | — | — | TODO |
+| 7 | Tests: v11 epoch work unchanged; v12 slice splits exactly; asset 2 credits the XFG leg and never the burn tally; pop reverses both | — | — | TODO |
+| 8 | Decide whether `m_swfHeatBalance` should stay in the `/heat_metrics` RPC now that it is permanently zero | — | — | TODO |
+| 9 | `make -j$(nproc)` on a host with Boost 1.86+ | — | — | TODO |
+
+### Sign-off
+
+| Gate | Status | Signed | Date |
+|------|--------|--------|------|
+| All tasks DONE | NO — tasks 6-9 open | — | — |
+| Build compiles | NOT VERIFIED — no Boost in audit container | — | — |
+| Tests pass | NOT RUN | — | — |
+| Brace/paren balance + hunk placement + scope checks reviewed | YES | Claude Opus 5 | 2026-11-05 |
+
+---
+
 ## Audit fixes: epoch CD-yield mint priced at TWAP, AuntPoL HEAT-leg saturation, Hearth accumulator carry-forward
 
 **Started**: 2026-11-05

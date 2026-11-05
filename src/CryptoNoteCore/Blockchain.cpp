@@ -5607,46 +5607,36 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
       }
     }
 
-    // SWF collateral conversion: every 8 epochs, convert 50% of XFG → HEAT (counter only, no burn).
-    // Converted HEAT stays in SWF as off-chain protocol collateral.
-    // TODO(Phase 2): re-enable when collateral demand justifies it — keep SWF in XFG until then.
-    // When re-enabled, converted XFG is permanently retired from total supply (m_permanentlyBurned).
-    if (false && epochNumber > 0 && epochNumber % CryptoNote::parameters::TREASURY_COUNTER_XFG_MINT_EPOCH_INTERVAL == 0) {
-      if (m_swfBurnedXfgPendingHeat > 0) {
-        uint64_t xfgToConvert = m_swfBurnedXfgPendingHeat / 2;
-        uint64_t heatConverted = xfgToConvert;
-        if (!m_ammPool.isEmpty() && m_ammPool.reserveHeat > 0 && m_ammPool.reserveXfg > 0) {
-          if (block.majorVersion >= BLOCK_MAJOR_VERSION_11) {
-            uint64_t poolRate = ammGetSpotPrice(m_ammPool.reserveXfg, m_ammPool.reserveHeat);
-            if (poolRate > 0) {
-              heatConverted = static_cast<uint64_t>(
-                  ((uint128_t)xfgToConvert * poolRate) / parameters::COIN);
-            }
-          } else {
-            FixedPoint64 poolRate = FixedPoint64::fromRatio(m_ammPool.reserveXfg, m_ammPool.reserveHeat);
-            if (!poolRate.isZero()) {
-              FixedPoint64 xfgFp = FixedPoint64::fromUint64(xfgToConvert);
-              FixedPoint64 heatFp = xfgFp.div(poolRate);
-              heatConverted = heatFp.toUint64();
-            }
-          }
-        }
-        if (heatConverted > 0) {
-          if (m_swfHeatBalance > UINT64_MAX - heatConverted) {
-            logger(ERROR, BRIGHT_RED) << "SWF HEAT balance overflow detected";
-            return false;
-          }
-          m_swfHeatBalance += heatConverted;
-          m_swfBurnedXfgPendingHeat -= xfgToConvert;
-          // Permanent retirement: SWF XFG removed from total supply when converted to HEAT.
-          // Not used in baseReward (ethereal only) — display/cap only.
-          m_bankingIndex.addPermanentBurn(xfgToConvert, newHeight);
-          logger(INFO) << "SWF collateral conversion (epoch " << epochNumber << "): "
-                       << m_currency.formatAmount(xfgToConvert) << " XFG → "
-                       << m_currency.formatAmount(heatConverted) << " HEAT (counter, permanently retired)";
-        }
-      }
-    }
+    // REMOVED: the SWF XFG→HEAT collateral conversion (was dead behind
+    // `if (false && ...)`, intended for a Phase 2 re-enable).
+    //
+    // It could not be made sound. m_swfBurnedXfgPendingHeat is a tally over
+    // XFG the mint already DESTROYED (bankedBurn excludes the premium
+    // precisely because the premium is the part that is NOT destroyed), and
+    // that burn already paid for the minter's HEAT. Minting a second HEAT
+    // balance against the same tally issues a second claim on collateral that
+    // is already spoken for — the counter records a gift already given to
+    // every XFG holder as deflation, not a reserve the protocol holds. You
+    // cannot spend deflation.
+    //
+    // It was also the one place left that priced an epoch-boundary conversion
+    // at the live pool spot (ammGetSpotPrice) rather than twapBefore. Epoch
+    // boundaries are deterministic and epoch work runs after the block's
+    // transactions settle, so re-enabling it as written would have shipped the
+    // same manipulation hole already closed for mints and for the CD-yield
+    // conversion below.
+    //
+    // DIGM needs none of this: DigmMintEngine::validateMint already requires
+    // locking real HEAT at the fixed peg to mint DIGM, so DIGM is fully
+    // collateralized at issuance by HEAT that exists and is already backed.
+    // Because DIGM_PEG_HEAT is a constant rather than a market price, the
+    // mint→redeem round trip is exactly supply-neutral and needs no reserve.
+    //
+    // m_swfHeatBalance now has no writer and stays zero; the field is kept for
+    // archive compatibility. m_swfBurnedXfgPendingHeat survives as a
+    // cumulative-burn statistic with no issuance authority. The SWF's real job
+    // is the revenue pipe below (swfLpSharePct): funding AuntPoL depth from
+    // fees that no HEAT claim has been issued against.
 
     // Route regular CD share: 100% to yield pool for HⲶ∆T minting.
     if (m_cdYieldPool > UINT64_MAX - regularCdShare) {
@@ -5726,6 +5716,40 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
           }
         }
       }
+      // SWF revenue pipe (v12+): a slice of the Hearth CD fee share funds the
+      // AuntPoL HEAT leg instead of CD yield, becoming permanent pool depth
+      // once the next epoch pairs it.
+      //
+      // Taken ONLY from cdHearthFeeAccumulator, never from the heatMinted
+      // produced by the m_cdYieldPool conversion above. The accumulator is
+      // HEAT that already exists — debited from LP reserves at swap
+      // settlement — so redirecting it moves backed value. The conversion
+      // above MINTS HEAT against burned XFG that already backs the minter's
+      // HEAT; slicing that would fund the leg by issuing a second claim on
+      // the same collateral, which is the defect that killed the SWF
+      // conversion removed above.
+      //
+      // The AuntPoL pairing for this epoch has already run by this point, so
+      // the credit pairs at the NEXT epoch boundary. That one-epoch lag is
+      // harmless: unpaired legs are carried forward by design, never dropped.
+      if (m_ammPool.cdHearthFeeAccumulator > 0) {
+        const uint64_t lpLegPct = swfLpSharePct(block.majorVersion);
+        if (lpLegPct > 0) {
+          const uint64_t hearthToLpLeg = static_cast<uint64_t>(
+              ((uint128_t)m_ammPool.cdHearthFeeAccumulator * lpLegPct) / 100);
+          if (hearthToLpLeg > 0) {
+            if (m_treasuryHeatReserve > UINT64_MAX - hearthToLpLeg) {
+              logger(ERROR, BRIGHT_RED) << "AuntPoL HEAT leg overflow on Hearth fee share";
+              return false;
+            }
+            m_ammPool.cdHearthFeeAccumulator -= hearthToLpLeg;
+            m_treasuryHeatReserve += hearthToLpLeg;
+            logger(INFO) << "AuntPoL HEAT leg <- Hearth CD fee share (epoch " << epochNumber
+                         << "): " << m_currency.formatAmount(hearthToLpLeg) << " HEAT";
+          }
+        }
+      }
+
       if (heatMinted > 0 || m_ammPool.cdHearthFeeAccumulator > 0) {
         if (heatMinted > UINT64_MAX - m_ammPool.cdHearthFeeAccumulator) {
           logger(ERROR, BRIGHT_RED) << "CD yield mint overflow";
@@ -6905,6 +6929,24 @@ bool CryptoNote::Blockchain::pushTransaction(BlockEntry& block, const Crypto::Ha
             // never enter the unburned treasury reserve or LP pairing path.
             m_swfBurnedXfgPendingHeat += fund.amount;
             m_bankingIndex.addTotalBurn(fund.amount, block.height);
+          } else if (fund.asset == 2) {
+            // v12+: donate XFG as the AuntPoL XFG leg, so it becomes pool
+            // depth instead of a tally entry. Accounted exactly like the mint
+            // premium: the transaction destroys the XFG, and the protocol
+            // holds it as LP inventory in m_treasuryLpPendingXfg.
+            //
+            // Deliberately NOT routed through addTotalBurn / the EF / the SWF.
+            // Donated-as-inventory XFG is retained value, not a burn: counting
+            // it as burned as well would claim the same XFG twice, exactly as
+            // bankedBurn() excludes premiumXfg for being retained rather than
+            // destroyed.
+            if (m_treasuryLpPendingXfg > UINT64_MAX - fund.amount) {
+              logger(ERROR, BRIGHT_RED) << "AuntPoL XFG leg overflow on donation";
+              return false;
+            }
+            m_treasuryLpPendingXfg += fund.amount;
+            logger(INFO) << "AuntPoL XFG leg <- donation: "
+                         << m_currency.formatAmount(fund.amount) << " XFG";
           } else {
             if (m_treasuryHeatReserve > UINT64_MAX - fund.amount) {
               logger(ERROR, BRIGHT_RED) << "Treasury HEAT reserve overflow";
@@ -7361,6 +7403,10 @@ void CryptoNote::Blockchain::popTransaction(const Transaction& transaction, cons
         const auto& fund = boost::get<TransactionExtraTreasuryFund>(field);
         if (fund.asset == 0) {
            if (m_swfBurnedXfgPendingHeat >= fund.amount) m_swfBurnedXfgPendingHeat -= fund.amount;
+        } else if (fund.asset == 2) {
+          // Mirror of the asset-2 credit in pushTransaction. No burn-tally
+          // reversal here because the credit never touched the tally.
+          if (m_treasuryLpPendingXfg >= fund.amount) m_treasuryLpPendingXfg -= fund.amount;
         } else {
           if (m_treasuryHeatReserve >= fund.amount) m_treasuryHeatReserve -= fund.amount;
         }
@@ -8113,14 +8159,20 @@ bool CryptoNote::Blockchain::validateSettlement(const Transaction& tx, uint32_t 
     flows.heatSource = lpRemoveHeat;
   } else if (kind == typeid(TransactionExtraTreasuryFund)) {
     const auto& f = boost::get<TransactionExtraTreasuryFund>(*tag);
-    if (f.amount == 0 || f.asset > 1) {
+    // asset 0 = XFG into the SWF burn tally (legacy: destroys the XFG into a
+    // counter that can back nothing), 1 = HEAT into the AuntPoL HEAT leg,
+    // 2 = XFG into the AuntPoL XFG leg (v12+). Asset 2 is the route that lets
+    // an XFG donation become pool depth instead of a tally entry.
+    const uint8_t maxAsset =
+        getBlockMajorVersionForHeight(height) >= BLOCK_MAJOR_VERSION_12 ? 2 : 1;
+    if (f.amount == 0 || f.asset > maxAsset) {
       error = "treasury fund: invalid amount or asset";
       return false;
     }
-    if (f.asset == 0) {
-      flows.xfgSink = f.amount;
-    } else {
+    if (f.asset == 1) {
       flows.heatSink = f.amount;
+    } else {
+      flows.xfgSink = f.amount;
     }
   }
   // HEAT sends and market buy/sell move nothing in or out: plain balance.
@@ -8310,7 +8362,9 @@ bool CryptoNote::Blockchain::validateSettlement(const Transaction& tx, uint32_t 
     }
   } else if (kind == typeid(TransactionExtraTreasuryFund)) {
     const auto& f = boost::get<TransactionExtraTreasuryFund>(*tag);
-    const uint64_t ledger = f.asset == 0 ? m_swfBurnedXfgPendingHeat : m_treasuryHeatReserve;
+    const uint64_t ledger = f.asset == 0 ? m_swfBurnedXfgPendingHeat
+                          : f.asset == 1 ? m_treasuryHeatReserve
+                                         : m_treasuryLpPendingXfg;
     if (ledger > UINT64_MAX - f.amount) {
       error = "treasury fund: ledger overflow";
       return false;
