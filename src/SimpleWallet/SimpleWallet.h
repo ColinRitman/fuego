@@ -75,6 +75,12 @@ namespace CryptoNote
       return msg;
     }
 
+    Logging::LoggerMessage warning_msg_writer() const {
+      auto msg = logger(Logging::WARNING, Logging::BRIGHT_YELLOW);
+      msg << "Warning: ";
+      return msg;
+    }
+
     // @ Alias system commands
     bool register_alias(const std::vector<std::string> &args);
     bool lookup_alias(const std::vector<std::string> &args);
@@ -108,6 +114,7 @@ namespace CryptoNote
     bool show_num_unlocked_outputs(const std::vector<std::string> &args);
     bool optimize_outputs(const std::vector<std::string> &args);
 	bool get_reserve_proof(const std::vector<std::string> &args);
+	bool get_swapKey(const std::vector<std::string> &args = std::vector<std::string>());
     bool get_tx_proof(const std::vector<std::string> &args);
     bool optimize_all_outputs(const std::vector<std::string> &args);
     bool listTransfers(const std::vector<std::string> &args);
@@ -120,16 +127,18 @@ namespace CryptoNote
 
     // Deposit commands
     bool deposit(const std::vector<std::string> &args);
+    bool rollover(const std::vector<std::string> &args);  // Rollover matured CD with compound interest
+    // Hidden cold commands - kept for internal use but not exposed in help
     bool burn(const std::vector<std::string> &args);
     bool cold(const std::vector<std::string> &args);
-    bool elderking_ceremony(const std::vector<std::string> &args);
+    // bool elderking_ceremony(const std::vector<std::string> &args);
     bool withdraw(const std::vector<std::string> &args);
-    bool unstake(const std::vector<std::string> &args);
-    bool list_cold(const std::vector<std::string> &args);
-    bool cold_info(const std::vector<std::string> &args);
+    // bool unstake(const std::vector<std::string> &args);  // Removed - not implemented
+    bool list_cds(const std::vector<std::string> &args);
+    bool cd_info(const std::vector<std::string> &args);
     bool list_burns(const std::vector<std::string> &args);
     bool burn_info(const std::vector<std::string> &args);
-    bool migrate_cold(const std::vector<std::string> &args);
+    bool migrate_legacy_deposit(const std::vector<std::string> &args);
     bool propose_slash(const std::vector<std::string> &args);
     bool get_report(const std::vector<std::string> &args);
 
@@ -138,16 +147,46 @@ namespace CryptoNote
     bool complete_swap(const std::vector<std::string> &args);
     bool refund_swap(const std::vector<std::string> &args);
 
+    // swapxfg TUI launcher
+    bool swap_tui(const std::vector<std::string> &args);
+
+  protected:
+    void launchSwapxfg(bool testnet = false);
+
+  private:
+
      bool create_cold_secret(const std::vector<std::string> &args);
 
     // USER-FACING: Proof generation from deposits
     // Users generate STARKs from deposit transactions with xfg-stark-cli for L2 claims
     bool gen_proof(const std::vector<std::string> &args);
-    bool elder_council(const std::vector<std::string> &args); // fier_panel
+    // bool elder_council(const std::vector<std::string> &args); // fier_panel
 
     // Sub-address commands
     bool gen_new_sub(const std::vector<std::string> &args);
     bool list_subs(const std::vector<std::string> &args);
+
+    // HEAT / Hearth AMM commands (v11+)
+    bool heat_info(const std::vector<std::string> &args);
+    bool pool_info(const std::vector<std::string> &args);
+    bool mint_heat(const std::vector<std::string> &args);
+    bool send_heat(const std::vector<std::string> &args);
+    bool swap(const std::vector<std::string> &args);
+    bool add_liq(const std::vector<std::string> &args);
+    bool remove_liq(const std::vector<std::string> &args);
+    bool claim_lp_fees(const std::vector<std::string> &args);
+
+    // HEAT CD commands (v11+)
+    bool heat_deposit(const std::vector<std::string> &args);
+    bool claim_cd(const std::vector<std::string> &args);
+    bool heat_list(const std::vector<std::string> &args);
+    bool legacy_withdraw(const std::vector<std::string> &args);
+
+    // Hearth orderbook commands (v11+)
+    bool place_order(const std::vector<std::string> &args);
+    bool cancel_order(const std::vector<std::string> &args);
+    bool orderbook(const std::vector<std::string> &args);
+    bool show_orders(const std::vector<std::string> &args);
 
     bool ask_wallet_create_if_needed();
     std::string resolveAlias(const std::string& aliasUrl);
@@ -224,8 +263,13 @@ namespace CryptoNote
     bool m_wallet_file_arg_provided;
     bool m_generate_new_provided;
 
+    // Optional wallet RPC port for swapxfg launcher (0 = not configured)
+    uint16_t m_wallet_rpc_port = 0;
+
+    // Swap direction for sell_xfg/buy_xfg commands (0=XFG→HEAT, 1=HEAT→XFG)
+    uint8_t m_lastSwapDirection = 0;
+
     // Sub-address list: (major, minor, addressString)
-    // Generated deterministically from master keys; persisted in <wallet>.subaddresses
     std::vector<std::tuple<uint32_t, uint32_t, std::string>> m_subAddresses;
     void loadSubAddresses();
     void saveSubAddresses() const;

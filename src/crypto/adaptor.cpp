@@ -26,6 +26,38 @@ extern "C" {
 #include "random.h"
 }
 
+namespace {
+
+bool point_is_valid(const unsigned char bytes[32]) {
+  int nonzero = 0;
+  for (int i = 0; i < 32; ++i) nonzero |= bytes[i];
+  if (!nonzero) return false;
+  ge_p3 p3;
+  if (ge_frombytes_vartime(&p3, bytes) != 0) return false;
+  ge_p2 p2;
+  ge_p3_to_p2(&p2, &p3);
+  ge_p1p1 p1p1;
+  ge_mul8(&p1p1, &p2);
+  ge_p2 p2r;
+  ge_p1p1_to_p2(&p2r, &p1p1);
+  unsigned char out[32];
+  ge_tobytes(out, &p2r);
+  // Reject small-order points: P is small-order exactly when 8*P is the
+  // neutral element. The neutral element encodes as {0x01, 0, ..., 0} — NOT
+  // all-zero. Comparing against all-zero made this check inert, because no
+  // valid point ever encodes to 32 zero bytes, so every decodable point was
+  // accepted (identity and the 8-torsion points included).
+  static const unsigned char kNeutral[32] = {
+    1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+  };
+  int diff = 0;
+  for (int i = 0; i < 32; ++i) diff |= (out[i] ^ kNeutral[i]);
+  return diff != 0;
+}
+
+} // namespace
+
 #include <mutex>
 #include <cstring>
 
@@ -60,6 +92,9 @@ bool generate_adaptor_signature(
   ge_p3 T_p3;
   if (ge_frombytes_vartime(&T_p3,
       reinterpret_cast<const unsigned char*>(&adaptor_point)) != 0) {
+    return false;
+  }
+  if (!point_is_valid(reinterpret_cast<const unsigned char*>(&adaptor_point))) {
     return false;
   }
 
@@ -108,10 +143,13 @@ bool check_adaptor_signature(
     const PublicKey &adaptor_point,
     const AdaptorSignature &pre_sig)
 {
-  // Decode adaptor point T
+  // Decode adaptor point T — reject identity and small-order points
   ge_p3 T_p3;
   if (ge_frombytes_vartime(&T_p3,
       reinterpret_cast<const unsigned char*>(&adaptor_point)) != 0) {
+    return false;
+  }
+  if (!point_is_valid(reinterpret_cast<const unsigned char*>(&adaptor_point))) {
     return false;
   }
 
@@ -195,12 +233,68 @@ bool extract_adaptor_secret(
 
   // t = r - r_hat = (r_hat + t) - r_hat
   sc_sub(reinterpret_cast<unsigned char*>(&adaptor_secret),
-         sig.data + 32,
-         pre_sig.data + 32);
+          sig.data + 32,
+          pre_sig.data + 32);
 
   // Secret must be nonzero (zero would mean T was the identity)
   return sc_isnonzero(
       reinterpret_cast<const unsigned char*>(&adaptor_secret)) != 0;
+}
+
+bool generate_afk_lock_data(
+    const Hash &prefix_hash,
+    const PublicKey &pub,
+    const SecretKey &sec,
+    AFKLockData &out)
+{
+  // 1. Generate secret s
+  adaptor_random_scalar(out.secret);
+  
+  // 2. Compute adaptor point S = s*G
+  ge_p3 S_p3;
+  ge_scalarmult_base(&S_p3, reinterpret_cast<const unsigned char*>(&out.secret));
+  ge_p3_tobytes(reinterpret_cast<unsigned char*>(&out.adaptor_point), &S_p3);
+  
+  // 3. Generate twisted pre-signature
+  return generate_adaptor_signature(prefix_hash, pub, sec, out.adaptor_point, out.pre_sig);
+}
+
+void complete_afk_signature(
+    const AdaptorSignature &pre_sig,
+    const EllipticCurveScalar &adaptor_secret,
+    Signature &sig)
+{
+  adapt_signature(pre_sig, adaptor_secret, sig);
+}
+
+bool extract_afk_secret(
+    const AdaptorSignature &pre_sig,
+    const Signature &sig,
+    EllipticCurveScalar &adaptor_secret)
+{
+  return extract_adaptor_secret(pre_sig, sig, adaptor_secret);
+}
+
+bool verify_afk_completion(
+    const Hash &prefix_hash,
+    const PublicKey &pub,
+    const AdaptorSignature &pre_sig,
+    const EllipticCurveScalar &expected_secret,
+    const Signature &sig)
+{
+  EllipticCurveScalar extracted_secret;
+  if (!extract_adaptor_secret(pre_sig, sig, extracted_secret)) {
+    return false;
+  }
+
+  const auto* extracted = reinterpret_cast<const uint8_t*>(&extracted_secret);
+  const auto* expected = reinterpret_cast<const uint8_t*>(&expected_secret);
+  uint8_t difference = 0;
+  for (size_t i = 0; i < sizeof(EllipticCurveScalar); ++i) {
+    difference |= extracted[i] ^ expected[i];
+  }
+
+  return difference == 0 && check_signature(prefix_hash, pub, sig);
 }
 
 } // namespace Crypto

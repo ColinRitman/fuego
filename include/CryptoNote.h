@@ -49,9 +49,9 @@ struct MultisignatureOutput {
 };
 
 // v10+ ring-signature deposit output.
-// Replaces MultisignatureOutput for ALL deposit types: COLD, HEAT burns, Elderfier stakes.
+// Replaces MultisignatureOutput for ALL deposit types: COLD, HEAT burns.
 // HEAT burns use throwaway commitKey (secret discarded) and never withdraw but
-// serve as excellent decoys, bulking up decoy pool for COLD/EF withdrawal rings.
+// serve as excellent decoys, bulking up decoy pool for COLD withdrawal rings.
 // Ring selection draws from the global CommitmentIndex by amount —
 // all commitment outputs of matching amount are eligible decoys regardless of term.
 //
@@ -68,7 +68,7 @@ struct TransactionOutputCommitment {
 };
 
 // v10+ ring-signature withdrawal input.
-// Replaces MultisignatureInput for COLD/Elderfier withdrawals.
+// Replaces MultisignatureInput for COLD withdrawals.
 // outputIndexes are GLOBAL commitment output indices (like KeyInput for key outputs).
 struct TransactionInputCommitmentSpend {
   uint64_t amount;                      // must match referenced commitment output amount
@@ -88,8 +88,19 @@ struct TransactionInputCommitmentTransfer {
   uint32_t newTerm;                     // new CD's term (spender-declared, >= 1)
 };
 
-// v11+ unified output — replaces KeyOutput + TransactionOutputCommitment.
-// ALL v11 transaction outputs (transfers, deposits, burns) use this type.
+// v13+ orderbook limit order output.
+// Stores a locked order on the orderbook as a UTXO.
+// spend_key/view_key: sender's keys for stealth remainder returns on partial fills.
+struct TransactionOutputOrder {
+  uint8_t side;              // 0 = BUY_XFG (pay HEAT, receive XFG), 1 = SELL_XFG (pay XFG, receive HEAT)
+  uint64_t price;            // XFG/HEAT ratio × 10^8
+  uint32_t expiration;       // block height after which unfilled remainder auto-returns
+  Crypto::PublicKey spendKey;
+  Crypto::PublicKey viewKey;
+};
+
+// v12+ (SILENTFIRE) unified output — replaces KeyOutput + TransactionOutputCommitment.
+// ALL v12+ transaction outputs (transfers, deposits, burns) use this type.
 // Amount hidden in Pedersen commitment; denomination proved by 1-of-N membership proof.
 // term=0: regular transfer. term>0: locked deposit (blocks).
 // TransactionOutput.amount is 0 on the wire for this type (amount is in commitment).
@@ -100,8 +111,8 @@ struct TransactionOutputUnified {
   Crypto::MembershipProof proof;            // 1-of-N: amount is a valid denomination
 };
 
-// v11+ unified input — replaces KeyInput + TransactionInputCommitmentSpend.
-// ALL v11 inputs (transfers, deposit withdrawals) use this type.
+// v12+ (SILENTFIRE) unified input — replaces KeyInput + TransactionInputCommitmentSpend.
+// ALL v12+ inputs (transfers, deposit withdrawals) use this type.
 // Amount hidden; MLSAG proves spend authority + commitment balance.
 // MLSAG response scalars stored in tx.signatures[input_idx]:
 //   signatures[input_idx][j] = {s[j][0], s[j][1]} for ring member j
@@ -113,9 +124,40 @@ struct TransactionInputUnified {
   Crypto::EllipticCurveScalar sigC0;                 // MLSAG initial challenge scalar
 };
 
-typedef boost::variant<BaseInput, KeyInput, MultisignatureInput, TransactionInputCommitmentSpend, TransactionInputCommitmentTransfer, TransactionInputUnified> TransactionInput;
+// v11+ (HEATWAVE) atomic-swap escrow output.
+//
+// Fixes the legacy cooperative-only escrow (C2: no unilateral refund).
+// Spending is split into two time-gated paths:
+//   claim  — valid only BEFORE refundTimeout: signature under claimKey
+//            (the MuSig2 aggregate of both swap parties; the completed
+//            adaptor aggregate verifies as a plain Schnorr sig).
+//   refund — valid only AT/AFTER refundTimeout: signature under refundKey
+//            (the maker's key alone; no peer cooperation required).
+// Both paths spend the same output; the chain marks the output used on
+// either spend, so claim-then-refund and refund-then-claim double spends
+// are impossible regardless of key-image differences.
+struct TransactionOutputSwapEscrow {
+  Crypto::PublicKey claimKey;      // MuSig2 aggregate pubkey (joint key)
+  Crypto::PublicKey refundKey;     // maker's refund pubkey
+  Crypto::PublicKey adaptorPoint;  // T = t*G — the claim challenge commits R_agg + T
+  uint32_t refundTimeout;          // absolute block height; refund valid after
+};
 
-typedef boost::variant<KeyOutput, MultisignatureOutput, TransactionOutputCommitment, TransactionOutputUnified> TransactionOutputTarget;
+// v11+ (HEATWAVE) atomic-swap escrow spend input.
+// References the funding transaction and output index directly (no decoy
+// ring — the escrow key is a one-time joint key, so mixing adds nothing).
+struct TransactionInputSwapEscrow {
+  uint64_t amount;             // must equal the referenced output amount
+  Crypto::Hash escrowTxId;     // funding transaction hash
+  uint16_t escrowOutputIndex;  // output index within the funding transaction
+  uint8_t mode;                // 0 = claim, 1 = refund
+  Crypto::KeyImage keyImage;   // deterministic per (escrowTxId, index, mode):
+                               // pool-level double-spend marker
+};
+
+typedef boost::variant<BaseInput, KeyInput, MultisignatureInput, TransactionInputCommitmentSpend, TransactionInputCommitmentTransfer, TransactionInputUnified, TransactionInputSwapEscrow> TransactionInput;
+
+typedef boost::variant<KeyOutput, MultisignatureOutput, TransactionOutputCommitment, TransactionOutputUnified, TransactionOutputOrder, TransactionOutputSwapEscrow> TransactionOutputTarget;
 
 struct TransactionOutput {
   uint64_t amount;
@@ -158,6 +200,12 @@ struct Block : public BlockHeader {
   ParentBlock parentBlock;
   Transaction baseTransaction;
   std::vector<Crypto::Hash> transactionHashes;
+  // v13+ orderbook state (serialized only when majorVersion >= 13)
+  uint64_t orderbookClearingPrice;
+  uint32_t orderbookNumMatches;
+  uint32_t orderbookDepthBidXfg;
+  uint32_t orderbookDepthAskXfg;
+  uint64_t hearthPoolRatio;
 };
 
 struct AccountPublicAddress {

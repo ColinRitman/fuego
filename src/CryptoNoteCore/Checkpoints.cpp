@@ -102,7 +102,17 @@ bool Checkpoints::is_alternative_block_allowed(uint32_t  blockchain_height, uint
 
   --it;
   uint32_t  checkpoint_height = it->first;
-  return checkpoint_height < block_height;
+  if (!(checkpoint_height < block_height))
+    return false;
+
+  uint32_t depth = blockchain_height - block_height;
+  if (depth > 500) {
+    logger(Logging::DEBUGGING, Logging::WHITE)
+      << "<< Checkpoints.cpp << " << "Reorganization depth above checkpoint too deep: " << depth << ". Block Rejected";
+    return false;
+  }
+
+  return true;
 }
 
 //---------------------------------------------------------------------------

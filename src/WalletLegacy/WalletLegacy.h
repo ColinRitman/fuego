@@ -32,6 +32,7 @@
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
 #include "CryptoNoteCore/Currency.h"
 #include "WalletLegacy/WalletUserTransactionsCache.h"
+#include "WalletLegacy/WalletLegacySerializer.h"
 #include "WalletLegacy/WalletUnconfirmedTransactions.h"
 
 #include "WalletLegacy/WalletTransactionSender.h"
@@ -39,7 +40,6 @@
 
 #include "Transfers/BlockchainSynchronizer.h"
 #include "Transfers/TransfersSynchronizer.h"
-#include "BurnTransactionHandler.h"
 #include "crypto/subaddress.h"
 
 namespace CryptoNote {
@@ -77,6 +77,8 @@ public:
   virtual uint64_t actualInvestmentBalance() override;
   virtual uint64_t pendingDepositBalance() override;
   virtual uint64_t pendingInvestmentBalance() override;
+  virtual uint64_t actualHeatBalance() override;
+  virtual uint64_t pendingHeatBalance() override;
 
   virtual size_t getTransactionCount() override;
   virtual size_t getTransferCount() override;
@@ -110,68 +112,78 @@ public:
                                         uint64_t unlockTimestamp = 0,
                                         const std::vector<TransactionMessage>& messages = std::vector<TransactionMessage>(),
                                         uint64_t ttl = 0) override;
-  virtual size_t estimateFusion(const uint64_t& threshold);
-  virtual std::list<TransactionOutputInformation> selectFusionTransfersToSend(uint64_t threshold, size_t minInputCount, size_t maxInputCount);
-  virtual TransactionId sendFusionTransaction(const std::list<TransactionOutputInformation>& fusionInputs, uint64_t fee, const std::string& extra = "", uint64_t mixIn = 0, uint64_t unlockTimestamp = 0);
+  virtual size_t estimateFusion(const uint64_t& threshold) override;
+  virtual std::list<TransactionOutputInformation> selectFusionTransfersToSend(uint64_t threshold, size_t minInputCount, size_t maxInputCount) override;
+  virtual TransactionId sendFusionTransaction(const std::list<TransactionOutputInformation>& fusionInputs, uint64_t fee, const std::string& extra = "", uint64_t mixIn = 0, uint64_t unlockTimestamp = 0) override;
   virtual TransactionId deposit(uint32_t term, uint64_t amount, uint64_t fee, uint64_t mixIn = 4) override;
-  virtual TransactionId deposit(uint32_t term, uint64_t amount, uint64_t fee, const std::string& extra, uint64_t mixIn = 4);
+  virtual TransactionId deposit(uint32_t term, uint64_t amount, uint64_t fee, const std::string& extra, uint64_t mixIn = 4) override;
+  virtual TransactionId mintHeatV10(uint64_t xfgBurned, uint64_t heatMinted, uint64_t fee, uint64_t mixIn = 4) override;
+  virtual TransactionId sendHeatV10(const AccountPublicAddress& recipient, uint64_t amount, uint64_t fee, uint64_t mixIn = 4) override;
+  virtual TransactionId ammSwapV10(uint8_t direction, uint64_t inputAmount, uint64_t outputAmount,
+                                    uint64_t minOutput, uint64_t fee, uint64_t mixIn = 4) override;
+  virtual TransactionId lpAddV10(uint64_t amountXfg, uint64_t amountHeat, uint64_t fee, uint64_t mixIn = 4) override;
+  virtual TransactionId lpRemoveV10(uint64_t lpShares, uint64_t minXfg, uint64_t minHeat, uint64_t fee, uint64_t mixIn = 4) override;
+  virtual TransactionId lpClaimFeesV10(uint64_t lpShares, uint64_t minXfg, uint64_t minHeat, uint64_t fee, uint64_t mixIn = 4) override;
+  virtual TransactionId heatDepositV10(uint64_t amount, uint32_t termEpochs, uint64_t bankingFee, uint64_t fee, uint64_t mixIn = 4) override;
   virtual TransactionId withdrawDeposits(const std::vector<DepositId>& depositIds, uint64_t fee) override;
+  virtual TransactionId donateToTreasury(Crypto::SecretKey& transactionSK,
+                                         uint64_t amount,
+                                         uint64_t fee,
+                                         uint64_t mixIn) override;
+  // v11 Orderbook
+  virtual TransactionId placeOrderV13(uint8_t side, uint64_t amount, uint64_t price, uint32_t expiration, uint64_t fee, uint64_t mixIn = 4) override;
+  virtual TransactionId cancelOrderV13(const Crypto::Hash& orderId, uint64_t fee, uint64_t mixIn = 4) override;
+  virtual TransactionId marketBuyV13(uint64_t xfgWanted, uint64_t maxHeatCost, uint64_t fee, uint64_t mixIn = 4) override;
+  virtual TransactionId marketSellV13(uint64_t xfgToSell, uint64_t minHeatReceive, uint64_t fee, uint64_t mixIn = 4) override;
   virtual std::error_code cancelTransaction(size_t transactionId) override;
-
+  virtual std::error_code create_afk_lock(uint64_t amount, uint32_t timeout_hours, uint8_t pair, std::string& lockId, std::string& adaptorPoint, std::string& preSig, std::string& hashLock) override;
+  virtual std::error_code claim_afk_swap(const std::string& swapId, const std::string& secret_s, const std::string& target_chain, const std::string& fee_address, const std::string& payout_address, std::string& txHash) override;
   virtual void getAccountKeys(AccountKeys& keys) override;
-
-  // Burn deposit secret management
   void storeBurnDepositSecret(const std::string& txHash, const Crypto::SecretKey& secret, uint64_t amount, const std::vector<uint8_t>& metadata);
   bool getBurnDepositSecret(const std::string& txHash, Crypto::SecretKey& secret, uint64_t& amount, std::vector<uint8_t>& metadata);
   bool hasBurnDepositSecret(const std::string& txHash);
-
-  // Sub-address registration.
-  // Derives the sub-address at (major, minor), subscribes it to the chain scanner
-  // and returns the sub-address string. Outputs received at this address contribute
-  // to actualBalance() and are selectable as transaction inputs (spend key b_ij used).
-  // Idempotent: calling with a previously-registered index is a no-op and returns the address.
   virtual std::string registerSubAddress(uint32_t major, uint32_t minor) override;
 
-private:
+  // ── AFK lock secrets (maker-side pre-lock material) ──
+  // Persisted (encrypted with the wallet password) so a wallet restart does
+  // not orphan in-flight AFK offers. Type defined in WalletLegacySerializer.h.
+  const std::map<std::string, AfkLockSecret>& afkLockSecrets() const { return m_afkLockSecrets; }
+  std::map<std::string, AfkLockSecret>& afkLockSecrets() { return m_afkLockSecrets; }
 
-  // IBlockchainSynchronizerObserver
+  private:
   virtual void synchronizationProgressUpdated(uint32_t current, uint32_t total) override;
   virtual void synchronizationCompleted(std::error_code result) override;
-
-  // ITransfersObserver
   virtual void onTransactionUpdated(ITransfersSubscription* object, const Crypto::Hash& transactionHash) override;
   virtual void onTransactionDeleted(ITransfersSubscription* object, const Crypto::Hash& transactionHash) override;
   virtual void onTransfersUnlocked(ITransfersSubscription* object, const std::vector<TransactionOutputInformation>& unlockedTransfers) override;
   virtual void onTransfersLocked(ITransfersSubscription* object, const std::vector<TransactionOutputInformation>& lockedTransfers) override;
-
   void initSync();
   void throwIfNotInitialised();
-
   void doSave(std::ostream& destination, bool saveDetailed, bool saveCache);
   void doLoad(std::istream& source);
-
   void synchronizationCallback(WalletRequest::Callback callback, std::error_code ec);
   void sendTransactionCallback(WalletRequest::Callback callback, std::error_code ec);
   void notifyClients(std::deque<std::unique_ptr<WalletLegacyEvent> >& events);
   void notifyIfBalanceChanged();
   void notifyIfDepositBalanceChanged();
   void notifyIfInvestmentBalanceChanged();
-
   std::unique_ptr<WalletLegacyEvent> getActualInvestmentBalanceChangedEvent();
   std::unique_ptr<WalletLegacyEvent> getPendingInvestmentBalanceChangedEvent();
-
   std::unique_ptr<WalletLegacyEvent> getActualDepositBalanceChangedEvent();
   std::unique_ptr<WalletLegacyEvent> getPendingDepositBalanceChangedEvent();
-
+  void notifyIfHeatBalanceChanged();
+  std::unique_ptr<WalletLegacyEvent> getActualHeatBalanceChangedEvent();
+  std::unique_ptr<WalletLegacyEvent> getPendingHeatBalanceChangedEvent();
   std::unique_ptr<WalletLegacyEvent> getActualBalanceChangedEvent();
   std::unique_ptr<WalletLegacyEvent> getPendingBalanceChangedEvent();
-
   uint64_t calculateActualDepositBalance();
   uint64_t calculateActualInvestmentBalance();
+  uint64_t calculateActualHeatBalance();
   uint64_t calculatePendingDepositBalance();
   uint64_t calculatePendingInvestmentBalance();
+  uint64_t calculatePendingHeatBalance();
   uint64_t getWalletMaximum();
-  uint64_t dustBalance();
+  uint64_t dustBalance() override;
 
   uint64_t calculateActualBalance();
   uint64_t calculatePendingBalance();
@@ -183,12 +195,7 @@ private:
   std::vector<uint32_t> getTransactionHeights(std::vector<TransactionOutputInformation> transfers);
 
   // Burn transaction management
-  void initializeBurnTransactionManager();
-  void setBurnTransactionCallbacks();
-  void processTransactionForBurnDetection(const std::string& txHash, const std::vector<uint8_t>& txExtra, uint64_t amount);
-  bool isBurnTransaction(const std::vector<uint8_t>& txExtra);
-  BurnTransactionHandler::BurnTransactionData parseBurnTransaction(const std::vector<uint8_t>& txExtra);
-  void generateStarkProofForBurn(const std::string& txHash, const std::string& ethAddress, uint64_t amount);
+  // Deprecated BPDF/STARK methods removed (C3/C8 security fixes)
 
 
 
@@ -216,6 +223,8 @@ private:
   std::atomic<uint64_t> m_lastNotifiedPendingDepositBalance;
   std::atomic<uint64_t> m_lastNotifiedActualInvestmentBalance;
   std::atomic<uint64_t> m_lastNotifiedPendingInvestmentBalance;
+  std::atomic<uint64_t> m_lastNotifiedActualHeatBalance;
+  std::atomic<uint64_t> m_lastNotifiedPendingHeatBalance;
 
   // Burn deposit secrets storage
   struct BurnDepositSecret {
@@ -230,6 +239,7 @@ private:
   };
 
   std::map<std::string, BurnDepositSecret> m_burnDepositSecrets;
+  std::map<std::string, AfkLockSecret> m_afkLockSecrets;
 
   // Pending burn deposit secrets (before transaction hash is known)
   Crypto::SecretKey m_pendingBurnSecret;
@@ -258,8 +268,6 @@ private:
 
   std::unique_ptr<SyncStarter> m_onInitSyncStarter;
 
-  // Burn transaction management
-  std::unique_ptr<CryptoNote::BurnTransactionManager> m_burnTransactionManager;
 };
 
 } //namespace CryptoNote

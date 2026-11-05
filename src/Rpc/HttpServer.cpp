@@ -96,10 +96,15 @@ void HttpServer::acceptLoop() {
     for (;;) {
       HttpRequest req;
       HttpResponse resp;
-	  resp.addHeader("Access-Control-Allow-Origin", "*");
-	  resp.addHeader("content-type", "application/json");
+      // No default CORS: a wildcard Access-Control-Allow-Origin would let any
+      // website issue RPC calls to the daemon (CSRF). CORS is opt-in via
+      // RpcServer::enableCors, which sets a configurable allow-origin domain.
+      resp.addHeader("content-type", "application/json");
 
       parser.receiveRequest(stream, req);
+      // Stamp the TCP-layer peer IP so RpcServer rate limiting can key on it.
+      // This is the only trusted source; X-Forwarded-For is not consulted.
+      req.addHeader("X-Remote-Addr", addr.first.toDottedDecimal());
 				if (authenticate(req)) {
 					processRequest(req, resp);
 				}

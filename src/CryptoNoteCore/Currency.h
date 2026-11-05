@@ -22,10 +22,12 @@
 #include <vector>
 #include <boost/utility.hpp>
 #include "../CryptoNoteConfig.h"
+#include "CdClaimEstimate.h"
 #include "../crypto/hash.h"
 #include "../Logging/LoggerRef.h"
 #include "CryptoNoteBasic.h"
 #include "Difficulty.h"
+#include "AssetType.h"
 
 namespace CryptoNote {
 
@@ -108,37 +110,8 @@ public:
     }
   }
 
-  // Dynamic ring ct calculation based on available outputs
-  size_t calculateOptimalRingSize(uint64_t amount, size_t availableOutputs, uint8_t blockMajorVersion) const {
-    if (blockMajorVersion < BLOCK_MAJOR_VERSION_10) {
-      return minMixin(blockMajorVersion); // Use legacy for older versions
-    }
-
-    // Standard privacy: aim for larger ring sizes when possible
-    size_t minRingSize = minMixin(blockMajorVersion); // Minimum: 8 at v10+
-    size_t maxRingSize = maxMixin(); // Maximum: 18
-
-    // For BlockMajorVersion 10+, never go below ring size 8
-    // If insufficient outputs for ring ct 8, this is handled by the caller
-    if (availableOutputs < minRingSize) {
-      // indicates insufficient outputs - caller should handle this error
-
-      return 0; // Signal to caller that ring ct 8 is not achievable - direct user to run optimizer
-    }
-
-    // Target ring sizes in order of preference
-    std::vector<size_t> targetRingSizes = {18, 15, 12, 11, 10, 9, 8};
-
-    // Find the largest achievable ring size
-    for (size_t targetSize : targetRingSizes) {
-      if (targetSize <= availableOutputs && targetSize <= maxRingSize) {
-        return targetSize;
-      }
-    }
-
-    // Fall back to standard if no targets are achievable
-    return minRingSize;
-  }
+  // Dynamic ring size calculation — use DynamicRingSizeCalculator::calculateOptimalRingSize
+  // (in src/CryptoNoteCore/DynamicRingSize.cpp) which targets {32, 16, 8} ring sizes.
 
   size_t maxMixin() const { return m_maxMixin; }
   size_t numberOfDecimalPlaces() const { return m_numberOfDecimalPlaces; }
@@ -153,8 +126,8 @@ public:
   // Dynamic minimum fee based on block size
   uint64_t dynamicMinimumFee(size_t currentBlockSize, size_t medianBlockSize, uint8_t blockMajorVersion) const;
 
-  // Calculate banking fee: 0.1% per active EFier (dynamic rate)
-  uint64_t calculateBankingFee(uint64_t depositAmount, uint32_t activeEfierCount) const;
+  // Calculate banking fee: 0.1% (dynamic rate)
+  uint64_t calculateBankingFee(uint64_t depositAmount) const;
 
   uint64_t defaultDustThreshold() const { return m_defaultDustThreshold; }
   uint64_t difficultyTarget_DRGL() const { return m_difficultyTarget_DRGL; }
@@ -174,13 +147,8 @@ public:
     {
       if (blockMajorVersion >= BLOCK_MAJOR_VERSION_10)
       {
-        // v10+: LWMA-1 with N=39. Provide N+1=40 timestamps.
+        // v10+: LWMA-1 with N=36. Provide N+1=37 timestamps.
         return 40;
-      }
-      else if (blockMajorVersion >= BLOCK_MAJOR_VERSION_7)
-      {
-        // v7-v9: single-window LWMA, DIFFICULTY_WINDOW_V4=45 is correct here
-        return difficultyBlocksCount4() + 1;
       }
       else if (blockMajorVersion >= BLOCK_MAJOR_VERSION_3)
       {
@@ -204,6 +172,8 @@ public:
     uint32_t depositMinTerm() const { return m_depositMinTerm; }
     uint32_t depositMaxTerm() const { return m_depositMaxTerm; }
 
+  uint32_t bootstrapBlocks() const { return m_bootstrapBlocks; }
+
   size_t maxBlockSizeInitial() const { return m_maxBlockSizeInitial; }
   uint64_t maxBlockSizeGrowthSpeedNumerator() const { return m_maxBlockSizeGrowthSpeedNumerator; }
   uint64_t maxBlockSizeGrowthSpeedDenominator() const { return m_maxBlockSizeGrowthSpeedDenominator; }
@@ -226,6 +196,13 @@ public:
   uint64_t numberOfPeriodsToForgetTxDeletedFromPool() const { return m_numberOfPeriodsToForgetTxDeletedFromPool; }
 
   uint32_t upgradeHeight(uint8_t majorVersion) const;
+  // First height at which HEAT CDs may be created and earn interest. Mainnet:
+  // parameters::CD_ACTIVATION_HEIGHT. Testnet: its v11 height, so CDs keep
+  // being exercised there and its existing history stays valid.
+  uint32_t cdActivationHeight() const;
+  // First height at which a pre-v11 block may not carry HEAT, Hearth or
+  // legacy-burn tags (parameters::HEATWAVE_TAG_CUTOFF_HEIGHT; testnet: v11).
+  uint32_t heatwaveTagCutoffHeight() const;
   uint8_t blockMajorVersionAtHeight(uint32_t height) const;
   unsigned int upgradeVotingThreshold() const { return m_upgradeVotingThreshold; }
   uint32_t upgradeVotingWindow() const { return m_upgradeVotingWindow; }
@@ -255,21 +232,51 @@ public:
     // Interest functions
     uint64_t calculateInterest(uint64_t amount, uint32_t term, uint32_t height) const;
     // Fee-pool interest: accrued from swap fees over epochs a CD was locked
+    // term=0 skips loyalty bonus check (conservative cap); pass actual term for payout
+    // autoRolled=true compounds interest at the auto-roll boundary (doubled earning period)
+    // v11+: returns BASE interest only; loyalty bonus is paid from Bonus Vault via calculateCdBonus().
     uint64_t calculateCdInterest(uint64_t amount, uint32_t creationHeight,
                                   uint32_t currentHeight,
-                                  const CommitmentIndex& commitmentIndex) const;
+                                  const CommitmentIndex& commitmentIndex,
+                                  uint32_t term = 0,
+                                  bool autoRolled = false) const;
+    // v11+: Bonus Vault yield floor. For each credited epoch whose fee rate
+    // fell below CD_YIELD_FLOOR_RATE, tops the CD up to the floor. Paid from
+    // the BONUS_VAULT partition, so payouts never exceed realized inflows.
+    uint64_t calculateCdBonus(uint64_t amount, uint32_t creationHeight,
+                               uint32_t currentHeight,
+                               const CommitmentIndex& commitmentIndex,
+                               uint32_t term) const;
+    // Last epoch a CD is credited for. calculateCdInterest and
+    // calculateCdBonus pay epochs [creationHeight / D, this], and the v11+
+    // epoch-rate denominator counts the CD over exactly the same window.
+    uint64_t cdLastCreditedEpoch(uint32_t creationHeight, uint32_t term) const;
     uint64_t calculateTotalTransactionInterest(const Transaction &tx, uint32_t height) const;
     uint64_t getTransactionInputAmount(const TransactionInput &in, uint32_t height) const;
     uint64_t getTransactionAllInputsAmount(const Transaction &tx, uint32_t height) const;
+    // Same total as getTransactionAllInputsAmount, but reports aggregate
+    // uint64 overflow instead of wrapping. A wrapped total read as a small
+    // funded number to every caller that compares inputs against outputs.
+    bool getTransactionAllInputsAmountChecked(const Transaction &tx, uint32_t height, uint64_t &total) const;
+    // Sums claimedInterest across all TransactionInputCommitmentSpend inputs of a tx.
+    // Returns false on uint64 overflow. Used by the block-validation aggregate
+    // fee-pool cap that backs CD interest (see Blockchain.cpp, F-001 fix).
+    bool sumCommitmentClaimedInterest(const Transaction &tx, uint64_t &total) const;
     bool getTransactionFee(const Transaction &tx, uint64_t &fee, uint32_t height) const;
     uint64_t getTransactionFee(const Transaction &tx, uint32_t height) const;
+
+    static AssetType classifyOutputAsset(const TransactionOutputTarget& target, uint32_t term);
+    // Asset of a TransactionOutputCommitment by its term. The single mapping
+    // for both sides of the per-asset balance: an output is minted as this
+    // asset, and spending it must present the same asset.
+    static AssetType classifyCommitmentTermAsset(uint32_t term);
+    AssetBalance getTransactionOutputAssetAmounts(const Transaction& tx) const;
   size_t maxBlockCumulativeSize(uint64_t height) const;
 
   bool constructMinerTx(uint8_t blockMajorVersion, uint32_t height, size_t medianSize, uint64_t alreadyGeneratedCoins, size_t currentBlockSize,
                           uint64_t fee, const AccountPublicAddress &minerAddress, Transaction &tx,
                           const BinaryArray &extraNonce = BinaryArray(), size_t maxOuts = 1, uint64_t burnedCoinsOverride = UINT64_MAX,
-                          uint64_t bankingFeesInBlock = 0,
-                          const std::vector<std::pair<AccountPublicAddress, uint64_t>> &efierRewards = {}) const;
+                          uint64_t bankingFeesInBlock = 0) const;
 
   bool isFusionTransaction(const Transaction &transaction) const;
   bool isFusionTransaction(const Transaction &transaction, size_t size) const;
@@ -286,11 +293,6 @@ public:
   uint64_t getBurnDepositLargeAmount() const { return m_burnDepositLargeAmount; }
   uint32_t getDepositTermForever() const { return m_depositTermForever; }
   uint32_t getDepositTermBurn() const { return m_depositTermForever; }  // Alias for compatibility
-
-  // HEAT token conversion methods
-  uint64_t convertXfgToHeat(uint64_t xfgAmount) const;
-  uint64_t convertHeatToXfg(uint64_t heatAmount) const;
-  uint64_t getHeatConversionRate() const { return m_heatConversionRate; }
 
   // Money supply methods
   uint64_t getBaseMoneySupply() const { return m_baseMoneySupply; }
@@ -320,6 +322,13 @@ public:
   std::string formatAmount(uint64_t amount) const;
   std::string formatAmount(int64_t amount) const;
   bool parseAmount(const std::string &str, uint64_t &amount) const;
+
+  // EUR display — all public-facing USD values shown in EUR
+  // GENIUS Act / Clarity Act compliance: HEAT is not pegged to USD,
+  // it targets constant purchasing power via CPI-adjusted band.
+  //   usdCents: USD value in cents (e.g. 150 = $1.50)
+  //   returns: EUR string (e.g. "€1.38")
+  std::string toEuroDisplay(uint64_t usdCents) const;
 
   difficulty_type nextDifficulty(uint32_t height, uint8_t blockMajorVersion, std::vector<uint64_t> timestamps, std::vector<difficulty_type> Difficulties) const;
   difficulty_type nextDifficultyV1(std::vector<uint64_t> timestamps, std::vector<difficulty_type> Difficulties) const;
@@ -396,9 +405,6 @@ private:
   uint64_t m_burnDepositLargeAmount;
   uint32_t m_depositTermForever;
 
-  // HEAT token conversion
-  uint64_t m_heatConversionRate;
-
   // Money supply
   uint64_t m_baseMoneySupply;
   uint64_t m_ethereal_xfg;
@@ -427,7 +433,11 @@ private:
   uint32_t m_upgradeHeightV7;
   uint32_t m_upgradeHeightV8;
   uint32_t m_upgradeHeightV9;
-  uint32_t m_upgradeHeightV10; // upgradekit
+   uint32_t m_upgradeHeightV10; // upgradekit
+    uint32_t m_upgradeHeightV11; // HearthAMM + HEAT
+    uint32_t m_upgradeHeightV12; // HEAT CDs + unified outputs
+
+  uint32_t m_bootstrapBlocks;
 
   unsigned int m_upgradeVotingThreshold;
   uint32_t m_upgradeVotingWindow;
@@ -535,9 +545,6 @@ public:
   CurrencyBuilder& burnDepositLargeAmount(uint64_t val) { m_currency.m_burnDepositLargeAmount = val; return *this; }
   CurrencyBuilder& depositTermForever(uint32_t val) { m_currency.m_depositTermForever = val; return *this; }
 
-  // HEAT conversion builder
-  CurrencyBuilder& heatConversionRate(uint64_t val) { m_currency.m_heatConversionRate = val; return *this; }
-
   // Money supply builders
   CurrencyBuilder& baseMoneySupply(uint64_t val) { m_currency.m_baseMoneySupply = val; return *this; }
   CurrencyBuilder& etherealXfg(uint64_t val) { m_currency.m_ethereal_xfg = val; return *this; }
@@ -562,6 +569,9 @@ public:
   CurrencyBuilder& upgradeHeightV8(uint64_t val) { m_currency.m_upgradeHeightV8 = static_cast<uint32_t>(val); return *this; }
   CurrencyBuilder& upgradeHeightV9(uint64_t val) { m_currency.m_upgradeHeightV9 = static_cast<uint32_t>(val); return *this; }
   CurrencyBuilder& upgradeHeightV10(uint64_t val) { m_currency.m_upgradeHeightV10 = static_cast<uint32_t>(val); return *this; }//upgradekit
+    CurrencyBuilder& upgradeHeightV11(uint64_t val) { m_currency.m_upgradeHeightV11 = static_cast<uint32_t>(val); return *this; }//HearthAMM+HEAT
+    CurrencyBuilder& upgradeHeightV12(uint64_t val) { m_currency.m_upgradeHeightV12 = static_cast<uint32_t>(val); return *this; }//CDs+unified outputs
+    CurrencyBuilder& bootstrapBlocks(uint64_t val) { m_currency.m_bootstrapBlocks = static_cast<uint32_t>(val); return *this; }
 
 
   CurrencyBuilder& upgradeVotingThreshold(unsigned int val);
@@ -581,14 +591,14 @@ public:
       publicAddressBase58Prefix(CRYPTONOTE_PUBLIC_ADDRESS_BASE58_PREFIX_TESTNET);
       subAddressBase58Prefix(CRYPTONOTE_SUBADDRESS_BASE58_PREFIX_TESTNET);
       // Set testnet-specific deposit terms
-      depositMinTerm(parameters::TESTNET_COLD_MIN_TERM);
-      depositMaxTerm(parameters::TESTNET_COLD_MAX_TERM);
+      depositMinTerm(parameters::TESTNET_CD_MIN_EPOCHS * parameters::TESTNET_EPOCH_DURATION_BLOCKS);
+      depositMaxTerm(parameters::TESTNET_CD_MAX_EPOCHS * parameters::TESTNET_EPOCH_DURATION_BLOCKS);
       // Set testnet-specific mined money unlock window
       minedMoneyUnlockWindow(parameters::CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW_TESTNET);
     } else {
       // Set mainnet deposit terms when switching from testnet to mainnet
-      depositMinTerm(parameters::COLD_MIN_TERM);
-      depositMaxTerm(parameters::COLD_MAX_TERM);
+      depositMinTerm(parameters::CD_MIN_EPOCHS * parameters::EPOCH_DURATION_BLOCKS);
+      depositMaxTerm(parameters::CD_MAX_EPOCHS * parameters::EPOCH_DURATION_BLOCKS);
       // Set mainnet mined money unlock window
       minedMoneyUnlockWindow(parameters::CRYPTONOTE_MINED_MONEY_UNLOCK_WINDOW);
     }

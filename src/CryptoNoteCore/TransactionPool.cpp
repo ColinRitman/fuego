@@ -18,7 +18,9 @@
 #include "TransactionPool.h"
 
 #include <algorithm>
+#include <cstring>
 #include <ctime>
+#include <set>
 #include <vector>
 #include <unordered_set>
 
@@ -45,6 +47,58 @@ using namespace Logging;
 
 namespace CryptoNote
 {
+  namespace
+  {
+    struct HashLess
+    {
+      bool operator()(const Crypto::Hash &a, const Crypto::Hash &b) const
+      {
+        return memcmp(a.data, b.data, sizeof(a.data)) < 0;
+      }
+    };
+
+    // What a transaction's settlement tag touches that another transaction in
+    // the same block could touch too.
+    struct PoolTouch
+    {
+      bool movesReserves = false;
+      bool hasDeposit = false;
+      bool hasWithdraw = false;
+      Crypto::Hash depositId{};
+      Crypto::Hash withdrawId{};
+    };
+
+    PoolTouch getPoolTouch(const Transaction &tx)
+    {
+      PoolTouch touch;
+      std::vector<TransactionExtraField> fields;
+      if (!parseTransactionExtra(tx.extra, fields))
+      {
+        return touch;
+      }
+      for (const auto &f : fields)
+      {
+        if (f.type() == typeid(TransactionExtraAmmSwapAuth) ||
+            f.type() == typeid(TransactionExtraLpAddAuth) ||
+            f.type() == typeid(TransactionExtraLpRemoveAuth))
+        {
+          touch.movesReserves = true;
+        }
+        else if (f.type() == typeid(TransactionExtraLimitDeposit))
+        {
+          touch.hasDeposit = true;
+          touch.depositId = boost::get<TransactionExtraLimitDeposit>(f).orderId;
+        }
+        else if (f.type() == typeid(TransactionExtraLimitWithdraw))
+        {
+          touch.hasWithdraw = true;
+          touch.withdrawId = boost::get<TransactionExtraLimitWithdraw>(f).orderId;
+        }
+      }
+      return touch;
+    }
+  }
+
 
   //---------------------------------------------------------------------------------
   // BlockTemplate
@@ -164,6 +218,36 @@ namespace CryptoNote
       return false;
     }
 
+    // DoS hardening — relay-time caps. keptByBlock=true bypasses these because
+    // the tx was already accepted into a block (we'd be re-adding during reorg);
+    // rejecting it now would corrupt mempool recovery.
+    if (!keptByBlock) {
+      // 1) Cap tx.extra: anything that isn't a natural protocol field (tx public
+      //    key, payment ID, MM tag, HEAT/AMM/DIGM commitments) is bloat the
+      //    chain has to carry forever. 4 KB is 4x headroom over real use.
+      if (tx.extra.size() > parameters::MAX_TX_EXTRA_SIZE) {
+        logger(WARNING, BRIGHT_YELLOW) << "tx " << id << " rejected: extra field "
+          << tx.extra.size() << " > " << parameters::MAX_TX_EXTRA_SIZE << " bytes";
+        tvc.m_verification_failed = true;
+        return false;
+      }
+
+      // 2) Cap total mempool bytes. Without this, a low-fee flood exhausts daemon
+      //    RAM. blobSize is summed across all pooled txs; reject if adding this
+      //    one would exceed MEMPOOL_SIZE_LIMIT.
+      size_t current_pool_bytes = 0;
+      for (const auto& item : m_transactions) {
+        current_pool_bytes += item.blobSize;
+      }
+      if (current_pool_bytes + blobSize > parameters::MEMPOOL_SIZE_LIMIT) {
+        logger(WARNING, BRIGHT_YELLOW) << "tx " << id << " rejected: mempool full ("
+          << (current_pool_bytes + blobSize) << " > " << parameters::MEMPOOL_SIZE_LIMIT
+          << " bytes; pool has " << m_transactions.size() << " txs)";
+        tvc.m_verification_failed = true;
+        return false;
+      }
+    }
+
     bool isWithdrawalTransaction = false;
 
     for (const auto &in : tx.inputs)
@@ -175,14 +259,16 @@ namespace CryptoNote
       }
     }
 
-    uint64_t inputs_amount = m_currency.getTransactionAllInputsAmount(tx, height);   
-    uint64_t outputs_amount = get_outs_money_amount(tx);
-
-    logger(DEBUGGING, WHITE) << "Processing tx " << id << " with inputs of " << inputs_amount << " and outputs of " << outputs_amount;
-
-    if (outputs_amount > inputs_amount)
+    // The fee this transaction adds to the coinbase, by the next block's rules
+    // (Blockchain::checkTransactionSettlement). v11+ checks its settlement
+    // against the tip and takes the XFG surplus; before v11 it is inputs minus
+    // outputs. Admitting outputs above inputs for mint and swap tags let the
+    // fee underflow into the block template's coinbase.
+    uint64_t fee = 0;
+    if (!m_validator.checkTransactionSettlement(tx, fee))
     {
-      logger(WARNING, BRIGHT_YELLOW) << "Transaction, with id " << id << " uses more money then it has: uses " << m_currency.formatAmount(outputs_amount) << ", has " << m_currency.formatAmount(inputs_amount);
+      logger(WARNING, BRIGHT_YELLOW) << "Transaction " << id
+                                     << " rejected: outputs exceed inputs or its settlement is invalid";
       tvc.m_verification_failed = true;
       return false;
     }
@@ -195,7 +281,6 @@ namespace CryptoNote
       ttl.ttl = 0;
     }
 
-    const uint64_t fee = inputs_amount - outputs_amount;
     bool isFusionTransaction = fee == 0 && m_currency.isFusionTransaction(tx, blobSize);
 
     if (ttl.ttl != 0 && !keptByBlock)
@@ -526,6 +611,8 @@ namespace CryptoNote
 
     BlockTemplate blockTemplate;
 
+    bool reservesMoved = false;
+    std::set<Crypto::Hash, HashLess> depositIds, withdrawIds;
     for (auto it = m_fee_index.rbegin(); it != m_fee_index.rend(); ++it)
     {
       const auto &txd = *it;
@@ -535,13 +622,25 @@ namespace CryptoNote
         continue;
       }
 
-      uint64_t inputs_amount = m_currency.getTransactionAllInputsAmount(txd.tx, height);
-      uint64_t outputs_amount = get_outs_money_amount(txd.tx);
-
-      if (outputs_amount > inputs_amount)
+      // Re-check against the current tip: v11 settlement reads pool and order
+      // state that moves every block, and the fee must be the one pushBlock
+      // will count for this transaction.
+      uint64_t txFee = 0;
+      if (!m_validator.checkTransactionSettlement(txd.tx, txFee))
       {
-        logger(WARNING, BRIGHT_YELLOW) << "Transaction, with id " << txd.id << " uses more money than it has: uses " << m_currency.formatAmount(outputs_amount) << ", has " << m_currency.formatAmount(inputs_amount)
-                                       << " and will not be included in the block template";
+        logger(DEBUGGING) << "Transaction " << txd.id << " no longer settles and will not be included in the block template";
+        continue;
+      }
+      // Each candidate is checked against the tip alone, so the template keeps
+      // candidates from depending on each other: one transaction that moves
+      // the reserves (swap, LP add or remove) — a second would be priced
+      // against reserves the first already moved — and each order id placed or
+      // withdrawn once.
+      const PoolTouch touch = getPoolTouch(txd.tx);
+      if ((touch.movesReserves && reservesMoved) ||
+          (touch.hasDeposit && depositIds.count(touch.depositId)) ||
+          (touch.hasWithdraw && withdrawIds.count(touch.withdrawId)))
+      {
         continue;
       }
 
@@ -557,7 +656,10 @@ namespace CryptoNote
       if (ready && blockTemplate.addTransaction(txd.id, txd.tx))
       {
         total_size += txd.blobSize;
-        fee += txd.fee;
+        fee += txFee;
+        reservesMoved = reservesMoved || touch.movesReserves;
+        if (touch.hasDeposit) depositIds.insert(touch.depositId);
+        if (touch.hasWithdraw) withdrawIds.insert(touch.withdrawId);
         logger(DEBUGGING) << "Transaction " << txd.id << " included in the block template";
       }
       else
@@ -793,6 +895,66 @@ namespace CryptoNote
           m_spentOutputs.erase(output);
         }
       }
+      else if (in.type() == typeid(TransactionInputCommitmentSpend))
+      {
+        const auto &cin = boost::get<TransactionInputCommitmentSpend>(in);
+        auto it = m_spent_key_images.find(cin.keyImage);
+        if (!(it != m_spent_key_images.end()))
+        {
+          logger(ERROR, BRIGHT_RED) << "failed to find commitment spend input in key images. img=" << cin.keyImage << std::endl
+                                    << "transaction id = " << tx_id;
+          return false;
+        }
+        std::unordered_set<Crypto::Hash> &key_image_set = it->second;
+        if (!(!key_image_set.empty()))
+        {
+          logger(ERROR, BRIGHT_RED) << "empty key_image set (commitment spend), img=" << cin.keyImage << std::endl
+                                    << "transaction id = " << tx_id;
+          return false;
+        }
+        auto it_in_set = key_image_set.find(tx_id);
+        if (!(it_in_set != key_image_set.end()))
+        {
+          logger(ERROR, BRIGHT_RED) << "transaction id not found in key_image set (commitment spend), img=" << cin.keyImage << std::endl
+                                    << "transaction id = " << tx_id;
+          return false;
+        }
+        key_image_set.erase(it_in_set);
+        if (key_image_set.empty())
+        {
+          m_spent_key_images.erase(it);
+        }
+      }
+      else if (in.type() == typeid(TransactionInputCommitmentTransfer))
+      {
+        const auto &xfer = boost::get<TransactionInputCommitmentTransfer>(in);
+        auto it = m_spent_key_images.find(xfer.keyImage);
+        if (!(it != m_spent_key_images.end()))
+        {
+          logger(ERROR, BRIGHT_RED) << "failed to find commitment transfer input in key images. img=" << xfer.keyImage << std::endl
+                                    << "transaction id = " << tx_id;
+          return false;
+        }
+        std::unordered_set<Crypto::Hash> &key_image_set = it->second;
+        if (!(!key_image_set.empty()))
+        {
+          logger(ERROR, BRIGHT_RED) << "empty key_image set (commitment transfer), img=" << xfer.keyImage << std::endl
+                                    << "transaction id = " << tx_id;
+          return false;
+        }
+        auto it_in_set = key_image_set.find(tx_id);
+        if (!(it_in_set != key_image_set.end()))
+        {
+          logger(ERROR, BRIGHT_RED) << "transaction id not found in key_image set (commitment transfer), img=" << xfer.keyImage << std::endl
+                                    << "transaction id = " << tx_id;
+          return false;
+        }
+        key_image_set.erase(it_in_set);
+        if (key_image_set.empty())
+        {
+          m_spent_key_images.erase(it);
+        }
+      }
     }
 
     return true;
@@ -833,6 +995,44 @@ namespace CryptoNote
           assert(r.second);
         }
       }
+      else if (in.type() == typeid(TransactionInputCommitmentSpend))
+      {
+        const auto &cin = boost::get<TransactionInputCommitmentSpend>(in);
+        std::unordered_set<Crypto::Hash> &kei_image_set = m_spent_key_images[cin.keyImage];
+        if (!(keptByBlock || kei_image_set.size() == 0))
+        {
+          logger(ERROR, BRIGHT_RED)
+              << "internal error: keptByBlock=" << keptByBlock
+              << ",  kei_image_set.size()=" << kei_image_set.size() << ENDL
+              << "cin.keyImage=" << cin.keyImage << ENDL << "tx_id=" << id;
+          return false;
+        }
+        auto ins_res = kei_image_set.insert(id);
+        if (!(ins_res.second))
+        {
+          logger(ERROR, BRIGHT_RED) << "internal error: try to insert duplicate iterator in key_image set";
+          return false;
+        }
+      }
+      else if (in.type() == typeid(TransactionInputCommitmentTransfer))
+      {
+        const auto &xfer = boost::get<TransactionInputCommitmentTransfer>(in);
+        std::unordered_set<Crypto::Hash> &kei_image_set = m_spent_key_images[xfer.keyImage];
+        if (!(keptByBlock || kei_image_set.size() == 0))
+        {
+          logger(ERROR, BRIGHT_RED)
+              << "internal error: keptByBlock=" << keptByBlock
+              << ",  kei_image_set.size()=" << kei_image_set.size() << ENDL
+              << "xfer.keyImage=" << xfer.keyImage << ENDL << "tx_id=" << id;
+          return false;
+        }
+        auto ins_res = kei_image_set.insert(id);
+        if (!(ins_res.second))
+        {
+          logger(ERROR, BRIGHT_RED) << "internal error: try to insert duplicate iterator in key_image set";
+          return false;
+        }
+      }
     }
 
     return true;
@@ -855,6 +1055,22 @@ namespace CryptoNote
       {
         const auto &msig = boost::get<MultisignatureInput>(in);
         if (m_spentOutputs.count(GlobalOutput(msig.amount, msig.outputIndex)))
+        {
+          return true;
+        }
+      }
+      else if (in.type() == typeid(TransactionInputCommitmentSpend))
+      {
+        const auto &cin = boost::get<TransactionInputCommitmentSpend>(in);
+        if (m_spent_key_images.count(cin.keyImage))
+        {
+          return true;
+        }
+      }
+      else if (in.type() == typeid(TransactionInputCommitmentTransfer))
+      {
+        const auto &xfer = boost::get<TransactionInputCommitmentTransfer>(in);
+        if (m_spent_key_images.count(xfer.keyImage))
         {
           return true;
         }

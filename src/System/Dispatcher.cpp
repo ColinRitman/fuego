@@ -92,8 +92,7 @@ namespace System {
 
     timers.clear();
     // Cancel any wake timer
-    boost::system::error_code ignored;
-    wakeTimer.cancel(ignored);
+    wakeTimer.cancel();
     wakeArmed = false;
     wakeExpiryMs = 0;
   }
@@ -149,7 +148,7 @@ namespace System {
 
   void Dispatcher::remoteSpawn(std::function<void()>&& procedure) {
     // Run spawn on the dispatcher thread via asio
-    ioContext.post([this, p = std::move(procedure)]() mutable {
+    boost::asio::post(ioContext, [this, p = std::move(procedure)]() mutable {
       this->spawn(std::move(p));
       });
   }
@@ -214,8 +213,7 @@ namespace System {
     const std::multimap<uint64_t, NativeContext*>& timers) {
     if (timers.empty()) {
       if (armed) {
-        boost::system::error_code ignored;
-        timer.cancel(ignored);
+        timer.cancel();
         armed = false;
         armedMs = 0;
       }
@@ -226,8 +224,7 @@ namespace System {
     if (!armed || earliest != armedMs) {
       using namespace std::chrono;
       auto tp = steady_clock::time_point(milliseconds(earliest));
-      boost::system::error_code ignored;
-      timer.expires_at(tp, ignored);
+      timer.expires_at(tp);
       timer.async_wait([](const boost::system::error_code&) {
         // no-op; dispatch() loop will re-check timers after run_one() returns
         });
@@ -366,9 +363,13 @@ namespace System {
   NativeContext& Dispatcher::getReusableContext() {
     if (firstReusableContext == nullptr) {
       // Create a coroutine whose first action is to publish its NativeContext
+      // Use a larger stack (4 MB) to prevent SIGBUS from hitting the guard
+      // page during deep call chains such as sendTransaction → OSPEAD pipeline.
+      boost::coroutines::attributes attrs;
+      attrs.size = 4 * 1024 * 1024;
       auto* pCoro = new coro_t::call_type([this](coro_t::yield_type& y) {
         this->contextProcedure(y);
-        });
+        }, attrs);
 
       // Start it: it yields immediately after publishing NativeContext
       (*pCoro)();

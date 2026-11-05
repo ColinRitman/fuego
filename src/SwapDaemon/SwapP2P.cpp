@@ -13,12 +13,8 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "SwapP2P.h"
+#include "Common/WinCompat.h"
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
 #include <cstring>
 #include <chrono>
 #include <algorithm>
@@ -47,9 +43,10 @@ static uint32_t readBE32(const uint8_t* src) {
 // Construction / destruction
 // ---------------------------------------------------------------------------
 
-SwapP2P::SwapP2P(uint16_t listenPort, Logging::LoggerRef& logger)
+SwapP2P::SwapP2P(uint16_t listenPort, const std::string& bindAddr, Logging::LoggerRef& logger)
   : m_listenSocket(-1)
   , m_listenPort(listenPort)
+  , m_bindAddr(bindAddr.empty() ? "127.0.0.1" : bindAddr)
   , m_running(false)
   , m_logger(logger) {
 }
@@ -70,12 +67,18 @@ bool SwapP2P::start() {
   }
 
   int optval = 1;
-  setsockopt(m_listenSocket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(optval));
+  setsockopt(m_listenSocket, SOL_SOCKET, SO_REUSEADDR,
+#ifdef _WIN32
+    reinterpret_cast<const char*>(&optval),
+#else
+    &optval,
+#endif
+    sizeof(optval));
 
   struct sockaddr_in addr;
   std::memset(&addr, 0, sizeof(addr));
   addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = INADDR_ANY;
+  addr.sin_addr.s_addr = inet_addr(m_bindAddr.c_str());
   addr.sin_port = htons(m_listenPort);
 
   if (bind(m_listenSocket, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
@@ -85,7 +88,7 @@ bool SwapP2P::start() {
     return false;
   }
 
-  if (listen(m_listenSocket, 5) < 0) {
+  if (listen(m_listenSocket, 64) < 0) {
     m_logger(Logging::ERROR) << "SwapP2P: listen failed on port " << m_listenPort;
     close(m_listenSocket);
     m_listenSocket = -1;
@@ -116,6 +119,17 @@ void SwapP2P::stop() {
     m_acceptThread.join();
   }
 
+  // Accept thread is gone, so no new workers will spawn. Drain any in-flight
+  // detached workers before returning — they hold a `this` pointer and would
+  // use-after-free if the object were destroyed while they run. Each worker
+  // exits within the per-connection SO_RCVTIMEO (30s) at the latest.
+  {
+    std::unique_lock<std::mutex> lock(m_mutex);
+    m_workersDoneCv.wait(lock, [this] {
+      return m_activeWorkers.load(std::memory_order_acquire) == 0;
+    });
+  }
+
   m_logger(Logging::INFO) << "SwapP2P: stopped";
 }
 
@@ -138,42 +152,159 @@ void SwapP2P::acceptLoop() {
       continue;
     }
 
-    // Set a receive timeout so we don't block forever on a misbehaving peer.
+    // Refuse connections beyond the worker cap so one slow peer (or a flood)
+    // can't tie up all threads or unbounded memory. The peer will retry.
+    if (m_activeWorkers.load() >= MAX_WORKERS) {
+      m_logger(Logging::WARNING) << "SwapP2P: worker cap reached ("
+        << MAX_WORKERS << "), refusing connection";
+      close(clientSock);
+      continue;
+    }
+
+    // Set a receive timeout so a misbehaving peer can't pin a worker forever.
+#ifdef _WIN32
+    DWORD rcvTimeout = 30000;
+    setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO,
+      reinterpret_cast<const char*>(&rcvTimeout), sizeof(rcvTimeout));
+#else
     struct timeval tv;
     tv.tv_sec = 30;
     tv.tv_usec = 0;
     setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
 
-    SwapMessage msg;
-    if (readFramedMessage(clientSock, msg)) {
-      char peerIp[INET_ADDRSTRLEN];
-      inet_ntop(AF_INET, &peerAddr.sin_addr, peerIp, sizeof(peerIp));
-      m_logger(Logging::DEBUGGING) << "SwapP2P: received msg type="
-        << static_cast<int>(msg.type) << " swapId=" << msg.swapId
-        << " from " << peerIp << ":" << ntohs(peerAddr.sin_port);
+    // Dispatch to a detached worker so accept() can continue immediately.
+    m_activeWorkers.fetch_add(1, std::memory_order_relaxed);
+    std::thread(&SwapP2P::handleConnection, this, clientSock).detach();
+  }
+}
 
-      // Deliver to callback if registered.
-      std::function<void(const SwapMessage&)> cb;
-      {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        cb = m_callback;
-      }
-      if (cb) {
-        cb(msg);
-      }
+void SwapP2P::handleConnection(int clientSock) {
+  SwapMessage msg;
+  if (readFramedMessage(clientSock, msg)) {
+    m_logger(Logging::DEBUGGING) << "SwapP2P: received msg type="
+      << static_cast<int>(msg.type) << " swapId=" << msg.swapId;
 
-      // Always enqueue for waitForMessage callers.
-      {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_pendingMessages.push_back(msg);
-      }
-      m_cv.notify_all();
-    } else {
-      m_logger(Logging::WARNING) << "SwapP2P: failed to read message from peer";
+    // Deliver to callback if registered.
+    std::function<void(const SwapMessage&)> cb;
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      cb = m_callback;
+    }
+    if (cb) {
+      cb(msg);
     }
 
-    close(clientSock);
+    // Always enqueue for waitForMessage callers (bounded at 1024).
+    {
+      std::lock_guard<std::mutex> lock(m_mutex);
+      if (m_pendingMessages.size() >= 1024) {
+        m_pendingMessages.pop_front();
+      }
+      m_pendingMessages.push_back(msg);
+    }
+    m_cv.notify_all();
+  } else {
+    m_logger(Logging::WARNING) << "SwapP2P: failed to read message from peer";
   }
+
+  close(clientSock);
+  if (m_activeWorkers.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+    // Last worker out — wake any stop() waiting to drain before destruction.
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_workersDoneCv.notify_all();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// connectViaSocks5 — SOCKS5 CONNECT handshake through a proxy
+// ---------------------------------------------------------------------------
+
+int SwapP2P::connectViaSocks5(const std::string& host, uint16_t port) {
+  // Parse proxy "host:port"
+  size_t colonPos = m_socks5Proxy.rfind(':');
+  if (colonPos == std::string::npos || colonPos == 0) {
+    m_logger(Logging::ERROR) << "SwapP2P: invalid SOCKS5 proxy: " << m_socks5Proxy;
+    return -1;
+  }
+  std::string proxyHost = m_socks5Proxy.substr(0, colonPos);
+  std::string proxyPortStr = m_socks5Proxy.substr(colonPos + 1);
+
+  // Connect to proxy
+  struct addrinfo hints, *result;
+  std::memset(&hints, 0, sizeof(hints));
+  hints.ai_family = AF_INET;
+  hints.ai_socktype = SOCK_STREAM;
+
+  int gai = getaddrinfo(proxyHost.c_str(), proxyPortStr.c_str(), &hints, &result);
+  if (gai != 0) {
+    m_logger(Logging::ERROR) << "SwapP2P: cannot resolve SOCKS5 proxy " << proxyHost;
+    return -1;
+  }
+
+  int sock = socket(AF_INET, SOCK_STREAM, 0);
+  if (sock < 0) {
+    freeaddrinfo(result);
+    return -1;
+  }
+
+  struct timeval tv;
+  tv.tv_sec = 15;
+  tv.tv_usec = 0;
+  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
+
+  if (connect(sock, result->ai_addr, result->ai_addrlen) < 0) {
+    m_logger(Logging::ERROR) << "SwapP2P: cannot connect to SOCKS5 proxy " << m_socks5Proxy;
+    freeaddrinfo(result);
+    close(sock);
+    return -1;
+  }
+  freeaddrinfo(result);
+
+  // SOCKS5 greeting: [0x05][0x01][0x00] (version 5, 1 auth method, no auth)
+  uint8_t greeting[3] = {0x05, 0x01, 0x00};
+  if (send(sock, reinterpret_cast<const char*>(greeting), 3, 0) != 3) {
+    close(sock);
+    return -1;
+  }
+
+  // Read greeting response: [0x05][0x00]
+  uint8_t greetingResp[2];
+  if (!recvAll(sock, greetingResp, 2) || greetingResp[0] != 0x05 || greetingResp[1] != 0x00) {
+    m_logger(Logging::ERROR) << "SwapP2P: SOCKS5 proxy rejected auth";
+    close(sock);
+    return -1;
+  }
+
+  // SOCKS5 CONNECT request
+  // [0x05][0x01][0x00][0x03][len][hostname][port_be16]
+  std::vector<uint8_t> req;
+  req.push_back(0x05); // version
+  req.push_back(0x01); // CONNECT
+  req.push_back(0x00); // reserved
+  req.push_back(0x03); // domain name
+  req.push_back(static_cast<uint8_t>(host.size()));
+  req.insert(req.end(), host.begin(), host.end());
+  req.push_back(static_cast<uint8_t>((port >> 8) & 0xFF));
+  req.push_back(static_cast<uint8_t>(port & 0xFF));
+
+  if (send(sock, reinterpret_cast<const char*>(req.data()), static_cast<int>(req.size()), 0) != static_cast<int>(req.size())) {
+    close(sock);
+    return -1;
+  }
+
+  // Read CONNECT response: [0x05][status][0x00][0x01][addr(4)][port(2)] = 10 bytes minimum
+  uint8_t connectResp[10];
+  if (!recvAll(sock, connectResp, 10) || connectResp[0] != 0x05 || connectResp[1] != 0x00) {
+    m_logger(Logging::ERROR) << "SwapP2P: SOCKS5 CONNECT failed (status="
+      << static_cast<int>(connectResp[1]) << ")";
+    close(sock);
+    return -1;
+  }
+
+  m_logger(Logging::DEBUGGING) << "SwapP2P: connected via SOCKS5 to " << host << ":" << port;
+  return sock;
 }
 
 // ---------------------------------------------------------------------------
@@ -190,39 +321,58 @@ bool SwapP2P::sendMessage(const std::string& peerEndpoint, const SwapMessage& ms
 
   std::string host = peerEndpoint.substr(0, colonPos);
   std::string portStr = peerEndpoint.substr(colonPos + 1);
+  uint16_t port = static_cast<uint16_t>(std::atoi(portStr.c_str()));
 
-  int sock = socket(AF_INET, SOCK_STREAM, 0);
-  if (sock < 0) {
-    m_logger(Logging::ERROR) << "SwapP2P: failed to create socket for send";
-    return false;
-  }
+  int sock = -1;
 
-  // Connect timeout via SO_SNDTIMEO
-  struct timeval tv;
-  tv.tv_sec = 10;
-  tv.tv_usec = 0;
-  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+  if (!m_socks5Proxy.empty()) {
+    // Route through SOCKS5 proxy (e.g. Tor)
+    sock = connectViaSocks5(host, port);
+    if (sock < 0) {
+      m_logger(Logging::ERROR) << "SwapP2P: SOCKS5 connect failed to " << peerEndpoint;
+      return false;
+    }
+  } else {
+    // Direct connection
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+      m_logger(Logging::ERROR) << "SwapP2P: failed to create socket for send";
+      return false;
+    }
 
-  // Resolve host
-  struct addrinfo hints, *result;
-  std::memset(&hints, 0, sizeof(hints));
-  hints.ai_family = AF_INET;
-  hints.ai_socktype = SOCK_STREAM;
+#ifdef _WIN32
+    DWORD timeout = 10000;
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO,
+      reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO,
+      reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+#else
+    struct timeval tv;
+    tv.tv_sec = 10;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+#endif
 
-  int gai = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
-  if (gai != 0) {
-    m_logger(Logging::ERROR) << "SwapP2P: cannot resolve " << host;
-    close(sock);
-    return false;
-  }
+    struct addrinfo hints, *result;
+    std::memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
 
-  int ret = connect(sock, result->ai_addr, result->ai_addrlen);
-  freeaddrinfo(result);
-  if (ret < 0) {
-    m_logger(Logging::ERROR) << "SwapP2P: connect failed to " << peerEndpoint;
-    close(sock);
-    return false;
+    int gai = getaddrinfo(host.c_str(), portStr.c_str(), &hints, &result);
+    if (gai != 0) {
+      m_logger(Logging::ERROR) << "SwapP2P: cannot resolve " << host;
+      close(sock);
+      return false;
+    }
+
+    int ret = connect(sock, result->ai_addr, result->ai_addrlen);
+    freeaddrinfo(result);
+    if (ret < 0) {
+      m_logger(Logging::ERROR) << "SwapP2P: connect failed to " << peerEndpoint;
+      close(sock);
+      return false;
+    }
   }
 
   std::vector<uint8_t> wire = serializeMessage(msg);
@@ -230,7 +380,7 @@ bool SwapP2P::sendMessage(const std::string& peerEndpoint, const SwapMessage& ms
   size_t remaining = wire.size();
 
   while (remaining > 0) {
-    ssize_t sent = send(sock, ptr, remaining, MSG_NOSIGNAL);
+    ssize_t sent = send(sock, reinterpret_cast<const char*>(ptr), remaining, MSG_NOSIGNAL);
     if (sent <= 0) {
       m_logger(Logging::ERROR) << "SwapP2P: send failed to " << peerEndpoint;
       close(sock);
@@ -341,8 +491,8 @@ bool SwapP2P::parseMessage(const std::vector<uint8_t>& data, SwapMessage& msg) {
   uint8_t rawType = *p++;
   remaining--;
 
-  if (rawType > static_cast<uint8_t>(SwapMsgType::SECRET_REVEAL) &&
-      rawType != static_cast<uint8_t>(SwapMsgType::ERROR)) {
+  if (rawType != static_cast<uint8_t>(SwapMsgType::ERROR) &&
+      rawType > static_cast<uint8_t>(SwapMsgType::PEER_PROTOCOL)) {
     return false;
   }
   msg.type = static_cast<SwapMsgType>(rawType);
@@ -375,7 +525,7 @@ bool SwapP2P::parseMessage(const std::vector<uint8_t>& data, SwapMessage& msg) {
 bool SwapP2P::recvAll(int sock, uint8_t* buf, size_t len) {
   size_t received = 0;
   while (received < len) {
-    ssize_t n = recv(sock, buf + received, len - received, 0);
+    ssize_t n = recv(sock, reinterpret_cast<char*>(buf + received), len - received, 0);
     if (n <= 0) {
       return false;
     }

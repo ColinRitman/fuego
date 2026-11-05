@@ -22,13 +22,14 @@
 #include "../CryptoNoteConfig.h"
 #include "../Common/CommandLine.h"
 #include "../Common/Util.h"
-#include "../Common/Math.h"
+#include "../Common/MathUtils.h"
 #include "../Common/StringTools.h"
 #include "../crypto/crypto.h"
 #include "../CryptoNoteProtocol/CryptoNoteProtocolDefinitions.h"
 #include "../Logging/LoggerRef.h"
 #include "../Rpc/CoreRpcServerCommandsDefinitions.h"
 #include "CryptoNoteFormatUtils.h"
+#include "AmmPool.h"
 
 #include "CryptoNoteTools.h"
 #include "CryptoNoteStatInfo.h"
@@ -293,23 +294,60 @@ bool core::get_stat_info(core_stat_info& st_inf) {
   return true;
 }
 
-bool core::check_tx_mixin(const Transaction& tx, uint8_t blockMajorVersion) {
+bool core::check_tx_mixin(const Transaction& tx, uint8_t blockMajorVersion, bool keeped_by_block) {
   size_t inputIndex = 0;
   for (const auto& txin : tx.inputs) {
     assert(inputIndex < tx.signatures.size());
     if (txin.type() == typeid(KeyInput)) {
-      uint64_t txMixin = boost::get<KeyInput>(txin).outputIndexes.size();
-            if (txMixin > m_currency.maxMixin()) {
+      uint64_t ringSize = boost::get<KeyInput>(txin).outputIndexes.size();
+      if (!keeped_by_block && ringSize > m_currency.maxMixin() + 1) {
         logger(ERROR) << "Transaction " << getObjectHash(tx) << " has too large mixIn count, rejected";
         return false;
       }
-      if (blockMajorVersion >= BLOCK_MAJOR_VERSION_7 && txMixin < m_currency.minMixin(blockMajorVersion)) {
-        logger(ERROR) << "Transaction " << getObjectHash(tx) << " has mixIn count " << txMixin
+      if (!keeped_by_block && blockMajorVersion >= BLOCK_MAJOR_VERSION_7 && ringSize < m_currency.minMixin(blockMajorVersion)) {
+        logger(ERROR) << "Transaction " << getObjectHash(tx) << " has mixIn count " << ringSize
+                      << " below the required minimum " << m_currency.minMixin(blockMajorVersion)
+                      << " for block version " << (int)blockMajorVersion << ", rejected";
+        return false;
+      }
+    } else if (txin.type() == typeid(TransactionInputCommitmentSpend)) {
+      uint64_t ringSize = boost::get<TransactionInputCommitmentSpend>(txin).outputIndexes.size();
+      if (!keeped_by_block && ringSize > m_currency.maxMixin() + 1) {
+        logger(ERROR) << "Transaction " << getObjectHash(tx) << " has too large commitment spend ring size, rejected";
+        return false;
+      }
+      if (!keeped_by_block && blockMajorVersion >= BLOCK_MAJOR_VERSION_10 && ringSize < m_currency.minMixin(blockMajorVersion)) {
+        logger(ERROR) << "Transaction " << getObjectHash(tx) << " has commitment spend ring size " << ringSize
+                      << " below the required minimum " << m_currency.minMixin(blockMajorVersion)
+                      << " for block version " << (int)blockMajorVersion << ", rejected";
+        return false;
+      }
+    } else if (txin.type() == typeid(TransactionInputCommitmentTransfer)) {
+      uint64_t ringSize = boost::get<TransactionInputCommitmentTransfer>(txin).outputIndexes.size();
+      if (!keeped_by_block && ringSize > m_currency.maxMixin() + 1) {
+        logger(ERROR) << "Transaction " << getObjectHash(tx) << " has too large CD transfer ring size, rejected";
+        return false;
+      }
+      if (!keeped_by_block && blockMajorVersion >= BLOCK_MAJOR_VERSION_11 && ringSize < m_currency.minMixin(blockMajorVersion)) {
+        logger(ERROR) << "Transaction " << getObjectHash(tx) << " has CD transfer ring size " << ringSize
+                      << " below the required minimum " << m_currency.minMixin(blockMajorVersion)
+                      << " for block version " << (int)blockMajorVersion << ", rejected";
+        return false;
+      }
+    } else if (txin.type() == typeid(TransactionInputUnified)) {
+      uint64_t ringSize = boost::get<TransactionInputUnified>(txin).outputIndexes.size();
+      if (!keeped_by_block && ringSize > m_currency.maxMixin() + 1) {
+        logger(ERROR) << "Transaction " << getObjectHash(tx) << " has too large unified input ring size, rejected";
+        return false;
+      }
+      if (!keeped_by_block && blockMajorVersion >= BLOCK_MAJOR_VERSION_12 && ringSize < m_currency.minMixin(blockMajorVersion)) {
+        logger(ERROR) << "Transaction " << getObjectHash(tx) << " has unified input ring size " << ringSize
                       << " below the required minimum " << m_currency.minMixin(blockMajorVersion)
                       << " for block version " << (int)blockMajorVersion << ", rejected";
         return false;
       }
     }
+    inputIndex++;
   }
   return true;
 }
@@ -369,10 +407,59 @@ bool core::check_tx_semantic(const Transaction& tx, bool keeped_by_block, uint32
     return false;
   }
 
-  uint64_t amount_in = m_currency.getTransactionAllInputsAmount(tx, height);
+  uint64_t amount_in = 0;
+  if (!m_currency.getTransactionAllInputsAmountChecked(tx, height, amount_in)) {
+    logger(ERROR) << "tx input total overflow, rejected for tx id= " << getObjectHash(tx);
+    return false;
+  }
   uint64_t amount_out = get_outs_money_amount(tx);
 
-  if (amount_in < amount_out) {
+  // Parse extra tags for per-asset conservation check
+  bool hasAmmSwapAuth = false;
+  uint8_t ammSwapDirection = 0;
+  bool hasHeatMintAuth = false;
+  std::vector<TransactionExtraField> tx_extra_fields;
+  if (parseTransactionExtra(tx.extra, tx_extra_fields)) {
+    for (const auto& field : tx_extra_fields) {
+      if (field.type() == typeid(TransactionExtraAmmSwapAuth)) {
+        hasAmmSwapAuth = true;
+        ammSwapDirection = boost::get<TransactionExtraAmmSwapAuth>(field).direction;
+        break;
+      }
+      if (field.type() == typeid(TransactionExtraHeatMintAuth)) {
+        hasHeatMintAuth = true;
+        break;
+      }
+    }
+  }
+
+  if (hasAmmSwapAuth || hasHeatMintAuth) {
+    // AMM swap or HEAT mint: check per-asset conservation instead of aggregate.
+    // HEAT mint is equivalent to direction 0 (XFG→HEAT): XFG inputs cover XFG outputs + fee, HEAT is minted.
+    // AMM direction 0 (XFG→HEAT): XFG inputs must cover XFG outputs + fee.
+    // AMM direction 1 (HEAT→XFG): HEAT inputs must cover HEAT outputs.
+    AssetBalance inAssets = get_blockchain_storage().getTransactionInputAssetAmounts(tx, height);
+    AssetBalance outAssets = m_currency.getTransactionOutputAssetAmounts(tx);
+    uint64_t fee = amount_in < amount_out ? m_currency.minimumFee() : amount_in - amount_out;
+
+    if (hasHeatMintAuth || ammSwapDirection == 0) {
+      // XFG→HEAT: XFG conservation (HEAT is minted, no HEAT inputs expected)
+      if (inAssets.xfg < outAssets.xfg + fee) {
+        logger(ERROR) << "tx XFG conservation violated for " << (hasHeatMintAuth ? "HEAT mint" : "AMM swap")
+                      << ": xfg_in=" << inAssets.xfg << " xfg_out=" << outAssets.xfg << " fee=" << fee
+                      << " rejected for tx id= " << getObjectHash(tx);
+        return false;
+      }
+    } else {
+      // HEAT→XFG: HEAT conservation (XFG is minted, no XFG inputs expected)
+      if (inAssets.heat < outAssets.heat) {
+        logger(ERROR) << "tx HEAT conservation violated for AMM swap: heat_in=" << inAssets.heat
+                      << " heat_out=" << outAssets.heat
+                      << " rejected for tx id= " << getObjectHash(tx);
+        return false;
+      }
+    }
+  } else if (amount_in < amount_out) {
     logger(ERROR) << "tx with wrong amounts: ins " << amount_in << ", outs " << amount_out << ", rejected for tx id= " << getObjectHash(tx);
     return false;
   }
@@ -386,6 +473,49 @@ bool core::check_tx_semantic(const Transaction& tx, bool keeped_by_block, uint32
   if (!checkMultisignatureInputsDiff(tx)) {
     logger(ERROR) << "tx has a few multisignature inputs with identical output indexes";
     return false;
+  }
+
+  if (!checkSwapEscrowInputsDiff(tx)) {
+    logger(ERROR) << "tx has duplicate swap escrow inputs";
+    return false;
+  }
+
+  // Determine block major version from the given height
+  uint8_t blockMajorVersion = BLOCK_MAJOR_VERSION_1;
+  uint8_t versionsToCheck[] = {
+    BLOCK_MAJOR_VERSION_11, BLOCK_MAJOR_VERSION_10, BLOCK_MAJOR_VERSION_9,
+    BLOCK_MAJOR_VERSION_8, BLOCK_MAJOR_VERSION_7, BLOCK_MAJOR_VERSION_6,
+    BLOCK_MAJOR_VERSION_5, BLOCK_MAJOR_VERSION_4, BLOCK_MAJOR_VERSION_3,
+    BLOCK_MAJOR_VERSION_2
+  };
+  for (auto v : versionsToCheck) {
+    uint32_t uh = m_currency.upgradeHeight(v);
+    if (uh != UpgradeDetectorBase::UNDEF_HEIGHT && height >= uh) {
+      blockMajorVersion = v;
+      break;
+    }
+  }
+  if (!check_tx_mixin(tx, blockMajorVersion, keeped_by_block)) {
+    logger(ERROR) << "tx with invalid mixin, rejected for tx id= " << getObjectHash(tx);
+    return false;
+  }
+
+  // Swap-escrow inputs/outputs are a v11 (HEATWAVE) consensus feature.
+  // Reject them on pre-v11 blocks so old nodes and new nodes stay in sync
+  // during the upgrade window.
+  if (blockMajorVersion < BLOCK_MAJOR_VERSION_11) {
+    for (const auto& in : tx.inputs) {
+      if (in.type() == typeid(TransactionInputSwapEscrow)) {
+        logger(ERROR) << "Swap escrow input before v11 rejected";
+        return false;
+      }
+    }
+    for (const auto& out : tx.outputs) {
+      if (out.target.type() == typeid(TransactionOutputSwapEscrow)) {
+        logger(ERROR) << "Swap escrow output before v11 rejected";
+        return false;
+      }
+    }
   }
 
   return true;
@@ -424,6 +554,41 @@ bool core::check_tx_inputs_keyimages_diff(const Transaction& tx) {
       // so first can be zero, others can't
       if (std::find(++std::begin(in.outputIndexes), std::end(in.outputIndexes), 0) != std::end(in.outputIndexes)) {
         logger(ERROR) << "Transaction has identical output indexes";
+        return false;
+      }
+    } else if (input.type() == typeid(TransactionInputCommitmentSpend)) {
+      const auto& cin = boost::get<TransactionInputCommitmentSpend>(input);
+      if (!ki.insert(cin.keyImage).second) {
+        logger(ERROR) << "Transaction has identical commitment spend key images";
+        return false;
+      }
+      if (cin.outputIndexes.empty()) {
+        logger(ERROR) << "Transaction's commitment spend input uses empty output";
+        return false;
+      }
+    } else if (input.type() == typeid(TransactionInputCommitmentTransfer)) {
+      const auto& xfer = boost::get<TransactionInputCommitmentTransfer>(input);
+      if (!ki.insert(xfer.keyImage).second) {
+        logger(ERROR) << "Transaction has identical commitment transfer key images";
+        return false;
+      }
+      if (xfer.outputIndexes.empty()) {
+        logger(ERROR) << "Transaction's commitment transfer input uses empty output";
+        return false;
+      }
+    } else if (input.type() == typeid(TransactionInputSwapEscrow)) {
+      const auto& escrow = boost::get<TransactionInputSwapEscrow>(input);
+      if (!ki.insert(escrow.keyImage).second) {
+        logger(ERROR) << "Transaction has identical swap escrow key images";
+        return false;
+      }
+      static const Crypto::Hash ZERO_HASH{};
+      if (std::memcmp(&escrow.escrowTxId, &ZERO_HASH, sizeof(Crypto::Hash)) == 0) {
+        logger(ERROR) << "Swap escrow input with zero escrow tx id";
+        return false;
+      }
+      if (escrow.mode > 1) {
+        logger(ERROR) << "Swap escrow input with invalid mode";
         return false;
       }
     }
@@ -566,36 +731,21 @@ bool core::get_block_template(Block& b, const AccountPublicAddress& adr, difficu
 
   // V10+: Compute banking fees from block template transactions for coinbase split
   uint64_t bankingFeesInBlock = 0;
-  std::vector<std::pair<AccountPublicAddress, uint64_t>> efierRewards;
   if (b.majorVersion >= BLOCK_MAJOR_VERSION_10) {
     // Fetch transactions from mempool to compute banking fees
     std::vector<Transaction> blockTxs;
     std::vector<Crypto::Hash> missed;
     m_mempool.getTransactions(b.transactionHashes, blockTxs, missed);
-    uint32_t activeEfCount = m_blockchain.getActiveEfierCount();
-    bankingFeesInBlock = Blockchain::computeBankingFeesFromTransactions(blockTxs, activeEfCount);
+    bankingFeesInBlock = Blockchain::computeBankingFeesFromTransactions(blockTxs);
 
-    // Swap fee share: per-block drip from 20% of last epoch's swap fees
-    uint64_t efierSwapReward = m_blockchain.getEfierSwapRewardPerBlock();
-
-    // Total EFier input = banking fees (from miner) + swap reward (from fee pool)
-    uint64_t totalEfierInput = bankingFeesInBlock + efierSwapReward;
-
-    // Per-block EFier distribution: split among active EFiers
-    if (totalEfierInput > 0) {
-      efierRewards = m_blockchain.getCommitmentIndex().computePerBlockEfierRewards(totalEfierInput, b.previousBlockHash);
-    }
-
-    if (bankingFeesInBlock > 0 || !efierRewards.empty()) {
-      logger(DEBUGGING) << "Block template banking fees: " << bankingFeesInBlock
-        << ", swap reward: " << efierSwapReward
-        << ", EFier rewards: " << efierRewards.size() << " outputs";
+    if (bankingFeesInBlock > 0) {
+      logger(DEBUGGING) << "Block template banking fees: " << bankingFeesInBlock;
     }
   }
 
   //make block's coinbase tx look more like real coinbase txs to get truthful blob size
   size_t maxCoinbaseOuts = (b.majorVersion >= BLOCK_MAJOR_VERSION_11) ? 33 : 11;
-  bool r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, txs_size, fee, adr, b.baseTransaction, ex_nonce, maxCoinbaseOuts, burnedCoins, bankingFeesInBlock, efierRewards);
+  bool r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, txs_size, fee, adr, b.baseTransaction, ex_nonce, maxCoinbaseOuts, burnedCoins, bankingFeesInBlock);
   if (!r) {
     logger(ERROR, BRIGHT_RED) << "Failed to construct miner tx, first chance";
     return false;
@@ -607,7 +757,7 @@ bool core::get_block_template(Block& b, const AccountPublicAddress& adr, difficu
     logger(TRACE) << "constructMinerTx attempt " << try_count << ": height=" << height << ", majorVersion=" << (int)b.majorVersion
       << ", median_size=" << median_size << ", cumulative_size=" << cumulative_size
       << ", already_generated_coins=" << already_generated_coins << ", fee=" << fee;
-    r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, cumulative_size, fee, adr, b.baseTransaction, ex_nonce, maxCoinbaseOuts, burnedCoins, bankingFeesInBlock, efierRewards);
+    r = m_currency.constructMinerTx(b.majorVersion, height, median_size, already_generated_coins, cumulative_size, fee, adr, b.baseTransaction, ex_nonce, maxCoinbaseOuts, burnedCoins, bankingFeesInBlock);
 
     if (!(r)) {
       logger(ERROR, BRIGHT_RED) << "Failed to construct miner tx, second chance. height=" << height
@@ -698,12 +848,22 @@ bool core::get_random_outs_for_amounts(const COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_
   return m_blockchain.getRandomOutsByAmount(req, res);
 }
 
-bool core::get_random_commitment_outs_for_amount(uint64_t amount, uint64_t count, std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry>& result) {
-  return m_blockchain.getRandomCommitmentOutputsForAmount(amount, count, result);
+bool core::get_random_commitment_outs_for_amount(uint64_t amount, uint64_t count, uint32_t maxHeight, std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry>& result) {
+  return m_blockchain.getRandomCommitmentOutputsForAmount(amount, count, result, maxHeight);
+}
+
+bool core::get_output_heights(const std::vector<std::pair<uint64_t, uint32_t>>& queries,
+                              std::vector<uint32_t>& heights) {
+  return m_blockchain.getOutputHeights(queries, heights);
 }
 
 bool core::get_tx_outputs_gindexs(const Crypto::Hash& tx_id, std::vector<uint32_t>& indexs) {
   return m_blockchain.getTransactionOutputGlobalIndexes(tx_id, indexs);
+}
+
+bool core::get_outs_for_amount(uint64_t amount, const std::vector<uint64_t>& indexes,
+                               std::vector<Crypto::PublicKey>& keys) {
+  return m_blockchain.getOutsByAmountAndIndexes(amount, indexes, keys);
 }
 
 bool core::getOutByMSigGIndex(uint64_t amount, uint64_t gindex, MultisignatureOutput& out) {
@@ -1339,6 +1499,15 @@ uint64_t core::getBurnedXfgAtHeight(size_t height) const {
   return m_blockchain.getBurnedXfgAtHeight(height);
 }
 
+void core::addSwapFee(uint64_t amount) {
+  m_blockchain.addSwapFee(amount);
+}
+
+void core::setXfgMarketValue(uint64_t val) {
+  // PI controller removed — XFG price is unrestrained via Hearth AMM.
+  // Callers (SwapDaemon oracle, testnet sim) still invoke this but the value is ignored.
+}
+
 // --- Commitment Index Accessors ---
 
 std::optional<CommitmentEntry> core::getCommitmentByHash(const Crypto::Hash& commitment) const {
@@ -1353,12 +1522,46 @@ const CommitmentIndex& core::getCommitmentIndex() const {
   return m_blockchain.getCommitmentIndex();
 }
 
+std::error_code core::calculateCdInterest(uint64_t amount, uint32_t creationHeight,
+                                           uint32_t currentHeight, uint64_t& outInterest,
+                                           uint32_t term,
+                                           bool autoRolled) {
+  outInterest = m_currency.calculateCdInterest(amount, creationHeight, currentHeight,
+                                               m_blockchain.getCommitmentIndex(),
+                                               term, autoRolled);
+  return {};
+}
+
+std::error_code core::getCommitmentEpochFeeRate(uint32_t epoch, uint64_t& outFeeRate) {
+  outFeeRate = m_blockchain.getCommitmentIndex().getEpochFeeRate(epoch);
+  return {};
+}
+
+std::error_code core::getAmmPoolReserves(AmmPoolReserves& out) {
+  const auto& pool = m_blockchain.getAmmPool();
+  out.reserveXfg = pool.reserveXfg;
+  out.reserveHeat = pool.reserveHeat;
+  return {};
+}
+
+uint64_t core::getHearthTwap() {
+  return m_blockchain.getRollingTwap();
+}
+
 size_t core::getCommitmentCount() const {
   return m_blockchain.getCommitmentCount();
 }
 
 size_t core::getHeatCommitmentCount() const {
   return m_blockchain.getHeatCommitmentCount();
+}
+
+uint64_t core::getTotalCdLocked() const {
+  return m_blockchain.getTotalCdLocked();
+}
+
+uint64_t core::getHeatCdFeePool() const {
+  return m_blockchain.getHeatCdFeePool();
 }
 
 size_t core::getColdCommitmentCount() const {
@@ -1373,6 +1576,22 @@ std::vector<Crypto::Hash> core::getCommitmentMerkleProof(const Crypto::Hash& com
   return m_blockchain.getCommitmentMerkleProof(commitment);
 }
 
+Crypto::Hash core::getReleaseRegistryRoot() const {
+  return m_blockchain.getReleaseRegistryRoot();
+}
+
+size_t core::getReleaseRegistryCount() const {
+  return m_blockchain.getReleaseRegistryCount();
+}
+
+std::optional<ReleaseRecord> core::findRelease(const Crypto::Hash& contentHash) const {
+  return m_blockchain.findRelease(contentHash);
+}
+
+ReleaseProof core::getReleaseProof(const Crypto::Hash& contentHash) const {
+  return m_blockchain.getReleaseProof(contentHash);
+}
+
 int64_t core::getCommitmentLeafIndex(const Crypto::Hash& commitment) const {
   return m_blockchain.getCommitmentLeafIndex(commitment);
 }
@@ -1381,30 +1600,8 @@ uint64_t core::getCommitmentHighestBlock() const {
   return m_blockchain.getCommitmentHighestBlock();
 }
 
-// Elderfier consensus accessors - delegate to Blockchain
-std::vector<uint8_t> core::getCommitmentSignedElderfierIds() const {
-  return m_blockchain.getCommitmentSignedElderfierIds();
-}
-
-std::vector<uint8_t> core::getCommitmentPendingElderfierIds() const {
-  return m_blockchain.getCommitmentPendingElderfierIds();
-}
-
-uint64_t core::getCommitmentConsensusPercentage() const {
-  return m_blockchain.getCommitmentConsensusPercentage();
-}
-
-std::vector<CommitmentIndex::ElderfierSignatureBundle> core::getSignaturesForCurrentRoot() const {
-  return m_blockchain.getSignaturesForCurrentRoot();
-}
-
-size_t core::getActiveElderfierCount() const {
-  return m_blockchain.getActiveElderfierCount();
-}
-
-// Elderfier registration lifecycle proxy
-bool core::canAddressRegisterElderfier(const std::string& address) const {
-  return m_blockchain.canAddressRegisterElderfier(address);
+std::vector<Crypto::Hash> core::getCommitmentLeaves() const {
+  return m_blockchain.getCommitmentLeaves();
 }
 
 // @ Alias system proxies
@@ -1422,6 +1619,135 @@ std::optional<AliasEntry> core::getAliasByAddress(const std::string& address) co
 
 std::vector<AliasEntry> core::getAllAliases() const {
   return m_blockchain.getAllAliases();
+}
+
+bool core::removeAlias(const std::string& alias) {
+  return m_blockchain.removeAlias(alias);
+}
+
+bool core::replaceAliasOwnership(const std::string& alias,
+                                 const Crypto::Hash& newAddressHash,
+                                 const std::string& newOwnerAddress) {
+  return m_blockchain.replaceAliasOwnership(alias, newAddressHash, newOwnerAddress);
+}
+
+core::HeatMetrics core::getHeatMetrics() const {
+  HeatMetrics m;
+  m.heatSupply = m_blockchain.getHeatSupply();
+  m.heatOnDeposit = m_blockchain.getHeatOnDeposit();
+  m.digmSupply = m_blockchain.getDigmSupply();
+  m.burnedXfg = m_blockchain.getBurnedXfgAmount();
+  m.totalBurnedXfg = m_blockchain.getTotalBurnedXfg();
+  m.permanentlyBurnedXfg = m_blockchain.getPermanentlyBurnedXfg();
+  m.heatCdFeePool = m_blockchain.getHeatCdFeePool();
+  m.swfBurnedXfgPendingHeat = m_blockchain.getSwfBurnedXfgPendingHeat();
+  const auto& pool = m_blockchain.getAmmPool();
+  if (!pool.isEmpty() && pool.reserveHeat > 0) {
+    // Pool ratio × 10^6 for precision
+    m.redemptionPriceNum = (pool.reserveXfg * 1000000ULL) / pool.reserveHeat;
+    m.redemptionPriceDenom = 1000000;
+  } else {
+    m.redemptionPriceNum = 0;
+    m.redemptionPriceDenom = 1;
+  }
+  m.treasuryBalance = m_blockchain.getTreasuryBalance();
+  m.treasuryHeatReserve = m_blockchain.getTreasuryHeatReserve();
+  m.treasuryLpPendingXfg = m_blockchain.getTreasuryLpPendingXfg();
+  m.treasuryCounterXFG = m.treasuryLpPendingXfg;  // v12 alias — same source, both fields for compat
+  m.swfHeatBalance = m_blockchain.getSwfHeatBalance();
+  m.epochSwapFees = m_blockchain.getCurrentEpochSwapFees();
+  {
+    VaultBalance vb = m_blockchain.getVault().allBalances();
+    m.vaultHeatCdFeePool = vb.heatCdFeePool;
+    m.vaultHeatLpReserve = vb.heatLpReserve;
+    m.vaultHeatGeneral    = vb.heatGeneral;
+    m.vaultHeatSwf        = vb.heatSwf;
+    m.vaultXfgCdFeePool  = vb.xfgCdFeePool;
+    m.vaultXfgLpReserve   = vb.xfgLpReserve;
+    m.vaultXfgGeneral     = vb.xfgGeneral;
+  }
+  return m;
+}
+
+core::AmmQuote core::getAmmQuote(uint64_t inputAmount, uint8_t direction) const {
+  AmmQuote q;
+  if (inputAmount == 0 || direction > 1) return q;
+  // The alternative to selling XFG on Hearth: burning it mints HEAT at the
+  // TWAP, with no price impact — for a large sale, often far more HEAT.
+  if (direction == 0) {
+    q.mintOutput = static_cast<uint64_t>(
+        ((uint128_t)inputAmount * m_blockchain.getRollingTwap()) / parameters::COIN);
+  }
+  const auto& pool = m_blockchain.getAmmPool();
+  const uint64_t reserveIn = direction == 0 ? pool.reserveXfg : pool.reserveHeat;
+  const uint64_t reserveOut = direction == 0 ? pool.reserveHeat : pool.reserveXfg;
+  if (reserveIn == 0 || reserveOut == 0) return q;
+
+  // This endpoint quotes the same constant-product output that the AMM swap
+  // validator accepts. An orderbook estimate may be higher and must not be
+  // handed to the wallet as a fixed AMM transaction output.
+  const uint64_t gross = ammGetOutputAmount(inputAmount, reserveIn, reserveOut, 0);
+  q.expectedOutput = ammSwapNetOutput(inputAmount, reserveIn, reserveOut);
+  q.fee = gross - q.expectedOutput;  // denominated in the output asset
+  const uint128_t ideal = (uint128_t(inputAmount) * reserveOut) / reserveIn;
+  if (ideal > gross && ideal > 0) {
+    q.priceImpactBps = static_cast<uint64_t>(((ideal - gross) * 10000) / ideal);
+  }
+  return q;
+}
+
+core::AmmPoolInfo core::getAmmPoolInfo() const {
+  AmmPoolInfo info;
+  const auto& pool = m_blockchain.getAmmPool();
+  info.reserveXfg = pool.reserveXfg;
+  info.reserveHeat = pool.reserveHeat;
+  info.totalLpShares = pool.totalLpShares;
+  info.epochSwapFees = m_blockchain.getCurrentEpochSwapFees();
+  info.spotPrice = m_blockchain.getHearthSpotPrice();
+  return info;
+}
+
+uint64_t core::getPoolTwap() const {
+  return m_blockchain.getPoolTwap();
+}
+
+std::error_code core::getAmmPoolInfo(ICore::AmmPoolInfo& info) {
+  const auto& pool = m_blockchain.getAmmPool();
+  info.reserveXfg = pool.reserveXfg;
+  info.reserveHeat = pool.reserveHeat;
+   info.spotPrice = m_blockchain.getHearthSpotPrice();
+   return {};
+}
+
+core::OrderbookInfo core::getOrderbookInfo() const {
+  OrderbookInfo info;
+  info.clearingPrice = m_blockchain.getOrderbookClearingPrice();
+  info.inBootstrap = m_blockchain.isOrderbookInBootstrap();
+  info.hearthPoolRatio = m_blockchain.getHearthSpotPrice();
+  // Depth and numMatches read from the latest block header — populated in processOrderbookForBlock
+  return info;
+}
+
+core::OrderbookState core::getOrderbookState(uint32_t depth) const {
+  OrderbookState state;
+  state.clearingPrice = m_blockchain.getOrderbookClearingPrice();
+
+  auto bids = m_blockchain.getOrderbookBidCurve(depth);
+  for (const auto& b : bids) {
+    state.bids.push_back({b.price, b.depth});
+  }
+
+  auto asks = m_blockchain.getOrderbookAskCurve(depth);
+  for (const auto& a : asks) {
+    state.asks.push_back({a.price, a.depth});
+  }
+
+  return state;
+}
+
+core::OrderbookEstimate core::getOrderbookEstimate(uint8_t side, uint64_t amount) const {
+  auto est = m_blockchain.getOrderbookEstimate(side, amount);
+  return {est.estimatedFill, est.hearthFill, est.orderbookFill, est.worstCasePrice, est.levelsConsumed};
 }
 
 }

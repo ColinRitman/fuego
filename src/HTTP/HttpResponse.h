@@ -26,8 +26,10 @@ namespace CryptoNote {
   public:
     enum HTTP_STATUS {
       STATUS_200,
+      STATUS_400,
       STATUS_401,
       STATUS_404,
+      STATUS_429,
       STATUS_500
     };
 

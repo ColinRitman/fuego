@@ -26,7 +26,7 @@ public:
   explicit SwapStateMachine(SwapParams params);
 
   // State transitions
-  bool transition(SwapState newState);
+  bool transition(SwapState newState, uint32_t currentHeight = 0);
   SwapState currentState() const;
 
   // Access params
@@ -41,8 +41,27 @@ public:
   std::string serialize() const;
   static SwapStateMachine deserialize(const std::string& json);
 
+  // Encryption key for adaptorSecret at rest (set before serialize for encryption)
+  void setEncryptionKey(const std::string& key);
+  bool hasEncryptionKey() const;
+
+  // Decrypt adaptorSecret and ourSwapSecKey after loading and setting
+  // encryption key. Must be called after setEncryptionKey on a deserialized
+  // record that has adaptorSecretEnc / ourSwapSecKeyEnc data.
+  // No-op if no encrypted data is present.
+  void decryptStoredSecret();
+
   // Check if swap is in a terminal state
   bool isTerminal() const;
+
+  // ── Optimistic concurrency ──
+  // Every persisted record carries a monotonically increasing version.
+  // SwapDatabase::saveSwapLocked rejects a save whose in-memory version does
+  // not match the on-disk record — a concurrent writer (P2P thread) won the
+  // race. Callers reload and re-apply. Prevents lost-update clobbering
+  // between the tick thread and the peer-message thread.
+  uint64_t recordVersion() const { return m_recordVersion; }
+  void bumpRecordVersion() { ++m_recordVersion; }
 
 private:
   // Validate that a transition from current state to newState is legal
@@ -52,6 +71,8 @@ private:
   SwapState m_state;
   time_t m_createdAt;
   time_t m_updatedAt;
+  uint64_t m_recordVersion = 0;
+  std::string m_encryptionKey;
 };
 
 } // namespace XfgSwap

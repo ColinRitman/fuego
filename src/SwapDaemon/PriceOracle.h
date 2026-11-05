@@ -28,7 +28,7 @@ namespace XfgSwap {
 struct CompletedSwapTrade {
   SwapPair pair;
   uint64_t xfgAmount;     // atomic units (7 decimals)
-  uint64_t ctrAmount;     // atomic units (pair-dependent decimals)
+  AtomicAmount ctrAmount; // atomic units (pair-dependent decimals)
   double   rate;           // XFG per 1 CTR unit (human-readable)
   uint32_t blockHeight;    // XFG block height when HTLC was claimed
   time_t   timestamp;
@@ -37,9 +37,9 @@ struct CompletedSwapTrade {
 // Swap rate validation result
 enum class RateCheck {
   OK,                // rate is acceptable
-  BELOW_FLOOR,       // rate is >= 50% below TWAP — REJECT
-  ABOVE_MARKET,      // rate is significantly above TWAP — WARN but allow
-  NO_DATA            // no TWAP yet, allow freely (bootstrap phase)
+  BELOW_FLOOR,       // proposed rate too LOW (XFG too cheap → REJECT, protects sellers)
+  ABOVE_MARKET,      // proposed rate too HIGH (XFG too expensive → WARN, protects buyers)
+  RATE_NO_DATA       // no TWAP yet, allow freely (bootstrap phase)
 };
 
 class PriceOracle {
@@ -52,11 +52,24 @@ public:
   // ---------------------------------------------------------------------------
 
   // Get the seed rate for a pair: XFG amount per 1 whole CTR coin.
-  // e.g., ETH: 214,000 XFG per 1 ETH
+  // This always uses the static seed price ($1.58). For live pool price,
+  // use getEffectiveRate().
   static double getSeedRate(SwapPair pair);
+
+  // Get the effective rate using live pool price when available, seed otherwise.
+  double getEffectiveRate(SwapPair pair) const;
 
   // Get seed XFG price in USD
   static double getSeedXfgUsd();
+
+  // ── Live pool price (from fuegod RPC) ─────────────────────────────
+
+  // Set the live XFG/USD price from the Hearth pool.
+  // When set (>0), getSeedRate uses this instead of the static seed.
+  void setLiveXfgUsd(double usd);
+
+  // Get the current live XFG/USD price. Returns 0.0 if not yet fetched.
+  double getLiveXfgUsd() const;
 
   // ---------------------------------------------------------------------------
   // TWAP from completed swaps (self-referencing price discovery)
@@ -88,7 +101,7 @@ public:
   RateCheck validateRate(SwapPair pair, double proposedRate) const;
 
   // Convenience: validate from atomic amounts
-  RateCheck validateSwapAmounts(SwapPair pair, uint64_t xfgAmount, uint64_t ctrAmount) const;
+  RateCheck validateSwapAmounts(SwapPair pair, uint64_t xfgAmount, const AtomicAmount& ctrAmount) const;
 
   // Human-readable result
   static const char* rateCheckToString(RateCheck rc);
@@ -106,19 +119,26 @@ public:
   // Floor protection threshold as fraction of TWAP (default: 0.50 = 50%)
   void setFloorThreshold(double fraction);
 
+  // Max allowed drift from seed rate during bootstrap (default: 0.50 = ±50%).
+  // In bootstrap mode (no completed swaps), rates outside [seed * (1-drift), seed * (1+drift)]
+  // are rejected. Set to 0.0 to disable bootstrap validation (fall back to unlimited).
+  void setMaxBootstrapDrift(double drift);
+
+  // CTR divisor for atomic→whole conversion
+  static double ctrDivisor(SwapPair pair);
+
 private:
   // Completed swap history per pair
   mutable std::mutex m_mutex;
   std::deque<CompletedSwapTrade> m_trades;
   size_t   m_twapMaxTrades;    // default 20
   uint64_t m_twapMaxAgeSec;    // default 604800 (7 days)
-  double   m_floorThreshold;   // default 0.50
+  double   m_floorThreshold;   // fractional tolerance, default 0.20 (+/-20%)
+  double   m_maxBootstrapDrift; // default 0.50 (±50%)
+  double   m_liveXfgUsd;        // live pool price, 0.0 = use seed
 
   // Convert atomic amounts to a rate (XFG per 1 whole CTR coin)
-  static double atomicToRate(SwapPair pair, uint64_t xfgAmount, uint64_t ctrAmount);
-
-  // CTR divisor for atomic→whole conversion
-  static double ctrDivisor(SwapPair pair);
+  static double atomicToRate(SwapPair pair, uint64_t xfgAmount, const AtomicAmount& ctrAmount);
 };
 
 } // namespace XfgSwap

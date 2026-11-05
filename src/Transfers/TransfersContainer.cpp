@@ -42,7 +42,9 @@ void serialize(TransactionInformation& ti, CryptoNote::ISerializer& s) {
   s(ti.messages, "");
 }
 
-const uint32_t TRANSFERS_CONTAINER_STORAGE_VERSION = 1;
+// 2: Commitment outputs also store their published commit key (see
+//    TransactionOutputInformationEx::serialize). Version 1 and 0 caches still load.
+const uint32_t TRANSFERS_CONTAINER_STORAGE_VERSION = 2;
 
 namespace {
   template<typename TIterator>
@@ -950,9 +952,17 @@ void TransfersContainer::load(std::istream& in) {
 
   s(currentHeight, "height");
   readSequence<TransactionInformation>(std::inserter(transactions, transactions.end()), "transactions", s);
-  readSequence<TransactionOutputInformationEx>(std::inserter(unconfirmedTransfers, unconfirmedTransfers.end()), "unconfirmedTransfers", s);
-  readSequence<TransactionOutputInformationEx>(std::inserter(availableTransfers, availableTransfers.end()), "availableTransfers", s);
-  readSequence<SpentTransactionOutput>(std::inserter(spentTransfers, spentTransfers.end()), "spentTransfers", s);
+  if (version >= 2) {
+    readSequence<TransactionOutputInformationEx>(std::inserter(unconfirmedTransfers, unconfirmedTransfers.end()), "unconfirmedTransfers", s);
+    readSequence<TransactionOutputInformationEx>(std::inserter(availableTransfers, availableTransfers.end()), "availableTransfers", s);
+    readSequence<SpentTransactionOutput>(std::inserter(spentTransfers, spentTransfers.end()), "spentTransfers", s);
+  } else {
+    // Older layout: no commitmentKey. The V1 readers zero it, which the signer
+    // reads as "recognised by the legacy-only scanner".
+    readSequence<TransactionOutputInformationExV1>(std::inserter(unconfirmedTransfers, unconfirmedTransfers.end()), "unconfirmedTransfers", s);
+    readSequence<TransactionOutputInformationExV1>(std::inserter(availableTransfers, availableTransfers.end()), "availableTransfers", s);
+    readSequence<SpentTransactionOutputV1>(std::inserter(spentTransfers, spentTransfers.end()), "spentTransfers", s);
+  }
 
   if (version != 0) {
     readSequence<TransferUnlockJob>(std::inserter(transfersUnlockJobs, transfersUnlockJobs.end()), "transfersUnlockJobs", s);
@@ -993,8 +1003,12 @@ bool TransfersContainer::isSpendTimeUnlocked(const TransactionOutputInformationE
     return current_time + m_currency.lockedTxAllowedDeltaSeconds_v2() >= info.unlockTime;
   }
 
-  if (isOuputUnlocked && (info.type == TransactionTypes::OutputType::Multisignature || info.type == TransactionTypes::OutputType::Commitment) && info.term != 0) {
-    isOuputUnlocked = m_currentHeight + 1 >= info.blockHeight + info.term;
+  if (isOuputUnlocked && (info.type == TransactionTypes::OutputType::Multisignature || info.type == TransactionTypes::OutputType::Commitment) && info.term != 0 && info.term != parameters::HEAT_TERM) {
+    // Deposit matures when currentHeight >= creationHeight + term.
+    // HEAT_TERM (0xFFFFFFFF) outputs are mints/burns, NOT time-locked CDs.
+    // The +1 offset was removed to align with consensus (Blockchain.cpp:checkCommitmentSpendInput)
+    // which also requires currentHeight >= maturityHeight (strict >=, no off-by-one).
+    isOuputUnlocked = m_currentHeight >= info.blockHeight + info.term;
   }
 
   return isOuputUnlocked;
@@ -1020,7 +1034,7 @@ bool TransfersContainer::isIncluded(const TransactionOutputInformationEx& output
     ((flags & IncludeTypeKey) != 0            && output.type == TransactionTypes::OutputType::Key) ||
     ((flags & IncludeTypeMultisignature) != 0 && output.type == TransactionTypes::OutputType::Multisignature && output.term == 0) ||
     ((flags & IncludeTypeDeposit) != 0        && output.type == TransactionTypes::OutputType::Multisignature && output.term > 0) ||
-    ((flags & IncludeTypeDeposit) != 0        && output.type == TransactionTypes::OutputType::Commitment && output.term > 0)
+    ((flags & IncludeTypeDeposit) != 0        && output.type == TransactionTypes::OutputType::Commitment && output.term > 0 && output.term != parameters::HEAT_TERM)
     )
     &&
     // filter by state
@@ -1058,8 +1072,10 @@ std::vector<TransactionOutputInformation> TransfersContainer::getUnlockingTransf
   }
 
   auto& index = m_transfersUnlockJobs.get<TransferUnlockHeightIndex>();
-  auto start = (prevHeight == 0) ? index.begin() : index.upper_bound(prevHeight + 1);
-  auto end = index.upper_bound(currentHeight + 1);
+  // Use upper_bound(currentHeight) so a deposit with unlockHeight=H unlocks
+  // when currentHeight >= H (consistent with consensus >= check, no off-by-one).
+  auto start = (prevHeight == 0) ? index.begin() : index.upper_bound(prevHeight);
+  auto end = index.upper_bound(currentHeight);
 
   if (start == end) {
     //no transfers to unlock
@@ -1088,8 +1104,10 @@ void TransfersContainer::getLockingTransfers(uint32_t prevHeight, uint32_t curre
   }
 
   auto& index = m_transfersUnlockJobs.get<TransferUnlockHeightIndex>();
-  auto start = index.upper_bound(currentHeight + 1);
-  auto end = index.upper_bound(prevHeight + 1);
+  // Mirror the getUnlockingTransfers fix: use upper_bound(H) so rollback
+  // re-locks exactly the transfers that were unlocked at prevHeight.
+  auto start = index.upper_bound(currentHeight);
+  auto end = index.upper_bound(prevHeight);
 
   if (start == end) {
     //no transfers to lock

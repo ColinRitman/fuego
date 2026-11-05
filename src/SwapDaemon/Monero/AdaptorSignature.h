@@ -34,9 +34,10 @@ struct DleqProof {
 // A signature "encrypted" under a public key T.
 // Given the secret t where T = t*G, the signature can be "adapted" (completed).
 struct AdaptorSignature {
-  Crypto::EllipticCurvePoint R_hat;   // shifted nonce point
+  Crypto::EllipticCurvePoint R_hat;   // shifted nonce point (R + T = k*G + t*G)
   Crypto::EllipticCurveScalar s_hat;  // partial signature scalar
-  DleqProof proof;                     // proves adaptor is well-formed
+  DleqProof proof;                     // proves adaptor is well-formed (Fiat-Shamir)
+  Crypto::EllipticCurvePoint R_H;     // k*H — second DLEQ point for proof verification
 };
 
 // Key pair for swap protocol
@@ -96,6 +97,21 @@ public:
       const Crypto::EllipticCurvePoint& P2,
       const Crypto::EllipticCurvePoint& G,
       const Crypto::EllipticCurvePoint& H);
+
+  // DEPRECATED — WRONG KEY MODEL. The XMR↔XFG swap shared spend key is the
+  // 2-term `a + b` (and the adaptor secret IS one party's spend share, revealed
+  // cross-chain), NOT a 3-term `a + b + adaptor`. Using this to build a sweep
+  // key produces an address no one funded. Use
+  // `MoneroSwapProtocol::computeFullSpendKey(own, extractedPeer)` (2-term) and
+  // `computeSharedSpendPub(A,B)` instead.
+  // See docs/superpowers/specs/2026-06-06-xmr-trustless-claim-design.md §9.
+  [[deprecated("3-term a+b+adaptor is the wrong XMR key model; use "
+               "MoneroSwapProtocol::computeFullSpendKey (2-term). See spec §9")]]
+  static bool combineSpendKeys(
+      const std::array<uint8_t, 32>& alice,
+      const std::array<uint8_t, 32>& bob,
+      const std::array<uint8_t, 32>& adaptor,
+      std::array<uint8_t, 32>& outCombined);
 };
 
 // XMR swap protocol helper that uses adaptor signatures

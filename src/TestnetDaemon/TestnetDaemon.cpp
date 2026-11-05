@@ -36,12 +36,12 @@
 #include "../P2p/NetNodeConfig.h"
 #include "../Rpc/RpcServer.h"
 #include "../Rpc/RpcServerConfig.h"
-#include "../version.h.in"
+#include "version.h"
 
 #include "../Logging/ConsoleLogger.h"
 #include "../Logging/LoggerManager.h"
-#include "../CryptoNoteCore/ElderfierSignatureBroadcaster.h"
 #include "../CryptoNoteCore/SwapOfferRelay.h"
+#include "../CryptoNoteCore/CdOfferRelay.h"
 #include "../Common/StringTools.h"
 
 #if defined(WIN32)
@@ -68,7 +68,7 @@ namespace
     const command_line::arg_descriptor<bool>        arg_print_genesis_tx = { "print-genesis-tx", "Prints genesis' block tx hex to insert it to config and exits" };
     const command_line::arg_descriptor<bool>        arg_generate_new_genesis = { "generate-new-genesis", "Generates a new genesis block for testnet" };
     const command_line::arg_descriptor<std::string> arg_testifier_key = {"testifier-key", "Secret signing key (hex) for Testifier merkle root signing.", ""};
-    const command_line::arg_descriptor<std::string> arg_testifier_address = {"testifier-address", "Wallet address for receiving EFier banking fee rewards.", ""};
+    const command_line::arg_descriptor<std::string> arg_testifier_address = {"testifier-address", "Wallet address for Testifier payout.", ""};
 }
 
 bool command_line_preprocessor(const boost::program_options::variables_map& vm, LoggerRef& logger);
@@ -341,46 +341,6 @@ int main(int argc, char* argv[])
 
     logger(INFO) << "Core initialized OK";
 
-    // Initialize elderfier broadcaster if --testifier-key provided
-    std::unique_ptr<CryptoNote::ElderfierSignatureBroadcaster> elderfierBroadcaster;
-    {
-      std::string keyHex = command_line::get_arg(vm, arg_testifier_key);
-      if (!keyHex.empty()) {
-        if (keyHex.size() == 64) {
-          Crypto::SecretKey sigSec;
-          Crypto::PublicKey sigPub;
-          if (Common::podFromHex(keyHex, sigSec) && Crypto::secret_key_to_public_key(sigSec, sigPub)) {
-            logger(INFO, BRIGHT_CYAN) << "";
-            logger(INFO, BRIGHT_CYAN) << "========================================";
-            logger(INFO, BRIGHT_CYAN) << "  TESTIFIER SIGNING MODE (TESTNET)";
-            logger(INFO, BRIGHT_CYAN) << "========================================";
-            logger(INFO, BRIGHT_CYAN) << "  Signing pubkey: " << Common::podToHex(sigPub);
-            logger(INFO, BRIGHT_CYAN) << "========================================";
-            logger(INFO, BRIGHT_CYAN) << "";
-            elderfierBroadcaster = std::make_unique<CryptoNote::ElderfierSignatureBroadcaster>(ccore, p2psrv, &p2psrv, logManager);
-            elderfierBroadcaster->setSigningKeys(sigPub, sigSec);
-
-            // Set payout address if provided
-            std::string payoutAddr = command_line::get_arg(vm, arg_testifier_address);
-            if (!payoutAddr.empty()) {
-              elderfierBroadcaster->setPayoutAddress(payoutAddr);
-              logger(INFO, BRIGHT_CYAN) << "  Payout address: " << payoutAddr;
-            } else {
-              logger(WARNING, BRIGHT_YELLOW) << "No --testifier-address set. EFier will not receive banking fee rewards.";
-              logger(WARNING, BRIGHT_YELLOW) << "Use: --testifier-address=<your_wallet_address>";
-            }
-
-            elderfierBroadcaster->start();
-            logger(INFO, BRIGHT_GREEN) << "Testifier signature broadcaster started";
-          } else {
-            logger(ERROR, BRIGHT_RED) << "Invalid --testifier-key hex";
-          }
-        } else {
-          logger(ERROR, BRIGHT_RED) << "Invalid --testifier-key: must be 64 hex characters";
-        }
-      }
-    }
-
     // Initialize swap offer relay
     auto swapRelay = std::make_unique<CryptoNote::SwapOfferRelay>(ccore, p2psrv, &p2psrv);
     swapRelay->start();
@@ -415,7 +375,7 @@ int main(int argc, char* argv[])
       std::string vk_str = command_line::get_arg(vm, arg_set_view_key);
 	    if (!vk_str.empty()) {
         rpcServer.setViewKey(vk_str);
-        logger(INFO, BRIGHT_YELLOW) << "Secret view key set: " << vk_str;
+        logger(INFO, BRIGHT_YELLOW) << "Secret view key configured (redacted)";
       }
     }
 
@@ -440,13 +400,6 @@ int main(int argc, char* argv[])
       logger(INFO) << "Stopping swap offer relay...";
       swapRelay->stop();
       swapRelay.reset();
-    }
-
-    // Stop elderfier signing before teardown
-    if (elderfierBroadcaster) {
-      logger(INFO) << "Stopping TESTIFIER broadcaster...";
-      elderfierBroadcaster->stop();
-      elderfierBroadcaster.reset();
     }
 
     //stop components

@@ -19,6 +19,7 @@
 
 #include <exception>
 #include <limits>
+#include <string>
 #include <vector>
 #include "IWallet.h"
 #include "Serialization/ISerializer.h"
@@ -26,6 +27,9 @@
 namespace PaymentService
 {
 
+// Default decoy count for RPC send when client omits "anonymity".
+// Mainnet callers should set anonymity explicitly; testnet clients can pass 0
+// (and WalletService forces/allows mixIn=0 on testnet for decoy-pool bootstrap).
 const uint32_t DEFAULT_ANONYMITY_LEVEL = 4;
 
 class RequestSerializationError : public std::exception
@@ -99,7 +103,7 @@ struct GetViewKey
 
   struct Response
   {
-    std::string viewSecretKey;
+    std::string viewPublicKey;
 
     void serialize(CryptoNote::ISerializer &serializer);
   };
@@ -136,8 +140,6 @@ struct CreateDeposit
     std::string sourceAddress;
     std::string heatCommitment;  // Hex string of HEAT commitment (optional)
     std::string metadata;        // Hex string of metadata (optional)
-    bool useStagedUnlock;        // Optional staged unlock (default: false)
-
     void serialize(CryptoNote::ISerializer &serializer);
   };
 
@@ -145,9 +147,49 @@ struct CreateDeposit
   {
     std::string transactionHash;
     bool isBurnDeposit;          // Indicates if this is a burn deposit
-    bool useStagedUnlock;        // Indicates if staged unlock was used
     uint64_t transactionFee;     // Transaction fee for this deposit
     uint64_t totalFees;          // Total fees (1x for traditional, 4x for staged)
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+struct CreateBurnDeposit
+{
+  struct Request
+  {
+    uint64_t amount;
+    std::string sourceAddress;
+    std::string metadata;        // Hex string of metadata (optional) - should include network_id for validation
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::string transactionHash;
+    uint64_t term;               // Always 4294967295 (FOREVER)
+    uint64_t heatAmount;         // HEAT amount that will be minted
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+struct CreateBurnDepositLarge
+{
+  struct Request
+  {
+    std::string sourceAddress;
+    std::string metadata;        // Hex string of metadata (optional) - should include network_id for validation
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::string transactionHash;
+    uint64_t term;               // Always 4294967295 (FOREVER)
+    uint64_t heatAmount;         // HEAT amount that will be minted (800 XFG = 8,000,000,000 HEAT)
 
     void serialize(CryptoNote::ISerializer &serializer);
   };
@@ -330,6 +372,182 @@ struct GiftDeposit
   };
 };
 
+struct HeatMint
+{
+  struct Request
+  {
+    uint64_t xfg_burned = 0;
+    uint64_t heat_minted = 0;
+    uint64_t mixin = 0;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::string tx_hash;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+struct SendHeat
+{
+  struct Request
+  {
+    std::string address;
+    uint64_t amount = 0;
+    uint64_t mixin = 0;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::string tx_hash;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+// HEAT CD deposit (term-locked HEAT) — matches fire_wallet heat_deposit params
+struct HeatDeposit
+{
+  struct Request
+  {
+    uint64_t amount = 0;
+    uint32_t term_epochs = 0;
+    uint64_t banking_fee = 0;
+    uint64_t fee = 0;
+    uint64_t mixin = 0;
+    std::string sourceAddress;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::string tx_hash;
+    std::string status;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+struct AmmSwap
+{
+  struct Request
+  {
+    uint8_t direction = 0;
+    uint64_t input_amount = 0;
+    uint64_t expected_output = 0;
+    uint64_t min_output = 0;
+    uint64_t fee = 0;
+    uint64_t mixin = 0;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::string tx_hash;
+    std::string status;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+struct PlaceLimitOrder
+{
+  struct Request
+  {
+    uint8_t side = 0;
+    uint64_t amount = 0;
+    uint64_t target_price = 0;
+    uint32_t expiration = 0;
+    uint64_t fee = 0;
+    uint64_t mixin = 0;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::string tx_hash;
+    std::string status;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+struct CancelLimitOrder
+{
+  struct Request
+  {
+    std::string order_id;
+    uint64_t fee = 0;
+    uint64_t mixin = 0;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::string tx_hash;
+    std::string status;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+struct GetLimitOrders
+{
+  struct Request
+  {
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct LimitOrderInfo
+  {
+    std::string order_id;
+    uint8_t side = 0;
+    uint64_t amount = 0;
+    uint64_t target_price = 0;
+    uint32_t expiration = 0;
+    bool withdrawn = false;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::vector<LimitOrderInfo> orders;
+    std::string status;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+struct RegisterAlias
+{
+  struct Request
+  {
+    std::string alias;
+    std::string address;
+    uint64_t mixin = 0;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    std::string tx_hash;
+    std::string status;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
 struct GetMoneySupplyStats
 {
   struct Request
@@ -493,7 +711,6 @@ struct GetDeposit
     std::string spendingTransactionHash;
     bool locked;
     std::string address;
-    bool useStagedUnlock;        // Indicates if this deposit uses staged unlock
     uint64_t transactionFee;     // Transaction fee for this deposit
     uint64_t totalFees;          // Total fees (1x for traditional, 4x for staged)
 
@@ -576,7 +793,6 @@ struct GetSpendKeys
 
   struct Response
   {
-    std::string spendSecretKey;
     std::string spendPublicKey;
 
     void serialize(CryptoNote::ISerializer &serializer);
@@ -598,6 +814,8 @@ struct GetBalance
     uint64_t lockedAmount;
     uint64_t lockedDepositBalance;
     uint64_t unlockedDepositBalance;
+    uint64_t lockedHeatBalance;
+    uint64_t unlockedHeatBalance;
 
     void serialize(CryptoNote::ISerializer &serializer);
   };
@@ -942,6 +1160,30 @@ struct SendFusionTransaction
   struct Response
   {
     std::string transactionHash;
+
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+};
+
+struct GetHealth
+{
+  struct Request
+  {
+    void serialize(CryptoNote::ISerializer &serializer);
+  };
+
+  struct Response
+  {
+    bool daemon;
+    bool wallet;
+    bool swap;
+    uint32_t height = 0;
+    uint32_t targetHeight = 0;
+    std::string lastBlockHash;
+    uint32_t peerCount = 0;
+    uint32_t depositCount = 0;
+    uint32_t transactionCount = 0;
+    uint32_t addressCount = 0;
 
     void serialize(CryptoNote::ISerializer &serializer);
   };

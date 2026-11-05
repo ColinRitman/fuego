@@ -104,13 +104,18 @@ private:
   std::error_code handleSendFusionTransaction(const SendFusionTransaction::Request& request, SendFusionTransaction::Response& response);
 
   // Burn deposit handlers
-  std::error_code handleCreateBurnDeposit(const CreateBurnDeposit::Request& request, CreateBurnDeposit::Response& response);
-  std::error_code handleCreateBurnDepositWithProof(const CreateBurnDepositWithProof::Request& request, CreateBurnDepositWithProof::Response& response);
-  std::error_code handleCreateBurnDepositLarge(const CreateBurnDepositLarge::Request& request, CreateBurnDepositLarge::Response& response);
-  std::error_code handleCreateBurnDepositLargeWithProof(const CreateBurnDepositLargeWithProof::Request& request, CreateBurnDepositLargeWithProof::Response& response);
-  std::error_code handleGenerateBurnProofDataFile(const GenerateBurnProofDataFile::Request& request, GenerateBurnProofDataFile::Response& response);
-  std::error_code handleGenerateBurnProofDataFileAuto(const GenerateBurnProofDataFileAuto::Request& request, GenerateBurnProofDataFileAuto::Response& response);
   std::error_code handleGetEthernalXFG(const GetEthernalXFG::Request& request, GetEthernalXFG::Response& response);
+  std::error_code handleGetHealth(const GetHealth::Request& request, GetHealth::Response& response);
+  std::error_code handleHeatMint(const HeatMint::Request& request, HeatMint::Response& response);
+  std::error_code handleSendHeat(const SendHeat::Request& request, SendHeat::Response& response);
+  std::error_code handleHeatDeposit(const HeatDeposit::Request& request, HeatDeposit::Response& response);
+  std::error_code handleAmmSwap(const AmmSwap::Request& request, AmmSwap::Response& response);
+  std::error_code handleSellXfg(const AmmSwap::Request& request, AmmSwap::Response& response);
+  std::error_code handleBuyXfg(const AmmSwap::Request& request, AmmSwap::Response& response);
+  std::error_code handlePlaceLimitOrder(const PlaceLimitOrder::Request& request, PlaceLimitOrder::Response& response);
+  std::error_code handleCancelLimitOrder(const CancelLimitOrder::Request& request, CancelLimitOrder::Response& response);
+  std::error_code handleGetLimitOrders(const GetLimitOrders::Request& request, GetLimitOrders::Response& response);
+  std::error_code handleRegisterAlias(const RegisterAlias::Request& request, RegisterAlias::Response& response);
 
 };
 

@@ -1,199 +1,249 @@
-<img title="The Long Night Is Coming" src="https://github.com/usexfg/fuego-data/blob/master/fuego-images/fuegoline.gif?raw=true"><img/>
-### Fuego is open-source peer-to-peer decentralized private cryptocurrency built by advocates of freedom thru sound money and free open-source software .
+<img title="The Long Night Is Coming, and the DEBT comes with it" src="https://github.com/usexfg/fuego-data/blob/master/fuego-images/fuegoline.gif?raw=true"><img/>
 
-Based upon the CryptoNote protocol & philosophy.
+### Fuego is a sovereign privacy blockchain banking network and cryptocurrency developed & maintained by advocates of freedom thru sound money and free open-source software.
+
+Based on the CryptoNote protocol.
 
 #### Resources
 
 -   [Website](https://usexfg.org)
--   Explorer: <http://fuego.spaceportx.net>
 -   Explorer: <https://explore-xfg.loudmining.com>
--   Explorer: [http://radioactive.sytes.net](http://radioactive.sytes.net:8000/index.html)
+-   Explorer: <http://fuego.spaceportx.net>
 -   [Discord](https://discord.gg/5UJcJJg)
 -   [Twitter](https://twitter.com/useXFG)
 -   [Medium](https://medium.com/@usexfg)
 -   [Bitcoin Talk](https://bitcointalk.org/index.php?topic=2712001)
 
- ______________________________
- 
+### Features
 
-<sup>"Working software is the primary measure of progress." [‣]</sup>
+| Category | Feature | Description |
+|----------|---------|-------------|
+| **Core** | CryptoNote | Ring-signature privacy at protocol level |
+| **Core** | Dynamic Ring Size | 32, 16, or min 8 decoys per transaction, adaptive to pool depth |
+| **Core** | Sub-addresses | Multiple addresses from single seed; integrated (v1) wallets |
+| **Core** | Fire Aliases | 8 characters ONLY, on-chain '@' aliases for fire addresses; (@fuegoxfg for development) integrated with ecosystem wallets |
+| **Assets** | ΗΞΔŦ flatcoin | XFG-colored coin pegged to purchasing power by rate of inflation on 1 USD since Q1 2009 value ⩰ $1.58 / Minted only by burning XFG at TWAP of Hearth's price / Launch ratio 10 : 1 |
+| **Assets** | Hearth Floor | Block-discrete on-chain exchange with limit order matching & adaptive-spread pool swap; batch-clears at VWAP |
+| **Assets** | Certificates of Deposit | ΗΞΔŦ-denominated time-locked deposits earning yield from protocol fees |
+| **Swaps** | Atomic Swaps | Cross-chain XFG swaps via COMIT protocol with PTLC/HTLC adaptor signatures |
+| **Swaps** | ЅШ𑫛𑫒**❋**XFG | Integrated TUI, Go-based swap engine with inter-chain fee routing |
+| **Network** | I2P / Tor  | Pluggable transport-layer privacy |
+| **Wallet** | `fire_wallet`| Full-featured CLI: send, receive, deposits, ΗΞΔŦ mint/swap, pool operations |
+| **Wallet** | TUI(suite) | Go-based terminal UI for atomic swaps, CD operations, ΗΞΔŦ mint |
+| **GUI Wallet/SDK** | Fuego Valise | Cross-platform GUI (Flutter/Rust) — [fuego-valise](https://github.com/usexfg/fuego-valise) Fuego SDK |
+| **Tools** | RPC API | JSON-RPC: heat_metrics, amm_quote, amm_pool_info, swap fees, CD queries |
+| **Dev Tools** | MCP Server | AI-agent integration for swap/mint automation |
+| **Dev Tools** | Fuego-Skills | AI-agent tools for codebase analytics, knowledge graph, and specialization |
 
-##### Master Status   
-[![Build check](https://github.com/usexfg/fuego/actions/workflows/check.yml/badge.svg)](https://github.com/usexfg/fuego/actions/workflows/check.yml)
+_____________________________
 
-[![macOS](https://github.com/usexfg/fuego/actions/workflows/macOS.yml/badge.svg)](https://github.com/usexfg/fuego/actions/workflows/macOS.yml)
+<sup>"Working software is the primary measure of progress." [‣](http://agilemanifesto.org/)</sup>
 
-[![AppImage Linux](https://github.com/usexfg/fuego/actions/workflows/appimage.yml/badge.svg)](https://github.com/usexfg/fuego/actions/workflows/appimage.yml)
+##### Build Status :
 
-[![Ubuntu 24.04](https://github.com/usexfg/fuego/actions/workflows/ubuntu24.yml/badge.svg)](https://github.com/usexfg/fuego/actions/workflows/ubuntu24.yml)
+[![Build check](https://github.com/usexfg/fuego-suite/actions/workflows/check.yml/badge.svg)](https://github.com/usexfg/fuego-suite/actions/workflows/check.yml)
+[![macOS](https://github.com/usexfg/fuego-suite/actions/workflows/macOS.yml/badge.svg)](https://github.com/usexfg/fuego-suite/actions/workflows/macOS.yml)
+[![AppImage Linux](https://github.com/usexfg/fuego-suite/actions/workflows/appimage.yml/badge.svg)](https://github.com/usexfg/fuego-suite/actions/workflows/appimage.yml)
+[![Ubuntu 24.04](https://github.com/usexfg/fuego-suite/actions/workflows/ubuntu24.yml/badge.svg)](https://github.com/usexfg/fuego-suite/actions/workflows/ubuntu24.yml)
+[![Ubuntu 22.04](https://github.com/usexfg/fuego-suite/actions/workflows/ubuntu22.yml/badge.svg)](https://github.com/usexfg/fuego-suite/actions/workflows/ubuntu22.yml)
+[![Windows](https://github.com/usexfg/fuego-suite/actions/workflows/windows.yml/badge.svg)](https://github.com/usexfg/fuego-suite/actions/workflows/windows.yml)
+[![Docker Images](https://github.com/usexfg/fuego-suite/actions/workflows/docker.yml/badge.svg)](https://github.com/usexfg/fuego-suite/actions/workflows/docker.yml)
+[![Android (Termux)](https://github.com/usexfg/fuego-suite/actions/workflows/termux.yml/badge.svg)](https://github.com/usexfg/fuego-suite/actions/workflows/termux.yml)
+[![Raspberry Pi (ARM64)](https://github.com/usexfg/fuego-suite/actions/workflows/raspberry-pi.yml/badge.svg)](https://github.com/usexfg/fuego-suite/actions/workflows/raspberry-pi.yml)
 
-### Build Requirements  
+### Build Requirements
 
-**Boost Version**: Fuego requires Boost 1.86 or below (for io_service compatibility)  
-- **macOS**: Builds Boost 1.86 from source automatically  
-- **Linux**: Uses system packages (1.74+ on Ubuntu 22.04, 1.83+ on Ubuntu 24.04)  
+**Boost Version**: Fuego supports Boost 1.86+ (uses `io_context` — no legacy `io_service` dependency)
+
+- **macOS**: `brew install boost` (1.90+)
+- **Linux**: Uses system packages (1.74+ on Ubuntu 22.04, 1.83+ on Ubuntu 24.04)
 - **Windows**: Uses vcpkg packages (1.84+)
 
-[![Ubuntu 22.04](https://github.com/usexfg/fuego/actions/workflows/ubuntu22.yml/badge.svg)](https://github.com/usexfg/fuego/actions/workflows/ubuntu22.yml)
+**OpenSSL**: Supports OpenSSL 3.x and 4.x
 
-[![Windows](https://github.com/usexfg/fuego/actions/workflows/windows.yml/badge.svg)](https://github.com/usexfg/fuego/actions/workflows/windows.yml)
+**secp256k1**: External dependency — use system package or bundled submodule
+- macOS: `brew install secp256k1`
+- Linux: `apt install libsecp256k1-dev` or use the submodule at `external/secp256k1`
+- CMake flag: `-DUSE_VENDORED_SECP256K1=OFF` to link against system secp256k1
 
-[![Docker Images](https://github.com/usexfg/fuego/actions/workflows/docker.yml/badge.svg)](https://github.com/usexfg/fuego/actions/workflows/docker.yml)
+### Linux (Ubuntu/Debian)
 
-[![Android (Termux)](https://github.com/usexfg/fuego/actions/workflows/termux.yml/badge.svg)](https://github.com/usexfg/fuego/actions/workflows/termux.yml)
+#### 1. Install Dependencies
 
-[![Raspberry Pi (ARM64)](https://github.com/usexfg/fuego/actions/workflows/raspberry-pi.yml/badge.svg)](https://github.com/usexfg/fuego/actions/workflows/raspberry-pi.yml)
-
-[‣]:http://agilemanifesto.org/
-
-#### Building On *nix
-
-1. Dependencies: GCC 4.7.3 or later, CMake 2.8.6 or later, and Boost 1.55.
-
-You may download them from:
-
-* http://gcc.gnu.org/
-* http://www.cmake.org/
-* http://www.boost.org/
-
-
-*** Alternatively, it may be possible to install them using a package manager by
-executing the following command.
- ```
- sudo apt-get install build-essential git cmake libboost-all-dev libjsoncpp-dev libssl-dev
+```bash
+sudo apt install build-essential git cmake libboost-all-dev libjsoncpp-dev libssl-dev libsecp256k1-dev
 ```
 
-2. Clone Fuego repository
-```
-git clone https://github.com/usexfg/fuego
+#### 2. Clone and Build
 
+```bash
+git clone --recursive https://github.com/usexfg/fuego-suite
+cd fuego-suite && git submodule init && git submodule update
+mkdir build && cd build
+cmake .. -DUSE_VENDORED_SECP256K1=OFF
+make -j$(nproc)
 ```
-3. Open folder with copied repository
-```
-cd fuego
-```
-4. Building (Compiling)
-    (resulting programs will be found in build/release/src)
 
+Binaries will be in `build/release/src/`. The Go TUI builds automatically if Go 1.24+ is installed.
+
+#### 3. Start the Daemon
+
+```bash
+./build/release/src/fuegod
 ```
+
+### macOS
+
+#### 1. Install Dependencies
+
+Install [Xcode](https://developer.apple.com/xcode/) and [Homebrew](https://brew.sh/), then:
+
+```bash
+xcode-select --install
+brew install git cmake boost openssl secp256k1 jsoncpp
+```
+
+#### 2. Build
+
+```bash
+git clone https://github.com/usexfg/fuego-suite
+cd fuego-suite
+mkdir build && cd build
+cmake .. -DUSE_VENDORED_SECP256K1=OFF
 make
 ```
 
-The TUI will be automatically built and placed with other binaries if Go 1.24+ is installed.
+Binaries will be in `build/src/`.
 
-5. Starting Fuego daemon
+### Windows
+
+#### 1. Prerequisites
+
+- [Visual Studio 2019 Community Edition](https://visualstudio.microsoft.com/thank-you-downloading-visual-studio/?sku=Community&rel=16)
+- [CMake](https://cmake.org/download/)
+- [Boost 1.73.0 MSVC 14.2](https://sourceforge.net/projects/boost/files/boost-binaries/1.73.0/boost_1_73_0-msvc-14.2-64.exe/download)
+
+When installing Visual Studio, include **Desktop development with C++** and **MSVC v142 - VS 2019 C++ x64/x86 build tools**.
+
+#### 2. Build
+
+From `x64 Native Tools Command Prompt for VS 2019`:
+
+```bash
+git clone https://github.com/usexfg/fuego-suite
+cd fuego-suite
+mkdir build && cd build
+cmake .. -G "Visual Studio 16 2019" -A x64 -DBOOST_LIBRARYDIR="c:\local\boost_1_73_0\lib64-msvc-14.2"
+msbuild fuegoX.sln /p:Configuration=Release /m
 ```
-cd fuego/build/release/src `
-./fuegod
-````
-try --help from within dæmon for a full list of available commands
-or <code>./fuegod --help</code> when outside of dæmon
+
+Binaries will be in `src/Release/`.
+
+### Docker
+
+```bash
+docker build -t fuego .
+docker run -p 11898:11898 -p 11899:11899 fuego
+```
+
+### Build Variants
+
+| Command | Description |
+|---------|-------------|
+| `make` | Release build + TUI |
+| `make build-release` | CMake release build |
+| `make build-debug` | Debug build with symbols |
+| `make build-static` | Static-linked build |
+| `make build-tui` | Go TUI only |
+| `make test-release` | Build and run tests |
+| `make -j$(nproc)` | Parallel build (all cores) |
+
+For Clang: `export CC=clang CXX=clang++` before `make`.
 
 ### Terminal User Interface (TUI)
 
-Fuego includes a Go-based Terminal User Interface for easy management of nodes and wallets. The TUI provides full support for Elderfier Staking and Burn2Mint flows.
-
-#### Building the TUI
-
-If you have Go 1.24+ installed, the TUI will be built automatically when running `make`. You can also build it separately:
+Go-based TUI for swaps, wallet management, and CD operations. Requires Go 1.24+.
 
 ```bash
 make build-tui
-```
-
-#### Running the TUI
-
-```bash
 ./tui/build/fuego-tui
 ```
 
 Navigate with arrow keys or j/k, select with Enter, quit with q or Ctrl+C.
 
-#### TUI Features
+### ΗΞΔŦ Flatcoin & Hearth Exchange
 
-- Start/Stop Node
-- Start Wallet RPC
-- Create Wallet
-- Get Balance
-- Send Transaction
-- Elderfier Menu (staking and voting)
-- Burn2Mint Menu (XFG→HEAT conversion)
+ΗΞΔŦ is Fuego's flatcoin — a stable asset pegged to purchasing power. It is **not** pegged to a fiat currency; it is pegged to inflation rate over time beginning Jan 2009 ⩰ $1.58 ||  XFG/ΗΞΔŦ ratio at launch mints 10:1 (1 XFG ⩰ $0.15)
 
-For detailed documentation, see `tui/README.md`.
-_________________________________________________________
-For the most user-friendly graphic interface experience
+| Operation | CLI Command | Description |
+|-----------|------------|-------------|
+| Mint ΗΞΔŦ | `mint_heat <xfg_amount>` | Burn XFG to create ΗΞΔŦ at Hearth price |
+| Swap | `swap <dir> <in> <out> <min>` | Swap XFG↔ΗΞΔŦ on Hearth at bid/ask spread |
+| MM Pool Info | `pool_info` | Show exchange depth, MM pool orders, spread |
+| ΗΞΔŦ Metrics | `heat_info` | Show ΗΞΔŦ supply, redemption price, treasury, CD yield |
+| ΗΞΔŦ Balance | `balance` | Shows ΗΞΔŦ balance alongside XFG |
 
-see [Fuego Desktop Wallet](https://github.com/usexfg/fuego-wallet). 
-_________________________________________________________
+**Daemon RPC endpoints**: `/heat_metrics`, `/amm_quote`, `/amm_pool_info`, `/addswapfee`
 
-_________________________________________________________
-**Advanced options:**
+**Key Properties**:
+- Launch ratio 10:1 (1 ΗΞΔŦ = 10 XFG) at genesis
+- Peg target $1.58 USD; mint premium **1%** of the burn (`HEAT_MINT_PREMIUM_BPS = 100`) — a haircut inside the burn that funds both AuntPoL legs (withheld XFG → XFG leg, the HEAT it buys → HEAT leg); PI controller removed
+- Protocol buys or mints ΗΞΔŦ for CD yield payments (structural demand, protocol pays 0% fee)
+- On-chain Hearth: constant-product AMM (swaps + backstop) plus pool depth-band makers in the per-block call auction (`HEARTH_DEPTH_BAND_PCT` of reserves, adaptive spread)
+- Pool reserves tracked (as a whole) on-chain with unspendable pool keys
 
-* Parallel build: run `make -j<number of threads>` instead of `make`.
-* Debug build: run `make build-debug`.
-* Test suite: run `make test-release` to run tests in addition to building. Running `make test-debug` will do the same to the debug version.
-* Building with Clang: it may be possible to use Clang instead of GCC, but this may not work everywhere. To build, run `export CC=clang CXX=clang++` before running `make`.
+### Protocol Earnings 
 
-**************************************************************************************************
-### Windows 10
+There are exactly **two** protocol earnings streams
 
-#### Prerequisites
+| # | Stream | Rate | Split |
+|---|--------|------|-------|
+| 1 | **Hearth swap fee** — on-chain Hearth DEX fills | **1%** per trade (`HEARTH_FEE_BPS = 100`) | **30% CD yield / 70% maker rebate** at v11; **70/30** at v12 |
+| 2 | **Atomic swap fee** — cross-chain swaps (SwapXFG TUI or DeXFG tab in Fuego-Wallet GUI) | **1% + 1% = 2%** per swap (`SWAP_FEE_RATE_BPS = 100` initiation + claim) | **80% CD Yield / 20% Bonus Vault** at v11+ (pre-v11 replay: 69/11/20) |
 
-- Install [Visual Studio 2019 Community Edition](https://visualstudio.microsoft.com/thank-you-downloading-visual-studio/?sku=Community&rel=16)
-- Install [CMake](https://cmake.org/download/)
-- When installing Visual Studio, you need to install **Desktop development with C++** and the **MSVC v142 - VS 2019 C++ x64/x86 build tools** components. The option to install the v142 build tools can be found by expanding the "Desktop development with C++" node on the right. You will need this for the project to build correctly.
-- Install [Boost 1.73.0](https://sourceforge.net/projects/boost/files/boost-binaries/1.73.0/boost_1_73_0-msvc-14.2-64.exe/download), **ensuring** you download the installer for **MSVC 14.2**.
+NOT protocol earnings:
+- **Mint premium** — 1% of the declared burn (`HEAT_MINT_PREMIUM_BPS = 100`, v11+). A haircut **inside** the burn, not a surcharge: the withheld `premiumXfg` is the **AuntPoL XFG leg** (`m_treasuryLpPendingXfg`, not burned) and the `heat(premiumXfg)` it buys is the **AuntPoL HEAT leg**. Protocol LP inventory, not revenue.
+- **CD creation fee** — 0.1% of the HEAT being deposited, charged in **XFG** to `FUEGO_DEV_FUND_ADDRESS`. Never part of CD yield, never a treasury reserve credit.
 
-#### Building
+### Certificates of Deposit (CD) — V12 activation
 
-From the start menu, open 'x64 Native Tools Command Prompt for vs2019' or run "C:\Program Files (x86)\Microsoft Visual Studio\2019\Community\Common7\Tools\VsMSBuildCmd.bat" from any command prompt.
+Epoch (900 blocks on mainnet, 10 on testnet) term-locked ΗΞΔŦ deposits earning real yield thru protocol revenue, not inflation. Each CD requires an upfront CD creation fee of 0.1% of the HEAT being deposited, charged in **XFG** at creation (no fee at claim), paid to `FUEGO_DEV_FUND_ADDRESS`.
 
-```bash
-git clone https://github.com/usexfg/fuego
-cd fuego
-mkdir build
-cmake .. -G "Visual Studio 16 2019" -A x64 -DBOOST_LIBRARYDIR="c:\local\boost_1_73_0\lib64-msvc-14.2"
-msbuild fuegoX.sln /p:Configuration=Release /m
-```
+| Command | Description |
+|---------|-------------|
+| `heat_deposit <amount> <term_epochs>` | Lock ΗΞΔŦ for epoch-based yield |
+| `heat_withdraw <deposit_id>` | Redeem matured CD with accrued interest |
+| `heat_list` | List active ΗΞΔŦ CDs and balance |
 
-If the build is successful the binaries will be in the `src/Release` folder.
+### Atomic Swaps (swapxfg)
 
-### macOS
+Cross-chain XFG atomic swaps via COMIT protocol with DLEQ adaptor signatures. Fee routing bridges SwapDaemon into on-chain CD yield and treasury.
 
-#### Prerequisites
+### Documentation
 
-In order to install prerequisites, [XCode](https://developer.apple.com/xcode/) and [Homebrew](https://brew.sh/) needs to be installed.
-Once both are ready, open Terminal app and run the following command to install additional tools:
+Comprehensive docs at [docs.usexfg.org](https://docs.usexfg.org) and in `docs/`:
+- `getting-started/` — Onboarding
+- `features/` — Feature guides
+- `api-reference/` — RPC API
+- `design/` + `developer/` — Architecture & protocols
+- `security/` — Audits & hardening
+- `HEAT_STABLECOIN_VISION.md` — ΗΞΔŦ economic design
+- `ATOMIC_SWAP_PLAN.md` — Swap protocol plan
+- `PRIVACY_ROADMAP.md` — Privacy milestones
 
-```bash
-$ xcode-select --install
-```
+### Advanced
 
-On newer macOS versions (v10.14 and higher) this step is done through Software Update in System Preferences.
+- **Parallel build**: `make -j$(nproc)`
+- **Debug build**: `make build-debug`
+- **Tests**: `make test-release`
+- **Static binary**: `make build-static`
 
-After that, proceed with installing dependencies:
+---
 
-```bash
-$ brew install git python cmake gcc boost
-```
+For the most user-friendly graphic interface experience, see [Fuego Desktop Wallet](https://github.com/usexfg/fuego-valise).
 
-#### Building
-
-When all dependencies are installed, build Fuego core binaries:
-
-```bash
-$ git clone https://github.com/usexfg/fuego
-$ cd fuego
-$ mkdir build && cd $_
-$ cmake ..
-$ make
-```
-
-If the build is successful the binaries will be located in `src` directory.
-*******************************
-
-Join our ever-expanding community of Fuego holders thru [Discord](https://discordapp.com/invite/5UJcJJg), [Reddit](https://reddit.com/r/Fango), or [Twitter](https://twitter.com/usexfg).
+_____________________________
+<sup>Made with ❤️‍🔥 for Fuego Mob</sup>
 
 
-
+Join Fuego's worldwide community [Discord](https://discordapp.com/invite/5UJcJJg), [Reddit](https://reddit.com/r/Fango), or [Twitter](https://twitter.com/usexfg).

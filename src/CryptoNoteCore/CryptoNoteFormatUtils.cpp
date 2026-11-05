@@ -17,6 +17,7 @@
 
 #include "CryptoNoteFormatUtils.h"
 
+#include <cstdio>
 #include <set>
 #include <Logging/LoggerRef.h>
 #include <Common/BinaryArray.hpp>
@@ -182,7 +183,7 @@ bool constructTransaction(
     if (!(r)) {
       logger(ERROR, BRIGHT_RED)
         << "at creation outs: failed to generate_key_derivation("
-        << dst_entr.addr.viewPublicKey << ", " << txkey.secretKey << ")";
+        << dst_entr.addr.viewPublicKey << ", <secret_key>)";
       return false;
     }
 
@@ -281,7 +282,12 @@ bool get_inputs_money_amount(const Transaction& tx, uint64_t& money) {
       amount = boost::get<TransactionInputCommitmentSpend>(in).amount;
     } else if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
       amount = boost::get<TransactionInputCommitmentTransfer>(in).amount;
+    } else if (in.type() == typeid(TransactionInputSwapEscrow)) {
+      amount = boost::get<TransactionInputSwapEscrow>(in).amount;
     }
+
+    if (amount > UINT64_MAX - money)
+      return false;
 
     money += amount;
   }
@@ -307,6 +313,14 @@ bool check_inputs_types_supported(const TransactionPrefix& tx) {
         return false;
       }
     } else if (inputType == typeid(TransactionInputCommitmentTransfer)) {
+      if (tx.version < TRANSACTION_VERSION_2) {
+        return false;
+      }
+    } else if (inputType == typeid(TransactionInputUnified)) {
+      if (tx.version < TRANSACTION_VERSION_2) {
+        return false;
+      }
+    } else if (inputType == typeid(TransactionInputSwapEscrow)) {
       if (tx.version < TRANSACTION_VERSION_2) {
         return false;
       }
@@ -369,6 +383,54 @@ bool check_outs_valid(const TransactionPrefix& tx, std::string* error) {
         }
         return false;
       }
+      if (out.amount == 0) {
+        if (error) {
+          *error = "Commitment output amount is zero";
+        }
+        return false;
+      }
+      if (commitment.term != parameters::HEAT_TERM &&
+          commitment.term != parameters::DEPOSIT_TERM_LP &&
+          commitment.term != parameters::DEPOSIT_TERM_POOL_XFG &&
+          commitment.term != parameters::DEPOSIT_TERM_POOL_HEAT &&
+          commitment.term != parameters::DEPOSIT_TERM_SWAP_RECEIVE_XFG &&
+          (commitment.term < parameters::DEPOSIT_MIN_TERM ||
+           commitment.term > parameters::DEPOSIT_MAX_TERM)) {
+        if (error) {
+          *error = "Commitment output has invalid term";
+        }
+        return false;
+      }
+    } else if (out.target.type() == typeid(TransactionOutputSwapEscrow)) {
+      if (tx.version < TRANSACTION_VERSION_2) {
+        *error = "Swap escrow output in a version-1 transaction";
+        return false;
+      }
+      const TransactionOutputSwapEscrow& escrow = ::boost::get<TransactionOutputSwapEscrow>(out.target);
+      if (!check_key(escrow.claimKey)) {
+        if (error) *error = "Swap escrow output with invalid claim key";
+        return false;
+      }
+      if (!check_key(escrow.refundKey)) {
+        if (error) *error = "Swap escrow output with invalid refund key";
+        return false;
+      }
+      if (!check_key(escrow.adaptorPoint)) {
+        if (error) *error = "Swap escrow output with invalid adaptor point";
+        return false;
+      }
+      if (std::memcmp(&escrow.claimKey, &escrow.refundKey, sizeof(Crypto::PublicKey)) == 0) {
+        if (error) *error = "Swap escrow output: claim and refund keys must differ";
+        return false;
+      }
+      if (escrow.refundTimeout == 0) {
+        if (error) *error = "Swap escrow output with zero refund timeout";
+        return false;
+      }
+      if (out.amount == 0) {
+        if (error) *error = "Swap escrow output with zero amount";
+        return false;
+      }
     } else {
       if (error) {
         *error = "Output with invalid type";
@@ -393,6 +455,51 @@ bool checkMultisignatureInputsDiff(const TransactionPrefix& tx) {
   return true;
 }
 
+bool checkSwapEscrowInputsDiff(const TransactionPrefix& tx) {
+  std::set<std::string> inputsUsage;
+  for (const auto& inv : tx.inputs) {
+    if (inv.type() == typeid(TransactionInputSwapEscrow)) {
+      const TransactionInputSwapEscrow& in = ::boost::get<TransactionInputSwapEscrow>(inv);
+      std::string key = Common::podToHex(in.escrowTxId);
+      key += ':';
+      key += std::to_string(in.escrowOutputIndex);
+      if (!inputsUsage.insert(key).second) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+// H-1: a transaction must not spend the same key image twice. Key-image uniqueness
+// was only ever checked against *chain* state, so an intra-transaction duplicate
+// passed validation and then failed the connect-path rollback, which erased earlier
+// inputs by type-blind boost::get and threw an uncaught boost::bad_get on the first
+// non-KeyInput element -- a remote daemon crash. Sibling of
+// checkMultisignatureInputsDiff / checkSwapEscrowInputsDiff, and deliberately
+// spans every key-image-carrying input type rather than one of them.
+bool checkKeyImagesUnique(const TransactionPrefix& tx) {
+  std::set<std::string> seen;
+  for (const auto& inv : tx.inputs) {
+    const Crypto::KeyImage* keyImage = nullptr;
+    if (const auto* in = ::boost::get<KeyInput>(&inv)) {
+      keyImage = &in->keyImage;
+    } else if (const auto* in = ::boost::get<TransactionInputCommitmentSpend>(&inv)) {
+      keyImage = &in->keyImage;
+    } else if (const auto* in = ::boost::get<TransactionInputCommitmentTransfer>(&inv)) {
+      keyImage = &in->keyImage;
+    } else if (const auto* in = ::boost::get<TransactionInputSwapEscrow>(&inv)) {
+      keyImage = &in->keyImage;
+    } else if (const auto* in = ::boost::get<TransactionInputUnified>(&inv)) {
+      keyImage = &in->keyImage;
+    }
+    if (keyImage && !seen.insert(Common::podToHex(*keyImage)).second) {
+      return false;
+    }
+  }
+  return true;
+}
+
 bool check_money_overflow(const TransactionPrefix &tx) {
   return check_inputs_overflow(tx) && check_outs_overflow(tx);
 }
@@ -411,6 +518,8 @@ bool check_inputs_overflow(const TransactionPrefix &tx) {
       amount = boost::get<TransactionInputCommitmentSpend>(in).amount;
     } else if (in.type() == typeid(TransactionInputCommitmentTransfer)) {
       amount = boost::get<TransactionInputCommitmentTransfer>(in).amount;
+    } else if (in.type() == typeid(TransactionInputSwapEscrow)) {
+      amount = boost::get<TransactionInputSwapEscrow>(in).amount;
     }
 
     if (money > amount + money)
@@ -559,7 +668,7 @@ bool get_block_longhash(cn_context &context, const Block& b, Hash& res) {
     return false;
   }     // original CryptoNight (0) until v5, anti-ASIC CNv7 var(1), CNv8(2) from v6 thru CNupx/2
   const int cn_variant = b.majorVersion < 5 ? 0 : b.majorVersion >= BLOCK_MAJOR_VERSION_6 ? 2 : 1;
-  const int light = ( b.majorVersion >= BLOCK_MAJOR_VERSION_9) ? 1 : 0;
+  const int light = (b.majorVersion >= BLOCK_MAJOR_VERSION_9) ? 1 : 0;
   cn_slow_hash(context, bd.data(), bd.size(), res, light, cn_variant);
   return true;
 }

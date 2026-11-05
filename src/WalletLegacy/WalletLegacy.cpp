@@ -16,6 +16,8 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "WalletLegacy.h"
+#include "crypto/adaptor.h"
+#include "SwapDaemon/SwapPairCatalog.h"
 
 #include <algorithm>
 #include <memory>
@@ -28,8 +30,9 @@
 #include <numeric>
 #include <string.h>
 #include <time.h>
-
+#include <openssl/sha.h>
 #include "crypto/crypto.h"
+#include "crypto/keccak.h"
 #include "Common/Base58.h"
 #include "Common/ShuffleGenerator.h"
 #include "Logging/ConsoleLogger.h"
@@ -39,8 +42,6 @@
 #include "WalletLegacy/WalletUtils.h"
 #include "Common/StringTools.h"
 #include "CryptoNoteCore/CryptoNoteTools.h"
-#include "BurnTransactionHandler.h"
-#include "CryptoNoteCore/DepositCommitment.h"
 #include "WalletLegacy/WalletLegacyEvent.h"
 #include "WalletLegacy/WalletLegacy.h"
 
@@ -141,6 +142,15 @@ uint64_t calculateInvestmentsAmount(const std::vector<CryptoNote::TransactionOut
   });
 }
 
+uint64_t calculateHeatAmount(const std::vector<CryptoNote::TransactionOutputInformation>& transfers) {
+  return std::accumulate(transfers.begin(), transfers.end(), static_cast<uint64_t>(0),
+    [](uint64_t sum, const CryptoNote::TransactionOutputInformation& output) {
+      if (output.term == CryptoNote::parameters::HEAT_TERM)
+        return sum + output.amount;
+      return sum;
+    });
+}
+
 
 } //namespace
 
@@ -178,7 +188,6 @@ WalletLegacy::WalletLegacy(const CryptoNote::Currency& currency, INode& node, Lo
   m_transactionsCache(m_currency.mempoolTxLiveTime()),
   m_sender(nullptr),
   m_onInitSyncStarter(new SyncStarter(m_blockchainSync)),
-  m_burnTransactionManager(std::unique_ptr<CryptoNote::BurnTransactionManager>(new CryptoNote::BurnTransactionManager())),
   m_pendingBurnAmount(0),
   m_hasPendingBurnSecret(false)
 {
@@ -284,7 +293,7 @@ void WalletLegacy::doLoad(std::istream& source) {
     std::unique_lock<std::mutex> lock(m_cacheMutex);
 
     std::string cache;
-    WalletLegacySerializer serializer(m_account, m_transactionsCache);
+    WalletLegacySerializer serializer(m_account, m_transactionsCache, m_afkLockSecrets);
     serializer.deserialize(source, m_password, cache);
 
     initSync();
@@ -427,7 +436,7 @@ void WalletLegacy::doSave(std::ostream& destination, bool saveDetailed, bool sav
     m_blockchainSync.stop();
     std::unique_lock<std::mutex> lock(m_cacheMutex);
 
-    WalletLegacySerializer serializer(m_account, m_transactionsCache);
+    WalletLegacySerializer serializer(m_account, m_transactionsCache, m_afkLockSecrets);
     std::string cache;
 
     if (saveCache) {
@@ -518,6 +527,20 @@ uint64_t WalletLegacy::pendingDepositBalance() {
   throwIfNotInitialised();
 
   return calculatePendingDepositBalance();
+}
+
+uint64_t WalletLegacy::actualHeatBalance() {
+  std::unique_lock<std::mutex> lock(m_cacheMutex);
+  throwIfNotInitialised();
+
+  return calculateActualHeatBalance();
+}
+
+uint64_t WalletLegacy::pendingHeatBalance() {
+  std::unique_lock<std::mutex> lock(m_cacheMutex);
+  throwIfNotInitialised();
+
+  return calculatePendingHeatBalance();
 }
 
 size_t WalletLegacy::getTransactionCount() {
@@ -846,6 +869,296 @@ TransactionId WalletLegacy::deposit(uint32_t term, uint64_t amount, uint64_t fee
   return txId;
 }
 
+TransactionId WalletLegacy::mintHeatV10(uint64_t xfgBurned, uint64_t heatMinted, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeHeatMintV10Request(txId, events, xfgBurned, heatMinted, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+
+  notifyClients(events);
+
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+
+  return txId;
+}
+
+TransactionId WalletLegacy::sendHeatV10(const AccountPublicAddress& recipient, uint64_t amount, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+
+  fee = m_currency.minimumFee();
+
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeHeatTransferV10Request(txId, events, recipient, amount, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+
+  notifyClients(events);
+
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+
+  return txId;
+}
+
+TransactionId WalletLegacy::placeOrderV13(uint8_t side, uint64_t amount, uint64_t price, uint32_t expiration, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+  fee = m_currency.minimumFee();
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makePlaceOrderV13Request(txId, events, side, amount, price, expiration, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+  notifyClients(events);
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+  return txId;
+}
+
+TransactionId WalletLegacy::cancelOrderV13(const Crypto::Hash& orderId, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+  fee = m_currency.minimumFee();
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeCancelOrderV13Request(txId, events, orderId, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+  notifyClients(events);
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+  return txId;
+}
+
+TransactionId WalletLegacy::marketBuyV13(uint64_t xfgWanted, uint64_t maxHeatCost, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+  fee = m_currency.minimumFee();
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeMarketBuyV13Request(txId, events, xfgWanted, maxHeatCost, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+  notifyClients(events);
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+  return txId;
+}
+
+TransactionId WalletLegacy::marketSellV13(uint64_t xfgToSell, uint64_t minHeatReceive, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+  fee = m_currency.minimumFee();
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeMarketSellV13Request(txId, events, xfgToSell, minHeatReceive, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+  notifyClients(events);
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+  return txId;
+}
+
+TransactionId WalletLegacy::ammSwapV10(uint8_t direction, uint64_t inputAmount, uint64_t outputAmount,
+                                        uint64_t minOutput, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+
+  fee = m_currency.minimumFee();
+
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeAmmSwapV10Request(txId, events, direction, inputAmount, outputAmount, minOutput, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+
+  notifyClients(events);
+
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+
+  return txId;
+}
+
+TransactionId WalletLegacy::lpAddV10(uint64_t amountXfg, uint64_t amountHeat, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+
+  fee = m_currency.minimumFee();
+
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeLpAddV10Request(txId, events, amountXfg, amountHeat, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+
+  notifyClients(events);
+
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+
+  return txId;
+}
+
+TransactionId WalletLegacy::lpRemoveV10(uint64_t lpShares, uint64_t minXfg, uint64_t minHeat, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+
+  fee = m_currency.minimumFee();
+
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeLpRemoveV10Request(txId, events, lpShares, minXfg, minHeat, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+
+  notifyClients(events);
+
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+
+  return txId;
+}
+
+TransactionId WalletLegacy::lpClaimFeesV10(uint64_t lpShares, uint64_t minXfg, uint64_t minHeat, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+
+  fee = m_currency.minimumFee();
+
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeLpClaimFeesRequest(txId, events, lpShares, minXfg, minHeat, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+
+  notifyClients(events);
+
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+
+  return txId;
+}
+
+TransactionId WalletLegacy::heatDepositV10(uint64_t amount, uint32_t termEpochs, uint64_t bankingFee, uint64_t fee, uint64_t mixIn) {
+  throwIfNotInitialised();
+
+  // Consensus rejects CD outputs below the activation height; say so plainly
+  // instead of building a transaction the network will refuse.
+  const uint32_t nextHeight = m_node.getLastKnownBlockHeight() + 1;
+  if (nextHeight < m_currency.cdActivationHeight()) {
+    throw std::system_error(make_error_code(error::WRONG_STATE),
+        "HEAT CDs activate at block " + std::to_string(m_currency.cdActivationHeight()) +
+        " (current height " + std::to_string(nextHeight) + ")");
+  }
+
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+
+  fee = m_currency.minimumFee();
+
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeHeatDepositV10Request(txId, events, amount, termEpochs, bankingFee, fee, mixIn);
+    if (request != nullptr) pushBalanceUpdatedEvents(events);
+  }
+
+  notifyClients(events);
+
+  if (request) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+
+  return txId;
+}
+
+TransactionId WalletLegacy::donateToTreasury(Crypto::SecretKey& transactionSK,
+                                             uint64_t amount,
+                                             uint64_t fee,
+                                             uint64_t mixIn) {
+  throwIfNotInitialised();
+
+  TransactionId txId = 0;
+  std::unique_ptr<WalletRequest> request;
+  std::deque<std::unique_ptr<WalletLegacyEvent>> events;
+
+  fee = m_currency.minimumFee();
+
+  {
+    std::unique_lock<std::mutex> lock(m_cacheMutex);
+    request = m_sender->makeDonateToTreasuryRequest(txId, events, amount, fee, mixIn, transactionSK);
+
+    if (request != nullptr) {
+      pushBalanceUpdatedEvents(events);
+    }
+  }
+
+  notifyClients(events);
+
+  if (request != nullptr) {
+    m_asyncContextCounter.addAsyncContext();
+    request->perform(m_node, std::bind(&WalletLegacy::sendTransactionCallback, this, std::placeholders::_1, std::placeholders::_2));
+  }
+
+  return txId;
+}
+
 TransactionId WalletLegacy::withdrawDeposits(const std::vector<DepositId>& depositIds, uint64_t fee) {
   throwIfNotInitialised();
 
@@ -873,6 +1186,8 @@ TransactionId WalletLegacy::withdrawDeposits(const std::vector<DepositId>& depos
 
   return txId;
 }
+
+// REMOVED: withdrawLegacyBond — no bond claims exist (0xCB/0xCC retired).
 
 /* go through all unlocked outputs and return a total of
   everything below the dust threshold */
@@ -1036,10 +1351,6 @@ void WalletLegacy::onTransactionUpdated(ITransfersSubscription* object, const Ha
       events.push_back(std::move(pendingDepositBalanceChangedEvent));
     }
 
-    // Process transaction for burn detection
-    if (txInfo.totalAmountOut > 0) {
-      processTransactionForBurnDetection(Common::toHex(transactionHash.data, 32), txInfo.extra, txInfo.totalAmountOut);
-    }
   }
 
   notifyClients(events);
@@ -1076,6 +1387,7 @@ void WalletLegacy::onTransfersUnlocked(ITransfersSubscription* object, const std
 
     notifyIfDepositBalanceChanged();
     notifyIfInvestmentBalanceChanged();
+    notifyIfHeatBalanceChanged();
   }
 }
 
@@ -1089,6 +1401,7 @@ void WalletLegacy::onTransfersLocked(ITransfersSubscription* object, const std::
 
     notifyIfDepositBalanceChanged();
     notifyIfInvestmentBalanceChanged();
+    notifyIfHeatBalanceChanged();
   }
 }
 
@@ -1215,6 +1528,44 @@ std::unique_ptr<WalletLegacyEvent> WalletLegacy::getPendingInvestmentBalanceChan
 
 
 
+
+
+void WalletLegacy::notifyIfHeatBalanceChanged() {
+  auto actualHeatEvent = getActualHeatBalanceChangedEvent();
+  if (actualHeatEvent) {
+    actualHeatEvent->notify(m_observerManager);
+  }
+  auto pendingHeatEvent = getPendingHeatBalanceChangedEvent();
+  if (pendingHeatEvent) {
+    pendingHeatEvent->notify(m_observerManager);
+  }
+}
+
+std::unique_ptr<WalletLegacyEvent> WalletLegacy::getActualHeatBalanceChangedEvent() {
+  auto actual = calculateActualHeatBalance();
+  auto prevActual = m_lastNotifiedActualHeatBalance.exchange(actual);
+
+  std::unique_ptr<WalletLegacyEvent> event;
+
+  if (actual != prevActual) {
+    event = std::unique_ptr<WalletLegacyEvent>(new WalletActualHeatBalanceUpdatedEvent(actual));
+  }
+
+  return event;
+}
+
+std::unique_ptr<WalletLegacyEvent> WalletLegacy::getPendingHeatBalanceChangedEvent() {
+  auto pending = calculatePendingHeatBalance();
+  auto prevPending = m_lastNotifiedPendingHeatBalance.exchange(pending);
+
+  std::unique_ptr<WalletLegacyEvent> event;
+
+  if (pending != prevPending) {
+    event = std::unique_ptr<WalletLegacyEvent>(new WalletPendingHeatBalanceUpdatedEvent(pending));
+  }
+
+  return event;
+}
 
 std::unique_ptr<WalletLegacyEvent> WalletLegacy::getActualBalanceChangedEvent() {
   auto actual = calculateActualBalance();
@@ -1370,6 +1721,20 @@ uint64_t WalletLegacy::calculatePendingInvestmentBalance() {
   return calculateInvestmentsAmount(transfers, m_currency, heights);
 }
 
+uint64_t WalletLegacy::calculateActualHeatBalance() {
+  std::vector<TransactionOutputInformation> transfers;
+  m_transferDetails->getOutputs(transfers, ITransfersContainer::IncludeTypeDeposit | ITransfersContainer::IncludeStateUnlocked);
+  return calculateHeatAmount(transfers) - m_transactionsCache.countUnconfirmedSpentDepositsTotalAmount();
+}
+
+uint64_t WalletLegacy::calculatePendingHeatBalance() {
+  std::vector<TransactionOutputInformation> transfers;
+  m_transferDetails->getOutputs(transfers, ITransfersContainer::IncludeTypeDeposit
+                                | ITransfersContainer::IncludeStateLocked
+                                | ITransfersContainer::IncludeStateSoftLocked);
+  return calculateHeatAmount(transfers);
+}
+
 uint64_t WalletLegacy::calculateActualBalance() {
   uint64_t total = m_transferDetails->balance(ITransfersContainer::IncludeKeyUnlocked);
   for (const auto& sa : m_subAddresses) {
@@ -1407,6 +1772,16 @@ void WalletLegacy::pushBalanceUpdatedEvents(std::deque<std::unique_ptr<WalletLeg
   auto pendingInvestmentBalanceUpdated = getPendingInvestmentBalanceChangedEvent();
   if (pendingInvestmentBalanceUpdated != nullptr) {
     eventsQueue.push_back(std::move(pendingInvestmentBalanceUpdated));
+  }
+
+  auto actualHeatBalanceUpdated = getActualHeatBalanceChangedEvent();
+  if (actualHeatBalanceUpdated != nullptr) {
+    eventsQueue.push_back(std::move(actualHeatBalanceUpdated));
+  }
+
+  auto pendingHeatBalanceUpdated = getPendingHeatBalanceChangedEvent();
+  if (pendingHeatBalanceUpdated != nullptr) {
+    eventsQueue.push_back(std::move(pendingHeatBalanceUpdated));
   }
 
   auto actualBalanceUpdated = getActualBalanceChangedEvent();
@@ -1612,69 +1987,12 @@ std::string WalletLegacy::getReserveProof(const uint64_t &reserve, const std::st
 
 bool WalletLegacy::checkWalletPassword(std::istream& source, const std::string& password) {
   std::unique_lock<std::mutex> lock(m_cacheMutex);
-  WalletLegacySerializer serializer(m_account, m_transactionsCache);
+  WalletLegacySerializer serializer(m_account, m_transactionsCache, m_afkLockSecrets);
   return serializer.deserialize(source, password);
 }
 
 
 //KK
-
-// Burn transaction management implementation
-void WalletLegacy::initializeBurnTransactionManager() {
-  if (m_burnTransactionManager) {
-    m_burnTransactionManager->initialize();
-    setBurnTransactionCallbacks();
-  }
-}
-
-void WalletLegacy::setBurnTransactionCallbacks() {
-  if (!m_burnTransactionManager) {
-    return;
-  }
-
-  // Set up callbacks for burn detection and STARK proof generation
-  m_burnTransactionManager->setBurnDetectedCallback([this](const std::string& txHash, uint64_t amount, const std::string& ethAddress) {
-    // Log burn transaction detection
-    std::stringstream ss;
-    ss << "Burn transaction detected: " << txHash
-       << ", amount: " << amount
-       << ", ETH address: " << ethAddress;
-    m_loggerGroup("Wallet", Logging::INFO, boost::posix_time::microsec_clock::universal_time(), ss.str());
-
-    // Notify observerMangager about burn transaction
-    // NOTE : Find way to properly disclose network burns/reborn coinbase rewards..
-    // perhaps per epoch (instead of per-burn/block)
-  });
-
-  m_burnTransactionManager->setStarkProofGeneratedCallback([this](const std::string& txHash, const std::string& proofData) {
-    // Log STARK proof generation
-    std::stringstream ss;
-    ss << "STARK proof generated for burn transaction: " << txHash;
-    m_loggerGroup("Wallet", Logging::INFO, boost::posix_time::microsec_clock::universal_time(), ss.str());
-
-    // Notify about STARK proof generation
-  });
-
-  m_burnTransactionManager->setErrorCallback([this](const std::string& error) {
-    // Log errors
-    std::stringstream ss;
-    ss << "Burn transaction error: " << error;
-    m_loggerGroup("Wallet", Logging::ERROR, boost::posix_time::microsec_clock::universal_time(), ss.str());
-  });
-}
-
-void WalletLegacy::processTransactionForBurnDetection(const std::string& txHash, const std::vector<uint8_t>& txExtra, uint64_t amount) {
-  if (m_burnTransactionManager) {
-    m_burnTransactionManager->processTransaction(txHash, txExtra, amount);
-  }
-}
-
-bool WalletLegacy::isBurnTransaction(const std::vector<uint8_t>& txExtra) {
-  if (m_burnTransactionManager) {
-    return m_burnTransactionManager->getHandler().isBurnTransaction(txExtra);
-  }
-  return false;
-}
 
 // Burn deposit secret management implementation
 void WalletLegacy::storeBurnDepositSecret(const std::string& txHash, const Crypto::SecretKey& secret, uint64_t amount, const std::vector<uint8_t>& metadata) {
@@ -1705,22 +2023,180 @@ bool WalletLegacy::hasBurnDepositSecret(const std::string& txHash) {
   return m_burnDepositSecrets.find(txHash) != m_burnDepositSecrets.end();
 }
 
-BurnTransactionHandler::BurnTransactionData WalletLegacy::parseBurnTransaction(const std::vector<uint8_t>& txExtra) {
-  if (m_burnTransactionManager) {
-    return m_burnTransactionManager->getHandler().parseBurnTransaction(txExtra);
-  }
-  return BurnTransactionHandler::BurnTransactionData();
-}
-
-void WalletLegacy::generateStarkProofForBurn(const std::string& txHash, const std::string& ethAddress, uint64_t amount) {
-  if (m_burnTransactionManager) {
-    m_burnTransactionManager->getHandler().generateStarkProof(txHash, ethAddress, amount);
-  }
-}
+// Deprecated BPDF/STARK methods removed (C3/C8 security fixes)
 
 // Implementation of process method for WalletBurnDepositSecretCreatedEvent
 void WalletBurnDepositSecretCreatedEvent::process(CryptoNote::WalletLegacy* wallet) {
   wallet->storeBurnDepositSecret(getTxHash(), getSecret(), getAmount(), getMetadata());
 }
 
-} //namespace CryptoNote
+std::error_code WalletLegacy::create_afk_lock(uint64_t amount, uint32_t timeout_hours, uint8_t pair, std::string& lockId, std::string& adaptorPoint, std::string& preSig, std::string& hashLock) {
+  if (!CryptoNote::parameters::AFK_SOFT_ORDER_EXECUTION_ENABLED) {
+    return make_error_code(CryptoNote::error::INVALID_ARGUMENT);
+  }
+  std::unique_lock<std::mutex> lock(m_cacheMutex);
+  throwIfNotInitialised();
+
+  if (amount == 0) return make_error_code(CryptoNote::error::INVALID_ARGUMENT);
+  if (timeout_hours == 0 || timeout_hours > 200) return make_error_code(CryptoNote::error::INVALID_ARGUMENT);
+  const auto* pairDescriptor =
+      XfgSwap::swapPairDescriptor(static_cast<XfgSwap::SwapPair>(pair));
+  if (!pairDescriptor ||
+      pairDescriptor->support == XfgSwap::SwapPairSupport::STAGED) {
+    return make_error_code(CryptoNote::error::INVALID_ARGUMENT);
+  }
+
+  // 1. Generate AFK Lock Data
+  Crypto::AFKLockData lockData;
+  Crypto::Hash zeroHash = {{0}};
+  if (!Crypto::generate_afk_lock_data(zeroHash, m_account.getAccountKeys().address.spendPublicKey, m_account.getAccountKeys().spendSecretKey, lockData)) {
+    return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+  }
+
+  // Hashlock H(t) so the taker can lock the counterparty HTLC without
+  // learning t. Family must match the counterparty program (same rule as
+  // SwapDaemon::adaptor_generate_adaptor): SHA-256 for UTXO scripts,
+  // keccak-256 for EVM/Solana.
+  {
+    const uint8_t* secretBytes = reinterpret_cast<const uint8_t*>(&lockData.secret);
+    uint8_t digest[32];
+    const bool utxoFamily =
+        pairDescriptor->family == XfgSwap::SwapChainFamily::UTXO;
+    if (utxoFamily) {
+      SHA256(secretBytes, 32, digest);
+    } else {
+      keccak(secretBytes, 32, digest, 32);
+    }
+    hashLock = Common::toHex(digest, 32);
+  }
+
+  // 2. Calculate Total Lock Amount (Base + 1% Bob's fee)
+  uint64_t feeBob = (amount * CryptoNote::parameters::SWAP_FEE_RATE_BPS) / CryptoNote::parameters::SWAP_FEE_RATE_DIVISOR;
+  uint64_t totalAmount = amount + feeBob;
+
+  // Create the lock transaction (Refund path)
+  uint64_t unlockTimestamp = std::time(nullptr) + (static_cast<uint64_t>(timeout_hours) * 3600);
+  
+  Crypto::SecretKey txSK;
+  Crypto::PublicKey txPK;
+  Crypto::generate_keys(txPK, txSK);
+
+  std::vector<WalletLegacyTransfer> transfers;
+  WalletLegacyTransfer transfer;
+  transfer.address = getAddress();
+  transfer.amount = static_cast<int64_t>(totalAmount);
+  transfers.push_back(transfer);
+
+  TransactionId txId = sendTransaction(txSK, transfers, m_currency.minimumFee(), "", 0, unlockTimestamp);
+  if (txId == WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+    return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+  }
+
+  // Use the transaction hash as the lockId
+  WalletLegacyTransaction tx;
+  if (!getTransaction(txId, tx)) {
+    return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+  }
+  
+  std::string lockIdStr = Common::podToHex(tx.hash);
+  lockId = lockIdStr;
+  adaptorPoint = Crypto::pointToString(lockData.adaptor_point);
+  preSig = Crypto::signatureToString(lockData.pre_sig);
+
+  // 3. Store secret and pre-signature
+  Crypto::Signature ps;
+  std::memcpy(&ps, &lockData.pre_sig, sizeof(ps));
+  m_afkLockSecrets[lockIdStr] = AfkLockSecret(reinterpret_cast<const Crypto::SecretKey&>(lockData.secret), ps, amount, timeout_hours, pair);
+
+  return std::error_code();
+}
+
+std::error_code WalletLegacy::claim_afk_swap(const std::string& swapId, const std::string& secret_s, const std::string& target_chain, const std::string& fee_address, const std::string& payout_address, std::string& txHash) {
+  std::unique_lock<std::mutex> lock(m_cacheMutex);
+  throwIfNotInitialised();
+  (void)target_chain;
+
+  // Refuse placeholder / empty destinations — funds must go to a real address
+  if (payout_address.empty() ||
+      payout_address.find("Placeholder") != std::string::npos ||
+      payout_address.find("placeholder") != std::string::npos) {
+    return make_error_code(CryptoNote::error::INVALID_ARGUMENT);
+  }
+  AccountPublicAddress payoutAcc;
+  if (!m_currency.parseAccountAddressString(payout_address, payoutAcc)) {
+    return make_error_code(CryptoNote::error::BAD_ADDRESS);
+  }
+  if (!fee_address.empty()) {
+    AccountPublicAddress feeAcc;
+    if (!m_currency.parseAccountAddressString(fee_address, feeAcc)) {
+      return make_error_code(CryptoNote::error::BAD_ADDRESS);
+    }
+  }
+
+  auto it = m_afkLockSecrets.find(swapId);
+  if (it == m_afkLockSecrets.end()) {
+    return make_error_code(CryptoNote::error::NOT_FOUND);
+  }
+
+  // 1. Extract secret s from the final signature revealed on target chain
+  Crypto::Signature finalSig;
+  if (!Common::podFromHex(secret_s, finalSig)) {
+    return make_error_code(CryptoNote::error::INVALID_ARGUMENT);
+  }
+
+  Crypto::AdaptorSignature pre_sig;
+  std::memcpy(&pre_sig, &it->second.preSig, sizeof(pre_sig));
+
+  Crypto::EllipticCurveScalar expectedSecret;
+  std::memcpy(&expectedSecret, &it->second.secret, sizeof(expectedSecret));
+  Crypto::Hash zeroHash{};
+  if (!Crypto::verify_afk_completion(
+          zeroHash,
+          m_account.getAccountKeys().address.spendPublicKey,
+          pre_sig,
+          expectedSecret,
+          finalSig)) {
+    return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+  }
+
+  // 2. Calculate payouts (Net 99% for Taker)
+  uint64_t baseAmount = it->second.amount;
+  uint64_t minFee = m_currency.minimumFee();
+  uint64_t totalLocked = baseAmount + (baseAmount * CryptoNote::parameters::SWAP_FEE_RATE_BPS / CryptoNote::parameters::SWAP_FEE_RATE_DIVISOR);
+
+  uint64_t takerNet = baseAmount - (baseAmount * CryptoNote::parameters::SWAP_FEE_RATE_BPS / CryptoNote::parameters::SWAP_FEE_RATE_DIVISOR);
+  uint64_t takerGross = takerNet + minFee;
+  uint64_t feePoolAmount = totalLocked - takerGross - minFee;
+
+  if (totalLocked < takerGross + minFee) {
+    return make_error_code(CryptoNote::error::INVALID_ARGUMENT);
+  }
+
+  // 3. Build and broadcast claim to the authenticated payout address only
+  std::vector<WalletLegacyTransfer> transfers;
+  transfers.push_back({ payout_address, static_cast<int64_t>(takerGross) });
+  if (!fee_address.empty() && feePoolAmount > 0) {
+    transfers.push_back({ fee_address, static_cast<int64_t>(feePoolAmount) });
+  }
+
+  Crypto::SecretKey txSK;
+  Crypto::PublicKey txPK;
+  Crypto::generate_keys(txPK, txSK);
+  TransactionId txId = sendTransaction(txSK, transfers, minFee);
+
+  if (txId == WALLET_LEGACY_INVALID_TRANSACTION_ID) {
+    return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+  }
+
+  WalletLegacyTransaction tx;
+  if (getTransaction(txId, tx)) {
+    txHash = Common::podToHex(tx.hash);
+  } else {
+    txHash = "TX_BROADCASTED";
+  }
+
+  m_afkLockSecrets.erase(it);
+  return std::error_code();
+}
+
+} // namespace CryptoNote

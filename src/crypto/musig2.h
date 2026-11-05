@@ -41,13 +41,7 @@
 
 #pragma once
 
-#include <cstdint>
-#include <cstring>
-#include "../../include/CryptoTypes.h"
-
-extern "C" {
-#include "crypto-ops.h"
-}
+#include "crypto.h"
 
 namespace Crypto {
 
@@ -80,6 +74,8 @@ struct Musig2Session {
   EllipticCurveScalar b;        // nonce binding factor
   PublicKey R_combined;          // effective nonce: R_agg[0] + b*R_agg[1] [+ T]
   EllipticCurveScalar challenge; // c = Hs(prefix_hash || agg_pubkey || R_combined)
+  bool nonceSigned = false;      // true after musig2_partial_sign; guards against nonce reuse
+                                  // WARNING: must be used under external mutex in multi-threaded contexts
 };
 
 // A single signer's partial signature.
@@ -130,8 +126,10 @@ bool musig2_session_init(
 //
 // signer_index: 0 or 1 (must match the order used in key_agg).
 // sec_nonce is consumed and zeroed after use.
-void musig2_partial_sign(
-    const Musig2Session &session,
+// session.nonceSigned is set to true; calling this twice on the same session
+// is rejected with a false return to prevent nonce reuse.
+bool musig2_partial_sign(
+    Musig2Session &session,      // nonceSigned flag is checked and set
     const Musig2KeyAgg &key_agg,
     Musig2SecNonce &sec_nonce,   // zeroed after use
     const SecretKey &sec_key,

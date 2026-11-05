@@ -3,25 +3,41 @@ package app
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"sync"
 	"time"
+
+	"golang.org/x/time/rate"
 )
 
 // FuegoClient talks to a fuegod node via JSON-RPC.
 type FuegoClient struct {
-	endpoint string
-	client   *http.Client
+	endpoint     string
+	client       *http.Client
+	fetchLimiter *rate.Limiter // max 10 FetchAll calls/second
+	authHeader   string        // non-empty when Basic Auth is configured
 }
 
 func NewFuegoClient(endpoint string) *FuegoClient {
 	return &FuegoClient{
-		endpoint: endpoint,
-		client:   &http.Client{Timeout: 10 * time.Second},
+		endpoint:     endpoint,
+		client:       &http.Client{Timeout: 10 * time.Second},
+		fetchLimiter: rate.NewLimiter(rate.Every(time.Second/10), 10), // 10 calls/s
 	}
+}
+
+// NewFuegoClientAuth creates a FuegoClient that attaches HTTP Basic Auth to
+// every request. Pass empty strings to skip authentication.
+func NewFuegoClientAuth(endpoint, username, password string) *FuegoClient {
+	fc := NewFuegoClient(endpoint)
+	if username != "" || password != "" {
+		fc.authHeader = "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
+	}
+	return fc
 }
 
 // --- RPC response types (mirror CoreRpcServerCommandsDefinitions.h) ---
@@ -35,6 +51,7 @@ type SwapOffer struct {
 	Timestamp    uint64 `json:"timestamp"`
 	TTLBlocks    uint32 `json:"ttlBlocks"`
 	PostedHeight uint32 `json:"postedHeight"`
+	IsSoftOrder  bool   `json:"isSoftOrder"`
 }
 
 type SwapTrade struct {
@@ -66,19 +83,21 @@ type SwapPriceResponse struct {
 	CompositeRate string             `json:"compositeRate"`
 	SourceCount   uint32             `json:"sourceCount"`
 	Sources       []PriceSourceEntry `json:"sources"`
-	XfgUsdLow     string            `json:"xfgUsdLow"`
-	XfgUsdHigh    string            `json:"xfgUsdHigh"`
-	XfgUsdMid     string            `json:"xfgUsdMid"`
-	PairImplied   []PairImplied     `json:"pairImplied"`
-	Status        string            `json:"status"`
+	XfgUsdLow     string             `json:"xfgUsdLow"`
+	XfgUsdHigh    string             `json:"xfgUsdHigh"`
+	XfgUsdMid     string             `json:"xfgUsdMid"`
+	PairImplied   []PairImplied      `json:"pairImplied"`
+	HearthRatio   string             `json:"hearthRatio"`
+	HeatUsd       string             `json:"heatUsd"`
+	Status        string             `json:"status"`
 }
 
 // SwapStatus represents the state of an active adaptor-signature swap.
 type SwapStatus struct {
 	SwapID    string `json:"swapId"`
 	Pair      uint8  `json:"pair"`
-	Role      string `json:"role"`      // "ALICE" or "BOB"
-	State     string `json:"state"`     // INITIATED, KEYS_EXCHANGED, ESCROW_FUNDED, PRESIGS_READY, CTR_LOCKED, SECRET_REVEALED, XFG_SPENT, REFUNDED, FAILED
+	Role      string `json:"role"`  // "ALICE" or "BOB"
+	State     string `json:"state"` // INITIATED, KEYS_EXCHANGED, ESCROW_FUNDED, PRESIGS_READY, CTR_LOCKED, SECRET_REVEALED, XFG_SPENT, REFUNDED, FAILED
 	XfgAmount uint64 `json:"xfgAmount"`
 	CtrAmount uint64 `json:"ctrAmount"`
 	Rate      string `json:"rate"`
@@ -109,6 +128,40 @@ type NodeInfo struct {
 	Connections   uint64 `json:"-"` // computed: IncomingConns + OutgoingConns
 	Version       string `json:"version"`
 	Status        string `json:"status"`
+}
+
+// --- OrderBook RPC types (mirror COMMAND_RPC_GET_ORDER_BOOK response) ---
+
+type OrderBookLevel struct {
+	Price      uint64 `json:"price"`
+	Amount     uint64 `json:"amount"`
+	OrderCount int    `json:"orderCount"`
+}
+
+type OrderBookSnapshot struct {
+	Bids   []OrderBookLevel `json:"bids"`
+	Asks   []OrderBookLevel `json:"asks"`
+	Spread uint64           `json:"spread"`
+	Height uint64           `json:"height"`
+	Status string           `json:"status"`
+}
+
+type PlaceOrderResult struct {
+	OrderId  string `json:"orderId"`
+	Status   string `json:"status"`
+	Filled   uint64 `json:"filled"`
+	StatusMsg string `json:"statusMsg"`
+}
+
+type OpenOrder struct {
+	OrderId   string `json:"orderId"`
+	Side      string `json:"side"`
+	Pair      uint8  `json:"pair"`
+	Price     uint64 `json:"price"`
+	Amount    uint64 `json:"amount"`
+	Filled    uint64 `json:"filled"`
+	Timestamp uint64 `json:"timestamp"`
+	TtlBlocks uint32 `json:"ttlBlocks"`
 }
 
 // --- Per-pair fetch methods ---
@@ -155,6 +208,43 @@ func (c *FuegoClient) GetSwapStatus(swapId string) (*SwapStatus, error) {
 	return &resp, nil
 }
 
+func (c *FuegoClient) CancelSwapOffer(offerId, makerPubKey, signature string) error {
+	req := map[string]interface{}{
+		"offerId":     offerId,
+		"makerPubKey": makerPubKey,
+		"signature":   signature,
+	}
+	var resp struct {
+		Status string `json:"status"`
+	}
+	if err := c.post("/cancelswap", req, &resp); err != nil {
+		return err
+	}
+	if resp.Status != "OK" {
+		return fmt.Errorf("cancel failed: %s", resp.Status)
+	}
+	return nil
+}
+
+func (c *FuegoClient) RequestSwap(offerId string, amount uint64, takerPubKey, proofOfFunds string) error {
+	req := map[string]interface{}{
+		"offerId":      offerId,
+		"amount":       amount,
+		"takerPubKey":  takerPubKey,
+		"proofOfFunds": proofOfFunds,
+	}
+	var resp struct {
+		Status string `json:"status"`
+	}
+	if err := c.post("/requestswap", req, &resp); err != nil {
+		return err
+	}
+	if resp.Status != "OK" {
+		return fmt.Errorf("request swap failed: %s", resp.Status)
+	}
+	return nil
+}
+
 func (c *FuegoClient) GetActiveSwaps() ([]SwapStatus, error) {
 	var resp struct {
 		Swaps  []SwapStatus `json:"swaps"`
@@ -164,6 +254,72 @@ func (c *FuegoClient) GetActiveSwaps() ([]SwapStatus, error) {
 		return nil, err
 	}
 	return resp.Swaps, nil
+}
+
+// --- OrderBook RPC methods ---
+
+func (c *FuegoClient) GetOrderBook(pair uint8, depth int) (*OrderBookSnapshot, error) {
+	req := map[string]interface{}{"pair": pair, "depth": depth}
+	var resp OrderBookSnapshot
+	if err := c.post("/getorderbook", req, &resp); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// PlaceSignedOrder submits a fully signed limit order (required by daemon).
+func (c *FuegoClient) PlaceSignedOrder(side, pair uint8, price, amount uint64, ttlBlocks uint32,
+	orderId, makerPubKey, signature string, nonce uint64) (*PlaceOrderResult, error) {
+	req := map[string]interface{}{
+		"side":        side,
+		"pair":        pair,
+		"price":       price,
+		"amount":      amount,
+		"ttlBlocks":   ttlBlocks,
+		"orderId":     orderId,
+		"makerPubKey": makerPubKey,
+		"signature":   signature,
+		"nonce":       nonce,
+	}
+	var resp PlaceOrderResult
+	if err := c.post("/placeorder", req, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Status != "" && resp.Status != "OK" {
+		return &resp, fmt.Errorf("placeorder: %s", resp.Status)
+	}
+	return &resp, nil
+}
+
+// CancelOrderSigned cancels with maker signature over "cancel:"+orderId.
+func (c *FuegoClient) CancelOrderSigned(orderId, makerPubKey, signature string) error {
+	req := map[string]interface{}{
+		"orderId":     orderId,
+		"makerPubKey": makerPubKey,
+		"signature":   signature,
+	}
+	var resp struct {
+		Status string `json:"status"`
+	}
+	if err := c.post("/cancelorder", req, &resp); err != nil {
+		return err
+	}
+	if resp.Status != "OK" {
+		return fmt.Errorf("cancel failed: %s", resp.Status)
+	}
+	return nil
+}
+
+func (c *FuegoClient) GetOpenOrders(address string) ([]OpenOrder, error) {
+	req := map[string]interface{}{"address": address}
+	var resp struct {
+		Orders []OpenOrder `json:"orders"`
+		Status string      `json:"status"`
+	}
+	if err := c.post("/openorders", req, &resp); err != nil {
+		return nil, err
+	}
+	return resp.Orders, nil
 }
 
 func (c *FuegoClient) GetInfo() (*NodeInfo, error) {
@@ -177,20 +333,31 @@ func (c *FuegoClient) GetInfo() (*NodeInfo, error) {
 
 // --- Multi-pair parallel fetch ---
 
-// AllPairData holds fetched data for all active pairs.
+// AllPairData holds fetched data for all active pairs + CD market.
 type AllPairData struct {
-	Offers map[uint8][]SwapOffer
-	Prices map[uint8]*SwapPriceResponse
-	Trades map[uint8][]SwapTrade
-	Height uint64
+	Offers      map[uint8][]SwapOffer
+	Prices      map[uint8]*SwapPriceResponse
+	Trades      map[uint8][]SwapTrade
+	Books       map[uint8]*OrderBookSnapshot // new P2P orderbook (bids/asks depth)
+	Height      uint64
+	CdOffers    []CdOffer
+	CdPrices    map[uint64]*CdPriceStats // keyed by CD amount tier
+	ExtPrices   *ExternalPrices          // reference USD prices from DeFiLlama
 }
 
-// FetchAll fetches offers, prices, and trades for the given pairs in parallel.
+// FetchAll fetches offers, prices, and trades for the given pairs in parallel,
+// plus CD market offers and price stats.
+// It is rate-limited to 10 calls/second to prevent flooding the daemon.
 func (c *FuegoClient) FetchAll(pairs []uint8) (*AllPairData, error) {
+	if !c.fetchLimiter.Allow() {
+		return nil, fmt.Errorf("FetchAll: rate limit exceeded (max 10/s)")
+	}
 	data := &AllPairData{
-		Offers: make(map[uint8][]SwapOffer),
-		Prices: make(map[uint8]*SwapPriceResponse),
-		Trades: make(map[uint8][]SwapTrade),
+		Offers:   make(map[uint8][]SwapOffer),
+		Prices:   make(map[uint8]*SwapPriceResponse),
+		Trades:   make(map[uint8][]SwapTrade),
+		Books:    make(map[uint8]*OrderBookSnapshot),
+		CdPrices: make(map[uint64]*CdPriceStats),
 	}
 
 	var mu sync.Mutex
@@ -215,10 +382,10 @@ func (c *FuegoClient) FetchAll(pairs []uint8) (*AllPairData, error) {
 		mu.Unlock()
 	}()
 
-	// Fetch offers + prices + trades per pair
+	// Fetch offers + prices + trades + orderbook per pair
 	for _, pair := range pairs {
 		p := pair
-		wg.Add(3)
+		wg.Add(4)
 		go func() {
 			defer wg.Done()
 			offers, err := c.GetOffers(p)
@@ -252,10 +419,64 @@ func (c *FuegoClient) FetchAll(pairs []uint8) (*AllPairData, error) {
 			}
 			mu.Unlock()
 		}()
+		go func() {
+			defer wg.Done()
+			book, err := c.GetOrderBook(p, 20)
+			mu.Lock()
+			if err == nil {
+				data.Books[p] = book
+			} else if firstErr == nil {
+				firstErr = err
+			}
+			mu.Unlock()
+		}()
 	}
 
+	// Fetch CD market offers
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		offers, err := c.GetCdOffers(0)
+		mu.Lock()
+		if err == nil {
+			data.CdOffers = offers
+			// Fetch price stats for each distinct CD amount tier
+			seen := make(map[uint64]bool)
+			for _, o := range offers {
+				if seen[o.CdAmount] {
+					continue
+				}
+				seen[o.CdAmount] = true
+				if ps, err2 := c.GetCdPrice(o.CdAmount); err2 == nil {
+					data.CdPrices[o.CdAmount] = ps
+				}
+			}
+		}
+		mu.Unlock()
+	}()
+
 	wg.Wait()
+
+	// Fetch reference USD prices from DeFiLlama — non-blocking, uses cache
+	data.ExtPrices = GetExternalPrices()
+
 	return data, firstErr
+}
+
+// --- Alias resolution ---
+
+type AliasResult struct {
+	Found   bool   `json:"found"`
+	Alias   string `json:"alias"`
+	Address string `json:"address"`
+}
+
+func (c *FuegoClient) ResolveAlias(alias string) (string, bool) {
+	var result AliasResult
+	if err := c.post("/get_alias", map[string]string{"alias": alias}, &result); err != nil {
+		return "", false
+	}
+	return result.Address, result.Found
 }
 
 // --- HTTP helper ---
@@ -270,11 +491,24 @@ func (c *FuegoClient) post(path string, reqBody interface{}, result interface{})
 		body = bytes.NewReader(data)
 	}
 
-	resp, err := c.client.Post(c.endpoint+path, "application/json", body)
+	req, err := http.NewRequest(http.MethodPost, c.endpoint+path, body)
+	if err != nil {
+		return fmt.Errorf("build request %s: %w", path, err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.authHeader != "" {
+		req.Header.Set("Authorization", c.authHeader)
+	}
+
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return fmt.Errorf("request %s: %w", path, err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("rpc: server returned %d %s", resp.StatusCode, resp.Status)
+	}
 
 	raw, err := io.ReadAll(resp.Body)
 	if err != nil {

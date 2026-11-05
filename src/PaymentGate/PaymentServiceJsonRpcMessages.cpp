@@ -61,7 +61,7 @@ void GetViewKey::Request::serialize(CryptoNote::ISerializer &serializer)
 
 void GetViewKey::Response::serialize(CryptoNote::ISerializer &serializer)
 {
-  serializer(viewSecretKey, "privateViewKey");
+  serializer(viewPublicKey, "publicViewKey");
 }
 
 void GetStatus::Request::serialize(CryptoNote::ISerializer &serializer)
@@ -87,14 +87,12 @@ void CreateDeposit::Request::serialize(CryptoNote::ISerializer &serializer)
   serializer(sourceAddress, "sourceAddress");
   serializer(heatCommitment, "heatCommitment");
   serializer(metadata, "metadata");
-  serializer(useStagedUnlock, "useStagedUnlock");
 }
 
 void CreateDeposit::Response::serialize(CryptoNote::ISerializer &serializer)
 {
   serializer(transactionHash, "transactionHash");
   serializer(isBurnDeposit, "isBurnDeposit");
-  serializer(useStagedUnlock, "useStagedUnlock");
   serializer(transactionFee, "transactionFee");
   serializer(totalFees, "totalFees");
 }
@@ -141,7 +139,6 @@ void GetDeposit::Response::serialize(CryptoNote::ISerializer &serializer)
   serializer(unlockHeight, "unlockHeight");
   serializer(locked, "locked");
   serializer(address, "address");
-  serializer(useStagedUnlock, "useStagedUnlock");
   serializer(transactionFee, "transactionFee");
   serializer(totalFees, "totalFees");
 }
@@ -207,7 +204,6 @@ void GetSpendKeys::Request::serialize(CryptoNote::ISerializer &serializer)
 
 void GetSpendKeys::Response::serialize(CryptoNote::ISerializer &serializer)
 {
-  serializer(spendSecretKey, "privateSpendKey");
   serializer(spendPublicKey, "publicSpendKey");
 }
 
@@ -222,6 +218,8 @@ void GetBalance::Response::serialize(CryptoNote::ISerializer &serializer)
   serializer(lockedAmount, "lockedAmount");
   serializer(lockedDepositBalance, "lockedDepositBalance");
   serializer(unlockedDepositBalance, "unlockedDepositBalance");
+  serializer(lockedHeatBalance, "lockedHeatBalance");
+  serializer(unlockedHeatBalance, "unlockedHeatBalance");
 }
 
 void GetBlockHashes::Request::serialize(CryptoNote::ISerializer &serializer)
@@ -573,23 +571,6 @@ void CreateBurnDeposit::Response::serialize(CryptoNote::ISerializer &serializer)
   serializer(heatAmount, "heatAmount");
 }
 
-void CreateBurnDepositWithProof::Request::serialize(CryptoNote::ISerializer &serializer)
-{
-  serializer(amount, "amount");
-  serializer(sourceAddress, "sourceAddress");
-  serializer(recipientAddress, "recipientAddress");
-  serializer(metadata, "metadata");
-}
-
-void CreateBurnDepositWithProof::Response::serialize(CryptoNote::ISerializer &serializer)
-{
-  serializer(transactionHash, "transactionHash");
-  serializer(term, "term");
-  serializer(heatAmount, "heatAmount");
-  serializer(burnProofDataFile, "burnProofDataFile");
-  serializer(networkId, "networkId");
-}
-
 void CreateBurnDepositLarge::Request::serialize(CryptoNote::ISerializer &serializer)
 {
   serializer(sourceAddress, "sourceAddress");
@@ -601,53 +582,6 @@ void CreateBurnDepositLarge::Response::serialize(CryptoNote::ISerializer &serial
   serializer(transactionHash, "transactionHash");
   serializer(term, "term");
   serializer(heatAmount, "heatAmount");
-}
-
-void CreateBurnDepositLargeWithProof::Request::serialize(CryptoNote::ISerializer &serializer)
-{
-  serializer(sourceAddress, "sourceAddress");
-  serializer(recipientAddress, "recipientAddress");
-  serializer(metadata, "metadata");
-}
-
-void CreateBurnDepositLargeWithProof::Response::serialize(CryptoNote::ISerializer &serializer)
-{
-  serializer(transactionHash, "transactionHash");
-  serializer(term, "term");
-  serializer(heatAmount, "heatAmount");
-  serializer(burnProofDataFile, "burnProofDataFile");
-  serializer(networkId, "networkId");
-}
-
-// BPDF RPC serialization
-void GenerateBurnProofDataFile::Request::serialize(CryptoNote::ISerializer &serializer)
-{
-  serializer(transactionHash, "transactionHash");
-  serializer(recipientAddress, "recipientAddress");
-  serializer(outputPath, "outputPath");
-}
-
-void GenerateBurnProofDataFile::Response::serialize(CryptoNote::ISerializer &serializer)
-{
-  serializer(burnProofDataFile, "burnProofDataFile");
-  serializer(success, "success");
-  serializer(errorMessage, "errorMessage");
-  serializer(networkId, "networkId");
-}
-
-void GenerateBurnProofDataFileAuto::Request::serialize(CryptoNote::ISerializer &serializer)
-{
-  serializer(transactionHash, "transactionHash");
-  serializer(recipientAddress, "recipientAddress");
-  serializer(outputPath, "outputPath");
-}
-
-void GenerateBurnProofDataFileAuto::Response::serialize(CryptoNote::ISerializer &serializer)
-{
-  serializer(burnProofDataFile, "burnProofDataFile");
-  serializer(success, "success");
-  serializer(errorMessage, "errorMessage");
-  serializer(networkId, "networkId");
 }
 
 // Dynamic Supply RPC serialization
@@ -662,5 +596,139 @@ void GenerateBurnProofDataFileAuto::Response::serialize(CryptoNote::ISerializer 
 
 
 
+
+void GetHealth::Request::serialize(CryptoNote::ISerializer &serializer)
+{
+}
+
+void GetHealth::Response::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(daemon, "daemon");
+  serializer(wallet, "wallet");
+  serializer(swap, "swap");
+  serializer(height, "height");
+  serializer(targetHeight, "targetHeight");
+  serializer(lastBlockHash, "lastBlockHash");
+  serializer(peerCount, "peerCount");
+  serializer(depositCount, "depositCount");
+  serializer(transactionCount, "transactionCount");
+  serializer(addressCount, "addressCount");
+}
+
+void HeatMint::Request::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(xfg_burned, "xfg_burned");
+  serializer(heat_minted, "heat_minted");
+  serializer(mixin, "mixin");
+}
+
+void HeatMint::Response::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(tx_hash, "tx_hash");
+}
+
+void SendHeat::Request::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(address, "address");
+  serializer(amount, "amount");
+  serializer(mixin, "mixin");
+}
+
+void SendHeat::Response::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(tx_hash, "tx_hash");
+}
+
+void HeatDeposit::Request::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(amount, "amount");
+  serializer(term_epochs, "term_epochs");
+  serializer(banking_fee, "banking_fee");
+  serializer(fee, "fee");
+  serializer(mixin, "mixin");
+  serializer(sourceAddress, "sourceAddress");
+}
+
+void HeatDeposit::Response::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(tx_hash, "tx_hash");
+  serializer(status, "status");
+}
+
+void AmmSwap::Request::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(direction, "direction");
+  serializer(input_amount, "input_amount");
+  serializer(expected_output, "expected_output");
+  serializer(min_output, "min_output");
+  serializer(fee, "fee");
+  serializer(mixin, "mixin");
+}
+
+void AmmSwap::Response::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(tx_hash, "tx_hash");
+  serializer(status, "status");
+}
+
+void PlaceLimitOrder::Request::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(side, "side");
+  serializer(amount, "amount");
+  serializer(target_price, "target_price");
+  serializer(expiration, "expiration");
+  serializer(fee, "fee");
+  serializer(mixin, "mixin");
+}
+
+void PlaceLimitOrder::Response::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(tx_hash, "tx_hash");
+  serializer(status, "status");
+}
+
+void CancelLimitOrder::Request::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(order_id, "order_id");
+  serializer(fee, "fee");
+  serializer(mixin, "mixin");
+}
+
+void CancelLimitOrder::Response::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(tx_hash, "tx_hash");
+  serializer(status, "status");
+}
+
+void GetLimitOrders::Request::serialize(CryptoNote::ISerializer &) {}
+
+void GetLimitOrders::LimitOrderInfo::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(order_id, "order_id");
+  serializer(side, "side");
+  serializer(amount, "amount");
+  serializer(target_price, "target_price");
+  serializer(expiration, "expiration");
+  serializer(withdrawn, "withdrawn");
+}
+
+void GetLimitOrders::Response::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(orders, "orders");
+  serializer(status, "status");
+}
+
+void RegisterAlias::Request::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(alias, "alias");
+  serializer(address, "address");
+  serializer(mixin, "mixin");
+}
+
+void RegisterAlias::Response::serialize(CryptoNote::ISerializer &serializer)
+{
+  serializer(tx_hash, "tx_hash");
+  serializer(status, "status");
+}
 
 } // namespace PaymentService

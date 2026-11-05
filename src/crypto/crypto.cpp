@@ -15,7 +15,11 @@
 // You should have received a copy of the GNU General Public License
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
+#ifdef _MSC_VER
+#include <malloc.h>
+#else
 #include <alloca.h>
+#endif
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -107,7 +111,9 @@ namespace Crypto {
     ge_p3 point;
     ge_p2 point2;
     ge_p1p1 point3;
-    assert(sc_check(reinterpret_cast<const unsigned char*>(&key2)) == 0);
+    if (sc_check(reinterpret_cast<const unsigned char*>(&key2)) != 0) {
+      return false;
+    }
     if (ge_frombytes_vartime(&point, reinterpret_cast<const unsigned char*>(&key1)) != 0) {
       return false;
     }
@@ -207,7 +213,8 @@ namespace Crypto {
   void crypto_ops::derive_secret_key(const KeyDerivation &derivation, size_t output_index,
     const SecretKey &base, SecretKey &derived_key) {
     EllipticCurveScalar scalar;
-    assert(sc_check(reinterpret_cast<const unsigned char*>(&base)) == 0);
+    if (sc_check(reinterpret_cast<const unsigned char*>(&base)) != 0)
+      throw std::runtime_error("derive_secret_key: invalid secret key");
     derivation_to_scalar(derivation, output_index, scalar);
     sc_add(reinterpret_cast<unsigned char*>(&derived_key), reinterpret_cast<const unsigned char*>(&base), reinterpret_cast<unsigned char*>(&scalar));
   }
@@ -215,7 +222,8 @@ namespace Crypto {
   void crypto_ops::derive_secret_key(const KeyDerivation &derivation, size_t output_index,
     const SecretKey &base, const uint8_t* suffix, size_t suffixLength, SecretKey &derived_key) {
     EllipticCurveScalar scalar;
-    assert(sc_check(reinterpret_cast<const unsigned char*>(&base)) == 0);
+    if (sc_check(reinterpret_cast<const unsigned char*>(&base)) != 0)
+      throw std::runtime_error("derive_secret_key: invalid secret key");
     derivation_to_scalar(derivation, output_index, suffix, suffixLength, scalar);
     sc_add(reinterpret_cast<unsigned char*>(&derived_key), reinterpret_cast<const unsigned char*>(&base), reinterpret_cast<unsigned char*>(&scalar));
   }
@@ -309,7 +317,7 @@ namespace Crypto {
     buf.h = prefix_hash;
     buf.key = reinterpret_cast<const EllipticCurvePoint&>(pub);
     if (ge_frombytes_vartime(&tmp3, reinterpret_cast<const unsigned char*>(&pub)) != 0) {
-      abort();
+      return false;
     }
     if (sc_check(reinterpret_cast<const unsigned char*>(&sig)) != 0 || sc_check(reinterpret_cast<const unsigned char*>(&sig) + 32) != 0) {
       return false;
@@ -449,8 +457,9 @@ void crypto_ops::generate_tx_proof(const Hash &prefix_hash, const PublicKey &R, 
   KeyImage crypto_ops::scalarmultKey(const KeyImage & P, const KeyImage & a) {
     ge_p3 A;
     ge_p2 R;
-    // maybe use assert instead?
-    ge_frombytes_vartime(&A, reinterpret_cast<const unsigned char*>(&P));
+    if (ge_frombytes_vartime(&A, reinterpret_cast<const unsigned char*>(&P)) != 0) {
+      return {}; // invalid point → return zero key image
+    }
     ge_scalarmult(&R, reinterpret_cast<const unsigned char*>(&a), &A);
     KeyImage aP;
     ge_tobytes(reinterpret_cast<unsigned char*>(&aP), &R);
@@ -526,7 +535,7 @@ void crypto_ops::generate_tx_proof(const Hash &prefix_hash, const PublicKey &R, 
     }
 #endif
     if (ge_frombytes_vartime(&image_unp, reinterpret_cast<const unsigned char*>(&image)) != 0) {
-      abort();
+      return;
     }
     ge_dsm_precomp(image_pre, &image_unp);
     sc_0(reinterpret_cast<unsigned char*>(&sum));
@@ -545,7 +554,7 @@ void crypto_ops::generate_tx_proof(const Hash &prefix_hash, const PublicKey &R, 
         random_scalar(reinterpret_cast<EllipticCurveScalar&>(sig[i]));
         random_scalar(*reinterpret_cast<EllipticCurveScalar*>(reinterpret_cast<unsigned char*>(&sig[i]) + 32));
         if (ge_frombytes_vartime(&tmp3, reinterpret_cast<const unsigned char*>(&*pubs[i])) != 0) {
-          abort();
+          return;
         }
         ge_double_scalarmult_base_vartime(&tmp2, reinterpret_cast<unsigned char*>(&sig[i]), &tmp3, reinterpret_cast<unsigned char*>(&sig[i]) + 32);
         ge_tobytes(reinterpret_cast<unsigned char*>(&buf->ab[i].a), &tmp2);
@@ -586,7 +595,7 @@ void crypto_ops::generate_tx_proof(const Hash &prefix_hash, const PublicKey &R, 
         return false;
       }
       if (ge_frombytes_vartime(&tmp3, reinterpret_cast<const unsigned char*>(&*pubs[i])) != 0) {
-        abort();
+        return false;
       }
       ge_double_scalarmult_base_vartime(&tmp2, reinterpret_cast<const unsigned char*>(&sig[i]), &tmp3, reinterpret_cast<const unsigned char*>(&sig[i]) + 32);
       ge_tobytes(reinterpret_cast<unsigned char*>(&buf->ab[i].a), &tmp2);

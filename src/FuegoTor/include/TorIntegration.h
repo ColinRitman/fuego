@@ -367,8 +367,7 @@ private:
 #endif
     
     // SOCKS5 proxy
-    std::unique_ptr<boost::asio::io_service> m_ioService;
-    std::unique_ptr<boost::asio::io_service::work> m_work;
+    std::unique_ptr<boost::asio::io_context> m_ioService;
     std::thread m_ioThread;
     
     // Tor process

@@ -39,9 +39,13 @@
 #include "CryptoNoteCore/CryptoNoteFormatUtils.h"
 #include "CryptoNoteCore/CryptoNoteTools.h"
 #include "CryptoNoteCore/Currency.h"
-#include "CryptoNoteCore/BurnProofDataFileGenerator.h"
 #include "Wallet/WalletErrors.h"
+#include "Wallet/WalletGreen.h"
+#include "Common/StringTools.h"
+#include "CryptoNoteCore/CryptoNoteBasic.h"
+#include "CryptoNoteConfig.h"
 #include <System/EventLock.h>
+#include <cstring>
 
 #include "PaymentServiceJsonRpcMessages.h"
 #include "NodeFactory.h"
@@ -258,6 +262,37 @@ namespace PaymentService
     {
       boost::system::error_code err;
       return boost::filesystem::remove(filename, err) && !err;
+    }
+
+    // M-3: export filenames arrive over JSON-RPC and are joined onto the wallet
+    // directory. A name containing ".." escapes that directory once the OS
+    // resolves it, and an *absolute* name makes boost::filesystem's operator/
+    // discard the base entirely — so exportWalletKeys could be steered into
+    // writing plaintext secret keys anywhere the walletd process can write. Only
+    // plain single-component names inside the wallet directory are accepted.
+    bool isConfinedExportFileName(const std::string &fileName)
+    {
+      if (fileName.empty() || fileName.size() > 255)
+      {
+        return false;
+      }
+
+      // Reject anything carrying a separator (both flavours, so a Windows host
+      // cannot be walked with '/' and vice versa) before parsing.
+      if (fileName.find_first_of("/\\") != std::string::npos)
+      {
+        return false;
+      }
+
+      if (fileName == "." || fileName == "..")
+      {
+        return false;
+      }
+
+      // Belt-and-braces: reject a name the platform still considers a traversal
+      // or a rooted path after parsing.
+      const boost::filesystem::path candidate(fileName);
+      return !candidate.is_absolute() && candidate.filename().string() == fileName;
     }
 
     void replaceWalletFiles(const std::string &path, const std::string &tempFilePath)
@@ -537,8 +572,8 @@ namespace PaymentService
       //TODO make this a cout
       log(Logging::INFO, Logging::BRIGHT_WHITE) << "New wallet generated.";
       log(Logging::INFO, Logging::BRIGHT_WHITE) << "Address: " << address;
-      log(Logging::INFO, Logging::BRIGHT_WHITE) << "Secret spend key: " << Common::podToHex(spendKey.secretKey);
-      log(Logging::INFO, Logging::BRIGHT_WHITE) << "Secret view key: " << Common::podToHex(private_view_key);
+      log(Logging::INFO, Logging::BRIGHT_WHITE) << "Secret spend key: <redacted>";
+      log(Logging::INFO, Logging::BRIGHT_WHITE) << "Secret view key: <redacted>";
     }
     /* We need both secret keys to import the wallet and create the container
      so in the absence of either, display and error message and return */
@@ -739,6 +774,12 @@ namespace PaymentService
         return make_error_code(CryptoNote::error::NOT_INITIALIZED);
       }
 
+      if (!isConfinedExportFileName(fileName))
+      {
+        logger(Logging::WARNING, Logging::BRIGHT_YELLOW) << "Export rejected: filename must be a plain name inside the wallet directory";
+        return make_error_code(CryptoNote::error::INVALID_ARGUMENT);
+      }
+
       boost::filesystem::path walletPath(config.walletFile);
       boost::filesystem::path exportPath = walletPath.parent_path() / fileName;
 
@@ -774,6 +815,12 @@ namespace PaymentService
       {
         logger(Logging::WARNING, Logging::BRIGHT_YELLOW) << "Export impossible: Wallet Service is not initialized";
         return make_error_code(CryptoNote::error::NOT_INITIALIZED);
+      }
+
+      if (!isConfinedExportFileName(fileName))
+      {
+        logger(Logging::WARNING, Logging::BRIGHT_YELLOW) << "Export rejected: filename must be a plain name inside the wallet directory";
+        return make_error_code(CryptoNote::error::INVALID_ARGUMENT);
       }
 
       boost::filesystem::path walletPath(config.walletFile);
@@ -842,7 +889,7 @@ namespace PaymentService
       Crypto::SecretKey secretKey;
       if (!Common::podFromHex(spendSecretKeyText, secretKey))
       {
-        logger(Logging::WARNING) << "Wrong key format: " << spendSecretKeyText;
+        logger(Logging::WARNING) << "Wrong key format: <redacted>";
         return make_error_code(CryptoNote::error::WalletServiceErrorCode::WRONG_KEY_FORMAT);
       }
 
@@ -974,7 +1021,7 @@ namespace PaymentService
       CryptoNote::KeyPair key = wallet.getAddressSpendKey(address);
 
       publicSpendKeyText = Common::podToHex(key.publicKey);
-      secretSpendKeyText = Common::podToHex(key.secretKey);
+      secretSpendKeyText.clear();  // secret key no longer exposed via RPC
     }
     catch (std::system_error &x)
     {
@@ -985,7 +1032,7 @@ namespace PaymentService
     return std::error_code();
   }
 
-  std::error_code WalletService::getBalance(const std::string &address, uint64_t &availableBalance, uint64_t &lockedAmount, uint64_t &lockedDepositBalance, uint64_t &unlockedDepositBalance)
+  std::error_code WalletService::getBalance(const std::string &address, uint64_t &availableBalance, uint64_t &lockedAmount, uint64_t &lockedDepositBalance, uint64_t &unlockedDepositBalance, uint64_t &lockedHeatBalance, uint64_t &unlockedHeatBalance)
   {
     try
     {
@@ -996,6 +1043,8 @@ namespace PaymentService
       lockedAmount = wallet.getPendingBalance(address);
       lockedDepositBalance = wallet.getLockedDepositBalance(address);
       unlockedDepositBalance = wallet.getUnlockedDepositBalance(address);
+      lockedHeatBalance = wallet.getLockedHeatBalance();
+      unlockedHeatBalance = wallet.getUnlockedHeatBalance();
     }
     catch (std::system_error &x)
     {
@@ -1007,7 +1056,7 @@ namespace PaymentService
     return std::error_code();
   }
 
-  std::error_code WalletService::getBalance(uint64_t &availableBalance, uint64_t &lockedAmount, uint64_t &lockedDepositBalance, uint64_t &unlockedDepositBalance)
+  std::error_code WalletService::getBalance(uint64_t &availableBalance, uint64_t &lockedAmount, uint64_t &lockedDepositBalance, uint64_t &unlockedDepositBalance, uint64_t &lockedHeatBalance, uint64_t &unlockedHeatBalance)
   {
     try
     {
@@ -1018,6 +1067,8 @@ namespace PaymentService
       lockedAmount = wallet.getPendingBalance();
       lockedDepositBalance = wallet.getLockedDepositBalance();
       unlockedDepositBalance = wallet.getUnlockedDepositBalance();
+      lockedHeatBalance = wallet.getLockedHeatBalance();
+      unlockedHeatBalance = wallet.getUnlockedHeatBalance();
     }
     catch (std::system_error &x)
     {
@@ -1057,7 +1108,7 @@ namespace PaymentService
     {
       System::EventLock lk(readyEvent);
       CryptoNote::KeyPair viewKey = wallet.getViewKey();
-      viewSecretKey = Common::podToHex(viewKey.secretKey);
+      viewSecretKey = Common::podToHex(viewKey.publicKey);  // return public key, not secret
     }
     catch (std::system_error &x)
     {
@@ -1174,7 +1225,7 @@ namespace PaymentService
     return std::error_code();
   }
 
-  std::error_code WalletService::getDepositWithStagedInfo(uint64_t depositId, uint64_t &amount, uint64_t &term, uint64_t &interest, std::string &creatingTransactionHash, std::string &spendingTransactionHash, bool &locked, uint64_t &height, uint64_t &unlockHeight, std::string &address, bool &useStagedUnlock)
+  std::error_code WalletService::getDepositWithStagedInfo(uint64_t depositId, uint64_t &amount, uint64_t &term, uint64_t &interest, std::string &creatingTransactionHash, std::string &spendingTransactionHash, bool &locked, uint64_t &height, uint64_t &unlockHeight, std::string &address)
   {
     try
     {
@@ -1197,9 +1248,6 @@ namespace PaymentService
         WalletTransaction walletstx = wallet.getTransaction(deposit.spendingTransactionId);
         spendingTransactionHash = Common::podToHex(walletstx.hash);
       }
-
-      // Check if this deposit uses staged unlock
-      useStagedUnlock = m_stagedUnlockStorage.getStagedUnlockPreference(creatingTransactionHash);
 
       bool state = true;
       uint32_t knownBlockCount = node.getKnownBlockCount();
@@ -1423,8 +1471,15 @@ namespace PaymentService
       sendParams.destinations = convertWalletRpcOrdersToWalletOrders(request.transfers);
       sendParams.messages = convertWalletRpcMessagesToWalletMessages(messages);
       sendParams.fee = currency.minimumFee();
-      // Use dynamic ring sizing for optimal privacy (aim for 18, fallback to 8 minimum)
-      sendParams.mixIn = parameters::MIN_TX_MIXIN_SIZE_V10;
+      // Mainnet: enforce V10 minimum decoy count (8).
+      // Testnet: force mixIn=0 until the decoy/ring pool is large enough
+      // (avoids MIXIN_COUNT_TOO_BIG on fresh chains). Raise again when pool grows.
+      if (currency.isTestnet()) {
+        sendParams.mixIn = 0;
+        logger(Logging::INFO) << "testnet sendTransaction: mixIn=0 (decoy-pool bootstrap)";
+      } else {
+        sendParams.mixIn = std::max<uint64_t>(request.anonymity, parameters::MIN_TX_MIXIN_SIZE_V10);
+      }
       sendParams.unlockTimestamp = request.unlockTime;
       sendParams.changeDestination = request.changeAddress;
 
@@ -1487,8 +1542,12 @@ namespace PaymentService
       sendParams.destinations = convertWalletRpcOrdersToWalletOrders(request.transfers);
       sendParams.messages = convertWalletRpcMessagesToWalletMessages(messages);
       sendParams.fee = request.fee;
-      // Use dynamic ring sizing for optimal privacy (aim for 18, fallback to 8 minimum)
-      sendParams.mixIn = parameters::MIN_TX_MIXIN_SIZE_V10;
+      // Same policy as sendTransaction: testnet bootstrap mixIn=0.
+      if (currency.isTestnet()) {
+        sendParams.mixIn = 0;
+      } else {
+        sendParams.mixIn = std::max<uint64_t>(request.anonymity, parameters::MIN_TX_MIXIN_SIZE_V10);
+      }
       sendParams.unlockTimestamp = request.unlockTime;
       sendParams.changeDestination = request.changeAddress;
 
@@ -1713,8 +1772,7 @@ namespace PaymentService
         uint32_t &peerCount,
         uint32_t &depositCount,
         uint32_t &transactionCount,
-        uint32_t &addressCount,
-        std::string &networkId)
+        uint32_t &addressCount)
     {
       try
       {
@@ -1729,7 +1787,6 @@ namespace PaymentService
         addressCount = static_cast<uint32_t>(wallet.getAddressCount());
         auto lastHashes = wallet.getBlockHashes(blockCount - 1, 1);
         lastBlockHash = Common::podToHex(lastHashes.back());
-                networkId = currency.getFuegoNetworkIdString();
       }
         catch (std::system_error &x)
         {
@@ -1777,25 +1834,21 @@ namespace PaymentService
 
         /* Now validate the deposit term and the amount */
 
-        /* Check if this is a FOREVER term (burn deposit) or a stake term (0xEF) */
-        bool isForeverTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
-        bool isStakeTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING ||
-                            term == CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING);
+        /* Check if this is a FOREVER term (burn deposit) */
+        bool isForeverTerm = (term == CryptoNote::parameters::HEAT_TERM);
 
-        if (!isForeverTerm && !isStakeTerm) {
+        if (!isForeverTerm) {
           /* For regular deposits, validate term constraints */
 
           /* Use testnet or mainnet term limits */
           bool isTestnet = this->currency.isTestnet();
-          uint32_t min_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;
-          uint32_t max_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;
+          uint32_t min_term = isTestnet ? CryptoNote::parameters::TESTNET_DEPOSIT_MIN_TERM : CryptoNote::parameters::DEPOSIT_MIN_TERM;
+          uint32_t max_term = isTestnet ? CryptoNote::parameters::TESTNET_DEPOSIT_MAX_TERM : CryptoNote::parameters::DEPOSIT_MAX_TERM;
 
-          /* Deposits should be either min_term, max_term, or a special term */
+          /* Deposits should be either min_term, max_term, or FOREVER */
           bool isValidTerm = (term == min_term ||
                              term == max_term ||
-                             term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER ||
-                             term == CryptoNote::parameters::DEPOSIT_TERM_ELDERFIER_STAKING ||
-                             term == CryptoNote::parameters::TESTNET_DEPOSIT_TERM_ELDERFIER_STAKING);
+                             term == CryptoNote::parameters::HEAT_TERM);
 
           if (!isValidTerm) {
             return make_error_code(CryptoNote::error::DEPOSIT_WRONG_TERM);
@@ -1814,7 +1867,7 @@ namespace PaymentService
 
         /* Determine minimum amount based on deposit type */
         uint64_t minAmount;
-        bool isBurnDeposit = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
+        bool isBurnDeposit = (term == CryptoNote::parameters::HEAT_TERM);
         if (isBurnDeposit) {
           /* Burn deposits (FOREVER term) use lower minimum: 0.8 XFG */
           minAmount = CryptoNote::parameters::BURN_DEPOSIT_MIN_AMOUNT;
@@ -1830,14 +1883,9 @@ namespace PaymentService
         }
 
         /* Create or send the deposit */
-        wallet.createDeposit(amount, term, sourceAddress, sourceAddress, transactionHash, commitment);
+        wallet.createDeposit(amount, term, sourceAddress, sourceAddress, transactionHash);
 
-        /* Handle staged unlock if requested */
-        if (useStagedUnlock && !isBurnDeposit) {
-          // Store staged unlock preference for this deposit
-          m_stagedUnlockStorage.setStagedUnlockPreference(transactionHash, true);
-          logger(Logging::INFO) << "Deposit created with staged unlock: " << transactionHash;
-        }
+        // Staged unlock removed — deposits are straightforward term-locked CDs.
       }
 
       catch (std::system_error &x)
@@ -1893,15 +1941,15 @@ namespace PaymentService
         /* Now validate the deposit term and the amount */
 
         /* Check if this is a FOREVER term (burn deposit) */
-        bool isForeverTerm = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
+        bool isForeverTerm = (term == CryptoNote::parameters::HEAT_TERM);
 
         if (!isForeverTerm) {
           /* For regular deposits, validate term constraints */
 
           /* Use testnet or mainnet term limits */
           bool isTestnet = this->currency.isTestnet();
-          uint32_t min_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MIN_TERM : CryptoNote::parameters::COLD_MIN_TERM;
-          uint32_t max_term = isTestnet ? CryptoNote::parameters::TESTNET_COLD_MAX_TERM : CryptoNote::parameters::COLD_MAX_TERM;
+          uint32_t min_term = isTestnet ? CryptoNote::parameters::TESTNET_DEPOSIT_MIN_TERM : CryptoNote::parameters::DEPOSIT_MIN_TERM;
+          uint32_t max_term = isTestnet ? CryptoNote::parameters::TESTNET_DEPOSIT_MAX_TERM : CryptoNote::parameters::DEPOSIT_MAX_TERM;
 
           if (term < min_term)
           {
@@ -1916,7 +1964,7 @@ namespace PaymentService
 
         /* Determine minimum amount based on deposit type */
         uint64_t minAmount;
-        bool isBurnDeposit = (term == CryptoNote::parameters::DEPOSIT_TERM_FOREVER);
+        bool isBurnDeposit = (term == CryptoNote::parameters::HEAT_TERM);
         if (isBurnDeposit) {
           /* Burn deposits (FOREVER term) use lower minimum: 0.8 XFG */
           minAmount = CryptoNote::parameters::BURN_DEPOSIT_MIN_AMOUNT;
@@ -2129,14 +2177,14 @@ namespace PaymentService
         Crypto::SecretKey viewSecretKey;
         if (!Common::podFromHex(viewSecretKeyText, viewSecretKey))
         {
-          logger(Logging::WARNING, Logging::BRIGHT_YELLOW) << "Cannot restore view secret key: " << viewSecretKeyText;
+          logger(Logging::WARNING, Logging::BRIGHT_YELLOW) << "Cannot restore view secret key: <redacted>";
           return make_error_code(CryptoNote::error::WalletServiceErrorCode::WRONG_KEY_FORMAT);
         }
 
         Crypto::PublicKey viewPublicKey;
         if (!Crypto::secret_key_to_public_key(viewSecretKey, viewPublicKey))
         {
-          logger(Logging::WARNING, Logging::BRIGHT_YELLOW) << "Cannot derive view public key, wrong secret key: " << viewSecretKeyText;
+          logger(Logging::WARNING, Logging::BRIGHT_YELLOW) << "Cannot derive view public key, wrong secret key: <redacted>";
           return make_error_code(CryptoNote::error::WalletServiceErrorCode::WRONG_KEY_FORMAT);
         }
 
@@ -2353,89 +2401,6 @@ namespace PaymentService
     }
   }
 
-  std::error_code WalletService::markBurnDepositBPDFGenerated(
-      const std::string& transactionHash) {
-
-    try {
-      auto& walletGreen = static_cast<CryptoNote::WalletGreen&>(wallet);
-      walletGreen.markBurnDepositBPDFGenerated(transactionHash);
-      return std::error_code();
-    } catch (std::exception& e) {
-      logger(Logging::WARNING) << "Error marking BPDF generated: " << e.what();
-      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
-    }
-  }
-
-  std::error_code WalletService::generateBurnProofDataFile(
-      const std::string& transactionHash,
-      const std::string& recipientAddress,
-      const std::string& outputPath,
-      const Crypto::SecretKey& secret,
-      uint64_t amount,
-      const std::vector<uint8_t>& metadata,
-      const std::string& networkId) {
-
-    try {
-      // Use BurnProofDataFileGenerator to create BPDF
-      std::error_code bpdfResult = CryptoNote::BurnProofDataFileGenerator::generateBPDF(
-        transactionHash,
-        secret,
-        recipientAddress,
-        amount,
-        outputPath
-      );
-
-      if (!bpdfResult) {
-        logger(Logging::INFO) << "Generated BPDF successfully";
-      } else {
-        logger(Logging::WARNING) << "Failed to generate BPDF";
-      }
-      return std::error_code();
-    } catch (std::exception& e) {
-      logger(Logging::WARNING) << "Error generating BPDF: " << e.what();
-      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
-    }
-  }
-
-  std::error_code WalletService::generateBurnProofDataFile(
-      const std::string& transactionHash,
-      const std::string& recipientAddress,
-      const std::string& outputPath,
-      const std::string& networkId) {
-
-    try {
-      // For manual mode, we need to get transaction data and extract commitment
-      // User will provide secret separately (not through RPC for security)
-      // For manual mode, we need to extract secret from transaction first
-      Crypto::SecretKey secret;
-      uint64_t amount;
-      std::error_code extractResult = CryptoNote::BurnProofDataFileGenerator::extractSecretFromTransaction(
-        transactionHash, secret, amount);
-
-      if (extractResult) {
-        return extractResult;
-      }
-
-      std::error_code bpdfResult = CryptoNote::BurnProofDataFileGenerator::generateBPDF(
-        transactionHash,
-        secret,
-        recipientAddress,
-        amount,
-        outputPath
-      );
-
-      if (!bpdfResult) {
-        logger(Logging::INFO) << "Generated BPDF (manual) successfully";
-      } else {
-        logger(Logging::WARNING) << "Failed to generate BPDF (manual)";
-      }
-      return std::error_code();
-    } catch (std::exception& e) {
-      logger(Logging::WARNING) << "Error generating BPDF manually: " << e.what();
-      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
-    }
-  }
-
   std::string WalletService::getDefaultWalletPath() {
     // Return the default wallet directory path
     // This should match the wallet file location
@@ -2612,6 +2577,274 @@ namespace PaymentService
     std::stringstream ss;
     ss << std::fixed << std::setprecision(8) << xfgAmount << " XFG";
     return ss.str();
+  }
+
+  std::error_code WalletService::mintHeatV10(
+      uint64_t xfgBurned,
+      uint64_t heatMinted,
+      uint64_t mixin,
+      std::string &transactionHash)
+  {
+    try
+    {
+      System::EventLock lk(readyEvent);
+      uint64_t fee = currency.minimumFee();
+      wallet.mintHeatV10(xfgBurned, heatMinted, fee, mixin, transactionHash);
+    }
+    catch (std::system_error &x)
+    {
+      logger(Logging::WARNING) << "Failed to mint HEAT: " << x.what();
+      return x.code();
+    }
+    catch (std::exception &x)
+    {
+      logger(Logging::WARNING) << "Failed to mint HEAT: " << x.what();
+      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+    }
+    return std::error_code();
+  }
+
+  std::error_code WalletService::sendHeatV10(
+      const std::string &recipient,
+      uint64_t amount,
+      uint64_t mixin,
+      std::string &transactionHash)
+  {
+    try
+    {
+      System::EventLock lk(readyEvent);
+      uint64_t fee = currency.minimumFee();
+      wallet.sendHeatV10(recipient, amount, fee, mixin, transactionHash);
+    }
+    catch (std::system_error &x)
+    {
+      logger(Logging::WARNING) << "Failed to send HEAT: " << x.what();
+      return x.code();
+    }
+    catch (std::exception &x)
+    {
+      logger(Logging::WARNING) << "Failed to send HEAT: " << x.what();
+      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+    }
+    return std::error_code();
+  }
+
+  std::error_code WalletService::heatDeposit(
+      uint64_t amount,
+      uint32_t termEpochs,
+      uint64_t bankingFee,
+      uint64_t mixin,
+      const std::string &/*sourceAddress*/,
+      std::string &transactionHash)
+  {
+    // Spend unlocked HEAT (HEAT_TERM) → finite-term HEAT CD. Must NOT use createDeposit
+    // (createDeposit spends XFG and enforces DEPOSIT_MIN_TERM block terms).
+    if (amount == 0 || termEpochs == 0) {
+      return make_error_code(CryptoNote::error::WRONG_PARAMETERS);
+    }
+    try
+    {
+      System::EventLock lk(readyEvent);
+      auto *green = dynamic_cast<CryptoNote::WalletGreen *>(&wallet);
+      if (!green) {
+        return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+      }
+      uint64_t fee = currency.minimumFee();
+      green->heatDepositV10(amount, termEpochs, bankingFee, fee, mixin, transactionHash);
+    }
+    catch (std::system_error &x)
+    {
+      logger(Logging::WARNING) << "heat_deposit failed: " << x.what();
+      return x.code();
+    }
+    catch (std::exception &x)
+    {
+      logger(Logging::WARNING) << "heat_deposit failed: " << x.what();
+      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+    }
+    return std::error_code();
+  }
+
+  std::error_code WalletService::ammSwap(
+      uint8_t direction,
+      uint64_t inputAmount,
+      uint64_t expectedOutput,
+      uint64_t minOutput,
+      uint64_t mixin,
+      std::string &transactionHash)
+  {
+    try
+    {
+      System::EventLock lk(readyEvent);
+      auto *green = dynamic_cast<CryptoNote::WalletGreen *>(&wallet);
+      if (!green) {
+        return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+      }
+      uint64_t fee = currency.minimumFee();
+      green->ammSwapV10(direction, inputAmount, expectedOutput, minOutput, fee, mixin, transactionHash);
+    }
+    catch (std::system_error &x)
+    {
+      logger(Logging::WARNING) << "Failed amm_swap: " << x.what();
+      return x.code();
+    }
+    catch (std::exception &x)
+    {
+      logger(Logging::WARNING) << "Failed amm_swap: " << x.what();
+      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+    }
+    return std::error_code();
+  }
+
+  std::error_code WalletService::placeLimitOrder(
+      uint8_t side,
+      uint64_t amount,
+      uint64_t targetPrice,
+      uint32_t expiration,
+      uint64_t mixin,
+      std::string &transactionHash)
+  {
+    try
+    {
+      System::EventLock lk(readyEvent);
+      auto *green = dynamic_cast<CryptoNote::WalletGreen *>(&wallet);
+      if (!green) {
+        return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+      }
+      uint64_t fee = currency.minimumFee();
+      green->placeLimitOrderV13(side, amount, targetPrice, expiration, fee, mixin, transactionHash);
+    }
+    catch (std::system_error &x)
+    {
+      logger(Logging::WARNING) << "Failed place_limit_order: " << x.what();
+      return x.code();
+    }
+    catch (std::exception &x)
+    {
+      logger(Logging::WARNING) << "Failed place_limit_order: " << x.what();
+      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+    }
+    return std::error_code();
+  }
+
+  std::error_code WalletService::cancelLimitOrder(
+      const std::string &orderIdHex,
+      uint64_t mixin,
+      std::string &transactionHash)
+  {
+    try
+    {
+      System::EventLock lk(readyEvent);
+      auto *green = dynamic_cast<CryptoNote::WalletGreen *>(&wallet);
+      if (!green) {
+        return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+      }
+      Crypto::Hash orderId{};
+      if (!Common::podFromHex(orderIdHex, orderId)) {
+        return make_error_code(CryptoNote::error::WRONG_PARAMETERS);
+      }
+      uint64_t fee = currency.minimumFee();
+      green->cancelLimitOrderV13(orderId, fee, mixin, transactionHash);
+    }
+    catch (std::system_error &x)
+    {
+      logger(Logging::WARNING) << "Failed cancel_limit_order: " << x.what();
+      return x.code();
+    }
+    catch (std::exception &x)
+    {
+      logger(Logging::WARNING) << "Failed cancel_limit_order: " << x.what();
+      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+    }
+    return std::error_code();
+  }
+
+  std::error_code WalletService::getLimitOrders(std::vector<GetLimitOrders::LimitOrderInfo> &orders)
+  {
+    try
+    {
+      System::EventLock lk(readyEvent);
+      std::vector<CryptoNote::INode::LimitDepositRpcEntry> all;
+      std::error_code ec = node.getLimitDeposits(all);
+      if (ec) {
+        // Soft-fail empty book if daemon lacks endpoint
+        logger(Logging::WARNING) << "getLimitDeposits failed: " << ec.message();
+        orders.clear();
+        return std::error_code();
+      }
+      // Filter to this wallet's address hash when possible
+      std::string myHash;
+      try {
+        if (wallet.getAddressCount() > 0) {
+          std::string addr = wallet.getAddress(0);
+          CryptoNote::AccountPublicAddress acc{};
+          if (currency.parseAccountAddressString(addr, acc)) {
+            uint8_t preimage[64];
+            memcpy(preimage, &acc.spendPublicKey, 32);
+            memcpy(preimage + 32, &acc.viewPublicKey, 32);
+            Crypto::Hash h = Crypto::cn_fast_hash(preimage, 64);
+            myHash = Common::podToHex(h);
+          }
+        }
+      } catch (...) {
+      }
+      orders.clear();
+      for (const auto &dep : all) {
+        if (!myHash.empty() && dep.address_hash != myHash) {
+          continue;
+        }
+        GetLimitOrders::LimitOrderInfo info;
+        info.order_id = dep.order_id;
+        info.side = dep.side;
+        info.amount = dep.amount;
+        info.target_price = dep.target_price;
+        info.expiration = dep.expiration;
+        info.withdrawn = dep.withdrawn || dep.expired;
+        orders.push_back(info);
+      }
+    }
+    catch (std::exception &x)
+    {
+      logger(Logging::WARNING) << "getLimitOrders: " << x.what();
+      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+    }
+    return std::error_code();
+  }
+
+  std::error_code WalletService::registerAlias(
+      const std::string &alias,
+      const std::string &ownerAddress,
+      std::string &transactionHash)
+  {
+    try
+    {
+      System::EventLock lk(readyEvent);
+      auto *green = dynamic_cast<CryptoNote::WalletGreen *>(&wallet);
+      if (!green) {
+        return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+      }
+      std::string addr = ownerAddress;
+      if (addr.empty() && wallet.getAddressCount() > 0) {
+        addr = wallet.getAddress(0);
+      }
+      Crypto::Hash txHash{};
+      std::error_code ec = green->registerAlias(alias, addr, txHash);
+      if (ec) {
+        return ec;
+      }
+      transactionHash = Common::podToHex(txHash);
+    }
+    catch (std::system_error &x)
+    {
+      logger(Logging::WARNING) << "register_alias: " << x.what();
+      return x.code();
+    }
+    catch (std::exception &x)
+    {
+      logger(Logging::WARNING) << "register_alias: " << x.what();
+      return make_error_code(CryptoNote::error::INTERNAL_WALLET_ERROR);
+    }
+    return std::error_code();
   }
 
   } //namespace PaymentService

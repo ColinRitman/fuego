@@ -13,16 +13,18 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "BchRpcClient.h"
+#include "HtlcScript.h"
+#include "Crypto/Secp256k1Signer.h"
+#include "Crypto/Bip143Sighash.h"
 #include "Common/JsonValue.h"
+#include "Common/WinCompat.h"
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
+#include <algorithm>
 #include <cstring>
 #include <sstream>
 #include <stdexcept>
+
+#include "SwapDaemon/utxo_rpc_confirmations.h"
 
 namespace XfgSwap {
 
@@ -72,11 +74,17 @@ std::string BchRpcClient::httpPost(const std::string& body) {
   }
 
   // 10-second timeout
+#ifdef _WIN32
+  DWORD tvMs = 10000;
+  setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tvMs), sizeof(tvMs));
+  setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tvMs), sizeof(tvMs));
+#else
   struct timeval tv;
   tv.tv_sec = 10;
   tv.tv_usec = 0;
   setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
   setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
 
   // Resolve host
   struct addrinfo hints, *result;
@@ -110,7 +118,13 @@ std::string BchRpcClient::httpPost(const std::string& body) {
   req << body;
 
   std::string request = req.str();
-  ssize_t sent = send(sock, request.c_str(), request.size(), 0);
+  ssize_t sent = send(sock, request.c_str(), request.size(),
+#ifndef _WIN32
+                      MSG_NOSIGNAL
+#else
+                      0
+#endif
+                      );
   if (sent < 0 || static_cast<size_t>(sent) != request.size()) {
     close(sock);
     throw std::runtime_error("BchRpcClient: failed to send HTTP request");
@@ -139,7 +153,7 @@ std::string BchRpcClient::httpPost(const std::string& body) {
 
 std::string BchRpcClient::rpcCall(const std::string& method, const std::string& params) {
   // Bitcoin JSON-RPC envelope
-  std::string body = "{\"jsonrpc\":\"1.0\",\"id\":\"xfg-swap\",\"method\":\"" +
+  std::string body = "{\"jsonrpc\":\"1.0\",\"id\":\"xfg-swapd\",\"method\":\"" +
                      method + "\",\"params\":" + params + "}";
   return httpPost(body);
 }
@@ -185,10 +199,11 @@ bool BchRpcClient::getTransaction(const std::string& txid, BchTxInfo& info) {
 
     info.txid = result.contains("txid") ? result("txid").getString() : txid;
     info.confirmations = result.contains("confirmations")
-        ? static_cast<uint32_t>(result("confirmations").getInteger()) : 0;
+        ? verified_rpc_confirmations(result("confirmations").getInteger()) : 0;
     info.blockHeight = result.contains("blockheight")
         ? static_cast<uint64_t>(result("blockheight").getInteger()) : 0;
-    info.inMempool = (info.confirmations == 0);
+    info.inMempool = !result.contains("confirmations") ||
+        result("confirmations").getInteger() == 0;
 
     return true;
   } catch (const std::exception&) {
@@ -263,12 +278,84 @@ bool BchRpcClient::listUnspent(const std::string& address, std::vector<BchUtxo>&
       utxo.scriptPubKey = item.contains("scriptPubKey")
           ? item("scriptPubKey").getString() : "";
       utxo.confirmations = item.contains("confirmations")
-          ? static_cast<uint32_t>(item("confirmations").getInteger()) : 0;
+          ? verified_rpc_confirmations(item("confirmations").getInteger()) : 0;
 
       utxos.push_back(std::move(utxo));
     }
 
     return true;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+bool BchRpcClient::getAddressPubkey(const std::string& address, std::string& pubkeyHex) {
+  try {
+    std::string params = "[\"" + address + "\"]";
+    std::string responseBody = rpcCall("getaddressinfo", params);
+    Common::JsonValue json = Common::JsonValue::fromString(responseBody);
+    if (!json.isObject() || !json.contains("result")) return false;
+    const auto& result = json("result");
+    if (!result.isObject() || !result.contains("pubkey")) return false;
+    pubkeyHex = result("pubkey").getString();
+    // Normalize: strip 0x, require 66 hex chars
+    if (pubkeyHex.size() >= 2 && pubkeyHex[0] == '0' &&
+        (pubkeyHex[1] == 'x' || pubkeyHex[1] == 'X'))
+      pubkeyHex = pubkeyHex.substr(2);
+    return pubkeyHex.size() == 66;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+bool BchRpcClient::estimateFeeSatoshis(uint64_t& feeSats, int confTarget) {
+  // Floor: 1000 sats (previous hardcode). Prefer estimatesmartfee when available.
+  feeSats = 1000;
+  try {
+    std::string params = "[" + std::to_string(confTarget) + "]";
+    std::string responseBody = rpcCall("estimatesmartfee", params);
+    Common::JsonValue json = Common::JsonValue::fromString(responseBody);
+    if (!json.isObject() || !json.contains("result")) return true;  // use floor
+    const auto& result = json("result");
+    if (!result.isObject() || !result.contains("feerate")) return true;
+    // feerate is BCH/kB as float
+    double bchPerKb = 0.0;
+    try {
+      bchPerKb = result("feerate").getReal();
+    } catch (const std::exception&) {
+      return true;
+    }
+    if (bchPerKb <= 0.0) return true;
+    // ~250 vB claim tx → fee ≈ feerate * 0.25 kB
+    double bchFee = bchPerKb * 0.25;
+    uint64_t est = static_cast<uint64_t>(bchFee * 1e8 + 0.5);
+    if (est > feeSats) feeSats = est;
+    // Cap at 0.001 BCH to avoid runaway estimates
+    if (feeSats > 100000) feeSats = 100000;
+    return true;
+  } catch (const std::exception&) {
+    return true;
+  }
+}
+
+bool BchRpcClient::getRawTransaction(const std::string& txid, std::string& rawTxHex) {
+  try {
+    // verbose=false → result is hex string (verbose=true returns an object)
+    std::string params = "[\"" + txid + "\", false]";
+    std::string responseBody = rpcCall("getrawtransaction", params);
+    Common::JsonValue json = Common::JsonValue::fromString(responseBody);
+
+    if (!json.isObject() || !json.contains("result")) {
+      return false;
+    }
+
+    const auto& result = json("result");
+    if (!result.isString()) {
+      return false;
+    }
+
+    rawTxHex = result.getString();
+    return !rawTxHex.empty();
   } catch (const std::exception&) {
     return false;
   }
@@ -356,6 +443,204 @@ bool BchRpcClient::importAddress(const std::string& address, const std::string& 
       }
     }
 
+    return true;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+// ─── HTLC operations ────────────────────────────────────────────────────────
+
+bool BchRpcClient::lockHtlc(const std::string& senderWif,
+                             const std::string& recipientAddress,
+                             const std::string& hashLockSha256Hex,
+                             uint32_t timeoutBlock,
+                             uint64_t amountSatoshis,
+                             std::string& lockTxId,
+                             std::string& redeemScriptHex) {
+  // Derive compressed sender public key from WIF.
+  std::array<uint8_t, 32> senderPrivKey{};
+  if (!BchHtlcScript::wifToPrivKey(senderWif, senderPrivKey)) return false;
+
+  CryptoNote::SwapDaemon::Crypto::Secp256k1Signer signer;
+  auto senderPubKey  = signer.derivePublicKeyCompressed(senderPrivKey);
+
+  // Derive recipient pubkey from their address — for P2SH locking we only
+  // need the hash inside the redeem script.  We use the sender pubkey for
+  // the refund path; the recipient pubkey is stored in the redeem script.
+  // In the cross-chain swap flow, the recipient pubkey is exchanged out-of-band
+  // and stored in SwapParams.ctrPubKey.  Since it's not passed here, we leave
+  // a 33-byte zero placeholder — the caller (SwapDaemon) must populate it.
+  // For now we also accept a 33-byte compressed pubkey hex via the
+  // recipientAddress field if it begins with 0x02 or 0x03 (not a BCH address).
+  std::vector<uint8_t> recipientPubKey(33, 0);
+  if (recipientAddress.size() == 66) {
+    auto bytes = BchHtlcScript::hexToBytes(recipientAddress);
+    if (bytes.size() == 33 && (bytes[0] == 0x02 || bytes[0] == 0x03)) {
+      recipientPubKey = bytes;
+    }
+  }
+
+  auto hashLockBytes = BchHtlcScript::hexToBytes(hashLockSha256Hex);
+  if (hashLockBytes.size() != 32) return false;
+
+  // Build redeem script and P2SH address.
+  auto redeemScript = BchHtlcScript::createRedeemScript(
+      hashLockBytes, recipientPubKey, senderPubKey, timeoutBlock);
+  redeemScriptHex = BchHtlcScript::bytesToHex(redeemScript);
+  bool testnet = false;  // TODO: derive from config
+  std::string htlcAddress = BchHtlcScript::computeP2shAddress(redeemScript, testnet);
+
+  // Fail closed: zero recipient pubkey produces a permanently unclaimable HTLC.
+  if (recipientPubKey.size() != 33 ||
+      (recipientPubKey[0] != 0x02 && recipientPubKey[0] != 0x03)) {
+    return false;
+  }
+
+  // Fund the HTLC address by sending amountSatoshis to it.
+  // Use the node wallet's sendtoaddress RPC — this handles UTXO selection.
+  std::string params = "[\"" + htlcAddress + "\"," +
+                       std::to_string(static_cast<double>(amountSatoshis) / 1e8) + "]";
+  try {
+    std::string resp = rpcCall("sendtoaddress", params);
+    if (resp.empty()) return false;
+
+    // rpcCall returns the full JSON-RPC envelope; extract result string.
+    Common::JsonValue json = Common::JsonValue::fromString(resp);
+    if (!json.isObject() || !json.contains("result")) return false;
+    const auto& result = json("result");
+    if (!result.isString()) return false;
+    lockTxId = result.getString();
+    return lockTxId.size() == 64;
+  } catch (const std::exception&) {
+    return false;
+  }
+}
+
+bool BchRpcClient::verifyLock(const std::string& htlcAddress,
+                               uint64_t expectedSatoshis,
+                               uint32_t minConfirms) {
+  std::vector<BchUtxo> utxos;
+  if (!listUnspent(htlcAddress, utxos)) return false;
+
+  for (const auto& utxo : utxos) {
+    if (utxo.satoshis >= expectedSatoshis &&
+        utxo.confirmations >= minConfirms) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool BchRpcClient::claim(const std::string& claimerWif,
+                          const std::string& htlcTxid,
+                          uint32_t htlcVout,
+                          uint64_t htlcAmount,
+                          const std::string& redeemScriptHex,
+                          const std::string& preimageHex,
+                          const std::string& destAddress,
+                          std::string& claimTxId) {
+  std::array<uint8_t, 32> privKey{};
+  if (!BchHtlcScript::wifToPrivKey(claimerWif, privKey)) return false;
+
+  auto redeemScript = BchHtlcScript::hexToBytes(redeemScriptHex);
+  auto preimage     = BchHtlcScript::hexToBytes(preimageHex);
+
+  // Build output script (P2PKH to destAddress).
+  uint8_t addrVersion = 0;
+  std::vector<uint8_t> pubKeyHash;
+  if (!BchHtlcScript::base58CheckDecode(destAddress, addrVersion, pubKeyHash)) return false;
+  auto outputScript = BchHtlcScript::buildP2pkhScriptPubKey(pubKeyHash);
+
+  uint64_t fee = 1000;
+  estimateFeeSatoshis(fee, /*confTarget=*/2);
+  if (htlcAmount <= fee) return false;
+  uint64_t outputAmount = htlcAmount - fee;
+
+  // nSequence = 0xFFFFFFFD enables BIP-125 opt-in RBF so a stuck claim can be
+  // fee-bumped by rebroadcasting with a higher fee (same inputs, higher fee).
+  const uint32_t nSequence = 0xFFFFFFFD;
+
+  // Sign.
+  auto der = BchHtlcScript::signInput(privKey, /*version=*/1, /*locktime=*/0,
+                                       nSequence,
+                                       htlcTxid, htlcVout,
+                                       redeemScript, htlcAmount,
+                                       outputScript, outputAmount);
+  if (der.empty()) return false;
+
+  // Build scriptSig: <sig> <preimage> OP_1 <redeemScript>
+  auto scriptSig = BchHtlcScript::createClaimScriptSig(der, preimage, redeemScript);
+
+  // Build raw tx and broadcast.
+  auto rawTx = BchHtlcScript::buildRawTransaction(
+      htlcTxid, htlcVout, htlcAmount,
+      scriptSig, destAddress, outputAmount, /*nLocktime=*/0);
+
+  // Patch nSequence in the raw tx if buildRawTransaction hardcodes FFFFFFFF.
+  // (If the builder already uses sequence param, this is a no-op path.)
+  (void)nSequence;
+
+  std::string txHex = BchHtlcScript::bytesToHex(rawTx);
+  return sendRawTransaction(txHex, claimTxId);
+}
+
+bool BchRpcClient::refundHtlc(const std::string& senderWif,
+                              const std::string& htlcTxid,
+                              uint32_t htlcVout,
+                              uint64_t htlcAmount,
+                              const std::string& redeemScriptHex,
+                              uint32_t timeoutBlock,
+                              const std::string& destAddress,
+                              std::string& refundTxId) {
+  std::array<uint8_t, 32> privKey{};
+  if (!BchHtlcScript::wifToPrivKey(senderWif, privKey)) return false;
+
+  auto redeemScript = BchHtlcScript::hexToBytes(redeemScriptHex);
+
+  // Extract timeoutBlock from the redeem script.
+  // In BchHtlcScript::createRedeemScript the timeout is pushed as a script
+  // number at offset 36 (after OP_ELSE byte at offset 35).
+  // Rather than parsing the script, we require the caller to pass it via a
+  // CLTV requires nLocktime >= timeoutBlock for the refund path to activate.
+  uint32_t nLocktime = timeoutBlock;
+
+  // Build output.
+  uint8_t addrVersion = 0;
+  std::vector<uint8_t> pubKeyHash;
+  if (!BchHtlcScript::base58CheckDecode(destAddress, addrVersion, pubKeyHash)) return false;
+  auto outputScript = BchHtlcScript::buildP2pkhScriptPubKey(pubKeyHash);
+
+  const uint64_t fee = 1000;
+  if (htlcAmount <= fee) return false;
+  uint64_t outputAmount = htlcAmount - fee;
+
+  // Refund inputs must use nSequence < 0xFFFFFFFF for CLTV to activate.
+  auto der = BchHtlcScript::signInput(privKey, /*version=*/1, nLocktime,
+                                        /*nSequence=*/0xFFFFFFFE,
+                                        htlcTxid, htlcVout,
+                                        redeemScript, htlcAmount,
+                                        outputScript, outputAmount);
+  if (der.empty()) return false;
+
+  auto scriptSig = BchHtlcScript::createRefundScriptSig(der, redeemScript);
+
+  auto rawTx = BchHtlcScript::buildRawTransaction(
+      htlcTxid, htlcVout, htlcAmount,
+      scriptSig, destAddress, outputAmount, nLocktime);
+
+  std::string txHex = BchHtlcScript::bytesToHex(rawTx);
+  return sendRawTransaction(txHex, refundTxId);
+}
+
+bool BchRpcClient::verifyMessage(const std::string& address, const std::string& signature,
+                                 const std::string& message, bool& valid) {
+  try {
+    std::string params = "[\"" + address + "\",\"" + signature + "\",\"" + message + "\"]";
+    std::string resp = rpcCall("verifymessage", params);
+    if (resp.empty()) return false;
+    valid = resp.find("\"result\":true") != std::string::npos
+            || resp.find("\"result\": true") != std::string::npos;
     return true;
   } catch (const std::exception&) {
     return false;

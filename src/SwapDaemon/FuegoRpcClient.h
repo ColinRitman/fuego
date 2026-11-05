@@ -26,7 +26,20 @@ struct NodeInfo {
   uint32_t height;
   uint64_t difficulty;
   uint64_t txCount;
+  uint8_t blockMajorVersion;
   std::string status;
+};
+
+// Live Hearth pool price from fuegod /get_fuego_price
+struct FuegoPrice {
+  uint64_t reserveXfg;
+  uint64_t reserveHeat;
+  uint64_t spotPrice;           // XFG/HEAT × 10^18
+  uint64_t redemptionPriceNum;
+  uint64_t redemptionPriceDenom;
+  double   xfgHeatRatio;        // parsed from string
+  double   hearthstoneUsd;      // parsed from string
+  double   xfgSpotUsd;          // parsed from string
 };
 
 // Result from a wallet RPC transfer call.
@@ -39,6 +52,17 @@ struct TransferResult {
 struct TxOutputInfo {
   uint64_t amount;
   Crypto::PublicKey targetKey;  // KeyOutput target public key
+  bool isSwapEscrow = false;    // TransactionOutputSwapEscrow
+  Crypto::PublicKey escrowClaimKey;
+  Crypto::PublicKey escrowRefundKey;
+  Crypto::PublicKey escrowAdaptorPoint;
+  uint32_t escrowRefundTimeout = 0;
+};
+
+// Decoy output for ring signature construction.
+struct RandomOutputEntry {
+  uint64_t globalIndex;
+  Crypto::PublicKey outKey;
 };
 
 class FuegoRpcClient {
@@ -49,14 +73,45 @@ public:
   // Must be called before sendTransfer().
   void setWalletRpc(const std::string& host, uint16_t port);
 
+  // Set authentication credentials for wallet RPC.
+  void setWalletAuth(const std::string& user, const std::string& pass) {
+    m_walletUser = user; m_walletPass = pass;
+  }
+
+  // Token required by fuegod swap-control RPC (X-Swap-Token / Bearer) when configured.
+  void setSwapControlToken(const std::string& token) { m_swapToken = token; }
+
+  // Run wallet optimize/fusion to consolidate dust outputs.
+  // Returns tx_hash + tx_secret_key in TransferResult.
+  bool optimizeWallet(uint64_t threshold, TransferResult& result);
+
+  // Convenience: POST to fuegod
+  std::string daemonPost(const std::string& path, const std::string& body);
+
   // Query /getheight
   bool getHeight(uint32_t& height);
+  // Unlocked, spendable XFG in atomic units, from the wallet's /getbalance `available`
+  // field. Returns false on any failure so callers can fail closed rather than assume
+  // the wallet is funded.
+  bool getSpendableBalance(uint64_t& atomic);
 
   // Relay via /sendrawtransaction
   bool sendRawTransaction(const std::string& txHex);
 
+  // Report atomic swap fee to daemon → blockchain fee pool
+  bool addSwapFee(uint64_t amount);
+
+  // Query /getcurrencyid — returns genesis block hash (used to derive treasury vault key)
+  bool getCurrencyId(std::string& genesisHashHex);
+
   // Query /getinfo
   bool getInfo(NodeInfo& info);
+
+  // Query /get_fuego_price — live Hearth pool XFG/USD price
+  bool getFuegoPrice(FuegoPrice& price);
+
+  // Feed XFG/USD market value back to fuegod (PI controller removed — value is ignored)
+  bool setXfgMarketValue(uint64_t val);
 
   // ── Wallet RPC (talks to fire_wallet --rpc-bind-port) ──
 
@@ -66,6 +121,22 @@ public:
   bool sendTransfer(const std::string& address, uint64_t amount,
                     uint64_t mixin, TransferResult& result);
 
+  // Call create_afk_lock on the wallet RPC
+  bool createAfkLock(uint64_t amount, uint32_t timeout_hours, uint8_t pair, std::string& lockId, std::string& adaptorPoint, std::string& preSig, std::string& hashLock);
+
+  // Pay out an AFK swap: wallet verifies the taker's proof-of-claim
+  // (final signature over the maker's pre-sig), extracts the secret, and
+  // sends XFG to the payout address. lockId == the AFK swap record id.
+  bool claimAfkSwap(const std::string& lockId,
+                    const std::string& finalSigHex,
+                    const std::string& targetChain,
+                    const std::string& feeAddress,
+                    const std::string& payoutAddress,
+                    std::string& txHash);
+
+  // The local wallet's primary XFG address (taker's AFK payout address).
+  bool getWalletAddress(std::string& address);
+
   // ── Daemon RPC for tx inspection ──
 
   // Fetch a transaction by hash and extract its outputs.
@@ -73,13 +144,31 @@ public:
   bool getTransactionOutputs(const std::string& txHashHex,
                              std::vector<TxOutputInfo>& outputs);
 
+  // Main-chain confirmations for a transaction. Pool transactions return zero.
+  // Returns false when the transaction or chain status cannot be verified.
+  bool getTransactionConfirmations(const std::string& txHashHex,
+                                   uint32_t& confirmations);
+
+  // Get random outputs for ring decoys at a given amount.
+  // Returns `count` random {global_index, public_key} pairs via the JSON endpoint.
+  bool getRandomOutputs(uint64_t amount, uint64_t count,
+                        std::vector<RandomOutputEntry>& entries);
+  // Lookup output keys at explicit per-amount global indexes (descriptor
+  // verification for the shared swap ring). Returns false on RPC failure;
+  // entries missing on-chain keep their globalIndex with a zeroed key.
+  bool getOutputsAt(uint64_t amount, const std::vector<uint64_t>& indexes,
+                    std::vector<RandomOutputEntry>& entries);
+
+  // Resolve an alias name to an XFG address. Returns false if not found.
+  bool resolveAlias(const std::string& alias, std::string& addressOut);
+
+  bool checkReserveProof(const std::string& address, const std::string& message,
+                         const std::string& signature, bool& good, uint64_t& total);
+
 private:
   // Synchronous HTTP POST to an arbitrary host:port
   std::string httpPost(const std::string& host, uint16_t port,
                        const std::string& path, const std::string& body);
-
-  // Convenience: POST to fuegod
-  std::string daemonPost(const std::string& path, const std::string& body);
 
   // Convenience: JSON-RPC call to wallet RPC
   std::string walletJsonRpc(const std::string& method, const std::string& params);
@@ -90,6 +179,9 @@ private:
   // Wallet RPC endpoint (optional, needed for sendTransfer)
   std::string m_walletHost;
   uint16_t m_walletPort = 0;
+  std::string m_walletUser;
+  std::string m_walletPass;
+  std::string m_swapToken;
 };
 
 } // namespace XfgSwap

@@ -9,10 +9,11 @@ type Config struct {
 	IsTestnet     bool
 	NodeRPCPort   int
 	NodeP2PPort   int
+	SwapdRPCPort  int
 	DataDir       string
 	CoinUnits     int64
 	StakeAmount   int64
-	BurnTiers     []int64 // 0.8, 8, 80, 800 in atomic
+	BurnTiers     []int64
 	TestTxAmount  int64
 }
 
@@ -21,14 +22,15 @@ var MainnetConfig = Config{
 	CoinName:      "XFG",
 	AddressPrefix: "1753191",
 	NodeBinary:    "fuegod",
-	WalletBinary:  "fire_wallet",
+	WalletBinary:  "walletd", // PaymentGateService JSON-RPC (OUTPUT_NAME may be "unified")
 	IsTestnet:     false,
 	NodeRPCPort:   18180,
 	NodeP2PPort:   10808,
+	SwapdRPCPort:  18902,
 	DataDir:       ".fuego",
 	CoinUnits:     10000000,
 	StakeAmount:   8000000000,
-	BurnTiers:     []int64{8000000, 80000000, 800000000, 8000000000}, // 0.8, 8, 80, 800 XFG
+	BurnTiers:     []int64{8000000, 80000000, 800000000, 8000000000},
 	TestTxAmount:  10000000,
 }
 
@@ -41,10 +43,11 @@ var TestnetConfig = Config{
 	IsTestnet:     true,
 	NodeRPCPort:   28280,
 	NodeP2PPort:   20808,
+	SwapdRPCPort:  18902,
 	DataDir:       ".fuego-testnet",
 	CoinUnits:     10000000,
 	StakeAmount:   40000000000,
-	BurnTiers:     []int64{8000000, 80000000, 800000000, 8000000000}, // 0.8, 8, 80, 800 TEST
+	BurnTiers:     []int64{8000000, 80000000, 800000000, 8000000000},
 	TestTxAmount:  1000,
 }
 

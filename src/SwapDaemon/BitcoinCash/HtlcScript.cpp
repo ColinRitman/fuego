@@ -13,9 +13,12 @@
 // along with Fuego. If not, see <https://www.gnu.org/licenses/>.
 
 #include "HtlcScript.h"
+#include "Crypto/Secp256k1Signer.h"
+#include "Crypto/Bip143Sighash.h"
 #include <stdexcept>
 #include <cstring>
 #include <algorithm>
+#include "SwapDaemon/Crypto/ripemd160.h"
 #include <openssl/sha.h>
 #include <openssl/ripemd.h>
 #include <openssl/evp.h>
@@ -38,14 +41,7 @@ std::vector<uint8_t> BchHtlcScript::doubleSha256(const std::vector<uint8_t>& dat
 }
 
 std::vector<uint8_t> BchHtlcScript::ripemd160(const std::vector<uint8_t>& data) {
-  std::vector<uint8_t> digest(RIPEMD160_DIGEST_LENGTH);
-  EVP_MD_CTX* ctx = EVP_MD_CTX_new();
-  EVP_DigestInit_ex(ctx, EVP_ripemd160(), nullptr);
-  EVP_DigestUpdate(ctx, data.data(), data.size());
-  unsigned int len = 0;
-  EVP_DigestFinal_ex(ctx, digest.data(), &len);
-  EVP_MD_CTX_free(ctx);
-  return digest;
+  return XfgSwap::ripemd160(data);
 }
 
 std::vector<uint8_t> BchHtlcScript::hash160(const std::vector<uint8_t>& data) {
@@ -361,13 +357,13 @@ std::vector<uint8_t> BchHtlcScript::buildP2shScriptPubKey(const std::vector<uint
 // =============================================================================
 
 std::vector<uint8_t> BchHtlcScript::createRedeemScript(
-    const std::vector<uint8_t>& hashLockRipemd160,
+    const std::vector<uint8_t>& hashLockSha256,
     const std::vector<uint8_t>& recipientPubKey,
     const std::vector<uint8_t>& senderPubKey,
     uint32_t timeoutBlock) {
 
-  if (hashLockRipemd160.size() != 20) {
-    throw std::runtime_error("createRedeemScript: hashLock must be 20 bytes (RIPEMD160)");
+  if (hashLockSha256.size() != 32) {
+    throw std::runtime_error("createRedeemScript: hashLock must be 32 bytes (SHA256)");
   }
   if (recipientPubKey.size() != 33) {
     throw std::runtime_error("createRedeemScript: recipientPubKey must be 33 bytes (compressed)");
@@ -379,22 +375,22 @@ std::vector<uint8_t> BchHtlcScript::createRedeemScript(
   //
   // Script structure:
   //   OP_IF
-  //     OP_HASH160 <20: hashLock> OP_EQUALVERIFY <33: recipientPubKey> OP_CHECKSIG
+  //     OP_SHA256 <32: hashLock> OP_EQUALVERIFY <33: recipientPubKey> OP_CHECKSIG
   //   OP_ELSE
   //     <N: timeoutBlock> OP_CHECKLOCKTIMEVERIFY OP_DROP <33: senderPubKey> OP_CHECKSIG
   //   OP_ENDIF
   //
   std::vector<uint8_t> script;
-  script.reserve(1 + 1 + 1 + 20 + 1 + 1 + 33 + 1 + 1 + 5 + 1 + 1 + 1 + 33 + 1 + 1);
+  script.reserve(1 + 1 + 1 + 32 + 1 + 1 + 33 + 1 + 1 + 5 + 1 + 1 + 1 + 33 + 1 + 1);
 
   // OP_IF
   script.push_back(OpCode::OP_IF);
 
-  // OP_HASH160
-  script.push_back(OpCode::OP_HASH160);
+  // OP_SHA256 (single SHA256 — consistent with other chains in this protocol)
+  script.push_back(OpCode::OP_SHA256);
 
-  // <hashLock> (20 bytes, direct push)
-  pushData(script, hashLockRipemd160);
+  // <hashLock> (32 bytes, direct push)
+  pushData(script, hashLockSha256);
 
   // OP_EQUALVERIFY
   script.push_back(OpCode::OP_EQUALVERIFY);
@@ -577,7 +573,10 @@ std::vector<uint8_t> BchHtlcScript::buildRawTransaction(
   // Input: sequence
   // For refund (CLTV): must be < 0xFFFFFFFF so CHECKLOCKTIMEVERIFY is not bypassed
   // For claim: 0xFFFFFFFF is fine (no timelock constraint)
-  uint32_t nSequence = (nLockTime > 0) ? 0xFFFFFFFE : 0xFFFFFFFF;
+  // Opt-in BIP-125 RBF (0xFFFFFFFD) when not using CLTV sequence for refund.
+  // Refund path needs nSequence < 0xFFFFFFFF for CLTV; use 0xFFFFFFFE there.
+  // Claim path: RBF-capable so stuck claims can be fee-bumped.
+  uint32_t nSequence = (nLockTime > 0) ? 0xFFFFFFFE : 0xFFFFFFFD;
   writeLE32(tx, nSequence);
 
   // Number of outputs = 1
@@ -594,6 +593,249 @@ std::vector<uint8_t> BchHtlcScript::buildRawTransaction(
   writeLE32(tx, nLockTime);
 
   return tx;
+}
+
+// =============================================================================
+// P2SH scriptPubKey from redeem script
+// =============================================================================
+
+std::vector<uint8_t> BchHtlcScript::redeemScriptToP2shScriptPubKey(
+    const std::vector<uint8_t>& redeemScript) {
+  return buildP2shScriptPubKey(hash160(redeemScript));
+}
+
+// =============================================================================
+// Raw transaction parser: extract claim preimage from a spending tx
+// =============================================================================
+
+// Helper: read a Bitcoin CompactSize (varint) from a byte range.
+// Returns false on underflow.
+static bool readVarInt(const uint8_t*& p, const uint8_t* end, uint64_t& out) {
+  if (p >= end) return false;
+  uint8_t first = *p++;
+  if (first < 0xFD) {
+    out = first;
+    return true;
+  } else if (first == 0xFD) {
+    if (p + 2 > end) return false;
+    out = static_cast<uint64_t>(p[0]) | (static_cast<uint64_t>(p[1]) << 8);
+    p += 2;
+    return true;
+  } else if (first == 0xFE) {
+    if (p + 4 > end) return false;
+    out = static_cast<uint64_t>(p[0]) | (static_cast<uint64_t>(p[1]) << 8) |
+          (static_cast<uint64_t>(p[2]) << 16) | (static_cast<uint64_t>(p[3]) << 24);
+    p += 4;
+    return true;
+  } else {
+    if (p + 8 > end) return false;
+    out = 0;
+    for (int i = 0; i < 8; ++i) {
+      out |= static_cast<uint64_t>(p[i]) << (i * 8);
+    }
+    p += 8;
+    return true;
+  }
+}
+
+std::vector<uint8_t> BchHtlcScript::parseClaimPreimage(
+    const std::vector<uint8_t>& rawTx,
+    const std::vector<uint8_t>& htlcP2shScriptPubKey) {
+
+  // P2SH claim scriptSigs are small (sig + 32-byte preimage + OP_TRUE +
+  // redeemScript ≈ 300 bytes). Cap the accepted scriptSig length to bound
+  // memory and CPU: reject pathological compact-size lengths without
+  // allocating or scanning them (OOM / CPU-exhaustion guard).
+  static const uint64_t MAX_SCRIPT_SIG_LEN = 10000;
+
+  // P2SH scriptPubKey format: OP_HASH160 (0xA9) PUSH20 (0x14) <20-byte-hash> OP_EQUAL (0x87)
+  // Total length: 23 bytes. The hash is at bytes [2..22).
+  if (htlcP2shScriptPubKey.size() != 23) return {};
+  if (htlcP2shScriptPubKey[0] != OpCode::OP_HASH160) return {};
+  if (htlcP2shScriptPubKey[1] != 0x14) return {};
+  if (htlcP2shScriptPubKey[22] != OpCode::OP_EQUAL) return {};
+  std::vector<uint8_t> expectedHash(htlcP2shScriptPubKey.begin() + 2,
+                                     htlcP2shScriptPubKey.begin() + 22);
+
+  const uint8_t* p = rawTx.data();
+  const uint8_t* end = rawTx.data() + rawTx.size();
+
+  // Skip version (4 bytes LE)
+  if (p + 4 > end) return {};
+  p += 4;
+
+  // Read number of inputs
+  uint64_t vinCount = 0;
+  if (!readVarInt(p, end, vinCount)) return {};
+
+  // Bound the input count against the remaining buffer to prevent a huge
+  // loop from a tiny/truncated payload.
+  if (vinCount > static_cast<uint64_t>(end - p) / 36 + 1) return {};
+
+  // Parse each input
+  for (uint64_t i = 0; i < vinCount; ++i) {
+    // Skip prev txid (32 bytes) + prev vout (4 bytes) + sequence (4 bytes) = 40 bytes
+    // We only care about scriptSig
+    if (p + 36 > end) return {};
+    p += 36;  // txid + vout
+
+    // Read scriptSig
+    uint64_t scriptSigLen = 0;
+    if (!readVarInt(p, end, scriptSigLen)) return {};
+    if (scriptSigLen > MAX_SCRIPT_SIG_LEN) return {};
+    if (p + scriptSigLen > end) return {};
+    const uint8_t* scriptSigStart = p;
+    const uint8_t* scriptSigEnd = p + scriptSigLen;
+    p = scriptSigEnd;
+
+    // Skip sequence (4 bytes)
+    if (p + 4 > end) return {};
+    p += 4;
+
+    // Parse the scriptSig: for a P2SH claim it's:
+    //   <signature-push> <preimage-push> OP_TRUE <redeemScript-push>
+    //
+    // Scan for push-data items separated by non-push opcodes.
+    const uint8_t* sp = scriptSigStart;
+    std::vector<std::pair<const uint8_t*, size_t>> pushItems;
+
+    while (sp < scriptSigEnd) {
+      uint8_t opcode = *sp;
+      if (opcode == OpCode::OP_TRUE || opcode == OpCode::OP_FALSE ||
+          opcode == OpCode::OP_IF || opcode == OpCode::OP_ELSE ||
+          opcode == OpCode::OP_ENDIF || opcode == OpCode::OP_DROP ||
+          opcode == OpCode::OP_EQUAL || opcode == OpCode::OP_EQUALVERIFY ||
+          opcode == OpCode::OP_CHECKSIG || opcode == OpCode::OP_CHECKLOCKTIMEVERIFY ||
+          opcode == OpCode::OP_SHA256 || opcode == OpCode::OP_HASH160 ||
+          opcode == OpCode::OP_DUP) {
+        // Non-push opcode
+        ++sp;
+        continue;
+      }
+
+      // Data push
+      uint64_t pushLen = 0;
+      if (opcode == OpCode::OP_PUSHDATA1) {
+        ++sp;
+        if (sp >= scriptSigEnd) break;
+        pushLen = *sp++;
+      } else if (opcode == 0x4D) {  // OP_PUSHDATA2
+        ++sp;
+        if (sp + 2 > scriptSigEnd) break;
+        pushLen = static_cast<uint64_t>(sp[0]) | (static_cast<uint64_t>(sp[1]) << 8);
+        sp += 2;
+      } else if (opcode <= 75) {
+        pushLen = opcode;
+        ++sp;
+      } else {
+        // Unknown opcode — skip
+        ++sp;
+        continue;
+      }
+
+      if (sp + pushLen > scriptSigEnd) break;
+      pushItems.emplace_back(sp, pushLen);
+      sp += pushLen;
+    }
+
+    // A P2SH claim scriptSig has at least 4 items: <sig> <preimage> OP_TRUE <redeemScript>
+    // The OP_TRUE is a non-push opcode between the 2nd and 3rd push items.
+    // We need at least 3 push items (sig, preimage, redeemScript).
+    if (pushItems.size() < 3) continue;
+
+    // The last push item is the redeemScript. Check its hash160 matches the HTLC P2SH.
+    const auto& redeemScriptPush = pushItems.back();
+    std::vector<uint8_t> redeemScript(redeemScriptPush.first,
+                                      redeemScriptPush.first + redeemScriptPush.second);
+    std::vector<uint8_t> p2shHash = hash160(redeemScript);
+
+    if (p2shHash != expectedHash) continue;
+
+    // Found the HTLC input. The preimage is the second push item.
+    const auto& preimagePush = pushItems[1];
+    return std::vector<uint8_t>(preimagePush.first,
+                                preimagePush.first + preimagePush.second);
+  }
+
+  return {};  // No matching input found
+}
+
+// =============================================================================
+// WIF decode and BCH signing helpers
+// =============================================================================
+
+bool BchHtlcScript::wifToPrivKey(const std::string& wif,
+                                   std::array<uint8_t, 32>& privKey) {
+  uint8_t version = 0;
+  std::vector<uint8_t> payload;
+  if (!base58CheckDecode(wif, version, payload)) return false;
+  if (payload.size() == 33 && payload.back() == 0x01) {
+    payload.pop_back();
+  }
+  if (payload.size() != 32) return false;
+  std::copy(payload.begin(), payload.end(), privKey.begin());
+  return true;
+}
+
+std::vector<uint8_t> BchHtlcScript::signInput(
+    const std::array<uint8_t, 32>& privKey,
+    uint32_t txVersion,
+    uint32_t nLocktime,
+    uint32_t nSequence,
+    const std::string& htlcTxid,
+    uint32_t htlcVout,
+    const std::vector<uint8_t>& redeemScript,
+    uint64_t htlcAmount,
+    const std::vector<uint8_t>& outputScript,
+    uint64_t outputAmount) {
+
+  auto txidBytes = hexToBytes(htlcTxid);
+  if (txidBytes.size() != 32) return {};
+  std::reverse(txidBytes.begin(), txidBytes.end());
+  std::array<uint8_t, 32> txidLE;
+  std::copy(txidBytes.begin(), txidBytes.end(), txidLE.begin());
+
+  CryptoNote::SwapDaemon::Crypto::Bip143Sighash bip143;
+  auto sighash = bip143.computeForP2sh(
+      txVersion, nLocktime, nSequence,
+      txidLE, htlcVout,
+      redeemScript,
+      htlcAmount,
+      outputScript,
+      outputAmount,
+      /*sighashType=*/0x41);
+
+  CryptoNote::SwapDaemon::Crypto::Secp256k1Signer signer;
+  auto sig = signer.signRecoverable(sighash, privKey);
+
+  auto& r = sig.r;
+  auto& s = sig.s;
+
+  size_t rStart = 0, sStart = 0;
+  while (rStart < 31 && r[rStart] == 0) ++rStart;
+  while (sStart < 31 && s[sStart] == 0) ++sStart;
+
+  bool rPad = (r[rStart] & 0x80) != 0;
+  bool sPad = (s[sStart] & 0x80) != 0;
+
+  size_t rLen = 32 - rStart + (rPad ? 1 : 0);
+  size_t sLen = 32 - sStart + (sPad ? 1 : 0);
+  size_t seqLen = 2 + rLen + 2 + sLen;
+
+  std::vector<uint8_t> der;
+  der.push_back(0x30);
+  der.push_back(static_cast<uint8_t>(seqLen));
+  der.push_back(0x02);
+  der.push_back(static_cast<uint8_t>(rLen));
+  if (rPad) der.push_back(0x00);
+  der.insert(der.end(), r.begin() + rStart, r.end());
+  der.push_back(0x02);
+  der.push_back(static_cast<uint8_t>(sLen));
+  if (sPad) der.push_back(0x00);
+  der.insert(der.end(), s.begin() + sStart, s.end());
+  der.push_back(0x41);
+
+  return der;
 }
 
 } // namespace XfgSwap

@@ -203,11 +203,17 @@ void P2pNode::acceptLoop() {
   while (!m_stopRequested) {
     try {
       auto connection = m_listener.accept();
+      if (m_incomingCount >= CryptoNote::P2P_MAX_INCOMING_CONNECTIONS) {
+        logger(DEBUGGING) << "Max incoming connections (" << CryptoNote::P2P_MAX_INCOMING_CONNECTIONS << ") reached, rejecting";
+        continue;
+      }
+      ++m_incomingCount;
       auto ctx = new P2pContext(m_dispatcher, std::move(connection), true, 
         getRemoteAddress(connection), m_cfg.getTimedSyncInterval(), getGenesisPayload());
       logger(INFO) << "Incoming connection from " << ctx->getRemoteAddress();
       workingContextGroup.spawn([this, ctx] {
         preprocessIncomingConnection(ContextPtr(ctx));
+        --m_incomingCount;
       });
     } catch (InterruptedException&) {
       break;
@@ -408,7 +414,7 @@ bool P2pNode::fetchPeerList(ContextPtr connection) {
     }
 
     if (response.node_data.network_id != request.node_data.network_id) {
-      logger(ERROR) << *connection << "COMMAND_HANDSHAKE failed, wrong network: " << response.node_data.network_id;
+      logger(Logging::ERROR) << *connection << "COMMAND_HANDSHAKE failed, wrong network: " << response.node_data.network_id;
       return false;
     }
 

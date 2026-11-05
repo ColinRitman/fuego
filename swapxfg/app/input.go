@@ -9,18 +9,28 @@ import (
 )
 
 // RenderInputBar draws the bottom command bar with prompt, balance, and connection info.
-func RenderInputBar(cmdBuf string, cursorOn bool, balance string, daemonAddr string, connected bool, width int) string {
-	// Prompt
+// xfgBal is the formatted XFG balance (empty if unavailable).
+// bchBal is the formatted BCH balance (empty if BCH not connected).
+func RenderInputBar(cmdBuf string, cursorOn bool, xfgBal, bchBal string, daemonAddr string, connected bool, width int) string {
 	cursor := " "
 	if cursorOn {
 		cursor = "█"
 	}
-	prompt := StyleInput.Render(fmt.Sprintf("> %s%s", cmdBuf, cursor))
 
-	// Right side: balance + daemon
+	// Hint when buffer is empty
+	promptText := fmt.Sprintf("> %s%s", cmdBuf, cursor)
+	if cmdBuf == "" && !cursorOn {
+		promptText = StyleMuted.Render("> /swap <amount> [pair]")
+	}
+	prompt := StyleInput.Render(promptText)
+
+	// Right side: balance(s) + daemon
 	var right []string
-	if balance != "" {
-		right = append(right, StyleBull.Render(fmt.Sprintf("BAL %s XFG", balance)))
+	if xfgBal != "" {
+		right = append(right, StyleBull.Render(fmt.Sprintf("BAL %s XFG", xfgBal)))
+	}
+	if bchBal != "" {
+		right = append(right, StyleBull.Render(bchBal))
 	}
 
 	connStyle := lipgloss.NewStyle().Foreground(ColorConnOK)
@@ -28,7 +38,6 @@ func RenderInputBar(cmdBuf string, cursorOn bool, balance string, daemonAddr str
 	if !connected {
 		connStyle = lipgloss.NewStyle().Foreground(ColorConnLost)
 	}
-	// Extract port from daemon address
 	port := daemonAddr
 	if idx := strings.LastIndex(daemonAddr, ":"); idx >= 0 {
 		port = ":" + daemonAddr[idx+1:]
@@ -36,7 +45,6 @@ func RenderInputBar(cmdBuf string, cursorOn bool, balance string, daemonAddr str
 	right = append(right, connStyle.Render(connChar), StyleMuted.Render(port))
 	rightStr := strings.Join(right, "  ")
 
-	// Fill middle with spaces
 	promptW := lipgloss.Width(prompt)
 	rightW := lipgloss.Width(rightStr)
 	gap := width - promptW - rightW

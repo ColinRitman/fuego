@@ -18,6 +18,7 @@
 extern "C" {
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 }
 
 namespace CryptoNote {
@@ -205,7 +206,7 @@ namespace TorUtils {
     
     /**
      * @brief Get Tor version string
-     * @param buffer Output buffer for version
+     * @param buffer Output buffer for volume
      * @param bufferSize Size of the buffer
      * @return true if version was retrieved successfully
      */

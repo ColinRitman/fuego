@@ -33,9 +33,12 @@
 #include "LevinProtocol.h"
 #include "NetNodeCommon.h"
 #include "NetNodeConfig.h"
+#include "NetworkAddressTypes.h"
 #include "P2pProtocolDefinitions.h"
 #include "P2pNetworks.h"
 #include "PeerListManager.h"
+#include "net/Socks5.h"
+#include "net/TorControl.h"
 
 namespace System {
 class TcpConnection;
@@ -143,6 +146,11 @@ namespace CryptoNote
     bool unban_host(const uint32_t address_ip) override;
     std::map<uint32_t, time_t> get_blocked_hosts() override { return m_blocked_hosts; };
 
+    // External relay interface (IP2pEndpoint) — public
+    virtual void externalRelayNotifyToAll(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection) override;
+    virtual void externalRelayNotifyToStem(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection) override;
+    virtual void externalRelayNotifyToList(int command, const BinaryArray &data_buff, const std::list<boost::uuids::uuid> relayList) override;
+
   private:
     enum PeerType
     {
@@ -157,6 +165,7 @@ namespace CryptoNote
     int handle_timed_sync(int command, COMMAND_TIMED_SYNC::request& arg, COMMAND_TIMED_SYNC::response& rsp, P2pConnectionContext& context);
     int handle_ping(int command, COMMAND_PING::request& arg, COMMAND_PING::response& rsp, P2pConnectionContext& context);
     int handle_elderfier_signature(int command, COMMAND_ELDERFIER_SIGNATURE::request& arg, COMMAND_ELDERFIER_SIGNATURE::response& rsp, P2pConnectionContext& context);
+
 
 #ifdef ALLOW_DEBUG_COMMANDS
     int handle_get_stat_info(int command, COMMAND_REQUEST_STAT_INFO::request& arg, COMMAND_REQUEST_STAT_INFO::response& rsp, P2pConnectionContext& context);
@@ -180,11 +189,15 @@ namespace CryptoNote
 
     //----------------- i_p2p_endpoint -------------------------------------------------------------
     virtual void relay_notify_to_all(int command, const BinaryArray& data_buff, const net_connection_id* excludeConnection) override;
+    virtual void relay_notify_stem(int command, const BinaryArray& data_buff, const net_connection_id* excludeConnection) override;
     virtual bool invoke_notify_to_peer(int command, const BinaryArray& req_buff, const CryptoNoteConnectionContext& context) override;
     virtual void drop_connection(CryptoNoteConnectionContext &context, bool add_fail) override;
     virtual void for_each_connection(std::function<void(CryptoNote::CryptoNoteConnectionContext&, PeerIdType)> f) override;
-    virtual void externalRelayNotifyToAll(int command, const BinaryArray &data_buff, const net_connection_id *excludeConnection) override;
-    virtual void externalRelayNotifyToList(int command, const BinaryArray &data_buff, const std::list<boost::uuids::uuid> relayList) override;
+#ifdef ENABLE_FUEGOMESH
+    virtual bool relayTransactionViaMesh(const BinaryArray& txBlob) override;
+    virtual bool relayBlockSignalViaMesh(uint32_t height, const Crypto::Hash& blockHash) override;
+    virtual bool isMeshtasticEnabled() const override;
+#endif
     //-----------------------------------------------------------------------------------------------
     bool add_host_fail(const uint32_t address_ip);
     bool block_host(const uint32_t address_ip, time_t seconds = P2P_IP_BLOCKTIME);
@@ -218,6 +231,25 @@ namespace CryptoNote
 
     //debug functions
     std::string print_connections_container();
+
+    // Per-zone network state — separate peerlists and proxy configuration per zone
+    struct network_zone_data {
+      PeerlistManager peerlist;
+      std::string proxy_host;
+      uint16_t proxy_port = 0;
+      network_address our_address;           // our .b32.i2p or .onion address (for inbound)
+      uint32_t max_out_peers = 0;
+      uint32_t max_in_peers = 0;
+      uint32_t current_out_peers = 0;
+      uint32_t current_in_peers = 0;
+      bool enabled = false;
+    };
+
+    std::map<NetworkZone, network_zone_data> m_network_zones;
+
+    network_zone_data& get_zone(NetworkZone zone);
+    bool init_network_zones(const NetNodeConfig& config);
+    bool try_to_connect_via_proxy(const network_address& na, NetworkZone zone, bool just_take_peerlist = false, uint64_t last_seen_stamp = 0, PeerType peer_type = white);
 
     typedef std::unordered_map<boost::uuids::uuid, P2pConnectionContext, boost::hash<boost::uuids::uuid>> ConnectionContainer;
     typedef ConnectionContainer::iterator ConnectionIterator;
@@ -288,6 +320,25 @@ namespace CryptoNote
     boost::uuids::uuid m_network_id;
     std::map<uint32_t, time_t> m_blocked_hosts;
     std::map<uint32_t, uint64_t> m_host_fails_score;
+
+    std::map<uint32_t, uint32_t> m_inboundCounts;     // per-IP inbound connection count (guarded by mutex)
+    size_t m_totalInboundCount = 0;                    // total inbound connections (guarded by mutex)
+
+    boost::uuids::uuid m_dandelionStemSuccessor;
+    time_t m_dandelionEpochEnd = 0;
+    std::unique_ptr<CryptoNote::net::TorHiddenService> m_hiddenService;
+
     mutable std::mutex mutex;
+
+#ifdef ENABLE_FUEGOMESH
+    bool initMeshtastic(const MeshtasticConfig& config);
+    void shutdownMeshtastic();
+    bool connectViaMeshtastic(const NetworkAddress& na);
+    void relayBlockViaMeshtastic(const BinaryArray& blockData);
+    void relayTransactionViaMeshtastic(const BinaryArray& txData);
+    std::unique_ptr<MeshtasticIntegration> m_meshtastic;
+    bool m_meshtasticEnabled;
+    bool m_meshtasticFallbackMode;
+#endif
   };
 }

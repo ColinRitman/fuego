@@ -17,11 +17,18 @@
 #include "SwapStateMachine.h"
 #include <string>
 #include <vector>
+#include <mutex>
+#include <functional>
 
 namespace XfgSwap {
 
 // File-based swap persistence.
 // Each swap is stored as a JSON file in <dataDir>/swaps/<swap_id>.json
+//
+// All public operations acquire m_mutex, serializing tick-thread and
+// user-command access to the same swap files. Atomic rename alone is
+// not sufficient: a concurrent load+save pair from two threads can
+// lose updates (stale copy overwriting a newer state).
 class SwapDatabase {
 public:
   explicit SwapDatabase(const std::string& dataDir);
@@ -38,18 +45,43 @@ public:
   // Delete a swap file from disk.
   bool deleteSwap(const std::string& swapId);
 
+  // Atomically load a swap, mutate it via fn, and save the result.
+  // fn must return true on success; if false, no save occurs.
+  // The mutex is held across load+mutate+save so no concurrent writer
+  // can clobber the update. Returns false on load/mutate/save failure.
+  bool updateSwap(const std::string& swapId,
+                  const std::function<bool(SwapStateMachine&)>& fn);
+
   // Get the data directory path.
   const std::string& dataDir() const;
+
+  // Set the escrow-secret encryption key (held in memory, never persisted).
+  void setEncryptionKey(const std::string& key);
+
+  // Move terminal swaps from active directory to archive on startup.
+  // Call once after construction to prevent stale terminal swaps from
+  // being loaded every tick.
+  void migrateTerminalSwaps();
 
 private:
   // Get the full path to a swap's JSON file.
   std::string swapFilePath(const std::string& swapId) const;
 
+  // Get the full path to a swap's archived JSON file.
+  std::string archiveFilePath(const std::string& swapId) const;
+
   // Ensure the swaps directory exists.
   bool ensureDirectory();
 
+  // Unlocked helpers (must be called with m_mutex held).
+  bool saveSwapLocked(const SwapStateMachine& sm);
+  bool loadSwapLocked(const std::string& swapId, SwapStateMachine& sm);
+
   std::string m_dataDir;
   std::string m_swapsDir;
+  std::string m_archiveDir;
+  std::string m_encKey;
+  mutable std::mutex m_mutex;
 };
 
 } // namespace XfgSwap

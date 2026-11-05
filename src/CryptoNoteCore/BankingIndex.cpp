@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cstdio>
 #include <iterator>
 #include <limits>
 
@@ -29,10 +30,10 @@
 
 namespace CryptoNote {
 
-BankingIndex::BankingIndex() : blockCount(0), m_ethereal_xfg(0) {
+BankingIndex::BankingIndex() : blockCount(0), m_ethereal_xfg(0), m_total_burned_xfg(0), m_permanently_burned_xfg(0) {
 }
 
-BankingIndex::BankingIndex(DepositHeight expectedHeight) : blockCount(0), m_ethereal_xfg(0) {
+BankingIndex::BankingIndex(DepositHeight expectedHeight) : blockCount(0), m_ethereal_xfg(0), m_total_burned_xfg(0), m_permanently_burned_xfg(0) {
   index.reserve(expectedHeight + 1);
 }
 
@@ -92,19 +93,39 @@ void BankingIndex::pushBlock(DepositAmount amount, DepositInterest interest) {
 void BankingIndex::popBlock() {
   assert(blockCount > 0);
 
-  // Calculate burned amount (if any) in block before popping
+  --blockCount;
+
   uint64_t burnedInBlock = 0;
   if (!m_burnedXfgEntries.empty() && m_burnedXfgEntries.back().height == blockCount) {
     uint64_t currentTotal = m_ethereal_xfg;
     uint64_t previousTotal = (m_burnedXfgEntries.size() > 1) ?
-      (--m_burnedXfgEntries.end() - 1)->cumulative_burned : 0;
+      (m_burnedXfgEntries.end() - 2)->cumulative_burned : 0;
     burnedInBlock = currentTotal - previousTotal;
 
     m_burnedXfgEntries.pop_back();
-    m_ethereal_xfg -= burnedInBlock;  // Update total
+    m_ethereal_xfg -= burnedInBlock;
   }
 
-  --blockCount;
+  if (!m_totalBurnedEntries.empty() && m_totalBurnedEntries.back().height == blockCount) {
+    uint64_t currentTotal = m_total_burned_xfg;
+    uint64_t previousTotal = (m_totalBurnedEntries.size() > 1) ?
+      (m_totalBurnedEntries.end() - 2)->cumulative_burned : 0;
+    uint64_t totalInBlock = currentTotal - previousTotal;
+
+    m_totalBurnedEntries.pop_back();
+    m_total_burned_xfg -= totalInBlock;
+  }
+
+  if (!m_permanentBurnedEntries.empty() && m_permanentBurnedEntries.back().height == blockCount) {
+    uint64_t currentTotal = m_permanently_burned_xfg;
+    uint64_t previousTotal = (m_permanentBurnedEntries.size() > 1) ?
+      (m_permanentBurnedEntries.end() - 2)->cumulative_burned : 0;
+    uint64_t permInBlock = currentTotal - previousTotal;
+
+    m_permanentBurnedEntries.pop_back();
+    m_permanently_burned_xfg -= permInBlock;
+  }
+
   if (!index.empty() && index.back().height == blockCount) {
     index.pop_back();
   }
@@ -138,10 +159,38 @@ size_t BankingIndex::popBlocks(DepositHeight from) {
 
   // Also pop burned XFG entries from this height
   auto burnedIt = m_burnedXfgEntries.begin();
-  while (burnedIt != m_burnedXfgEntries.end() && burnedIt->height >= from) {
+  while (burnedIt != m_burnedXfgEntries.end() && burnedIt->height < from) {
     ++burnedIt;
   }
+  if (!m_burnedXfgEntries.empty() && burnedIt != m_burnedXfgEntries.begin()) {
+    m_ethereal_xfg = (burnedIt - 1)->cumulative_burned;
+  } else if (burnedIt == m_burnedXfgEntries.begin()) {
+    m_ethereal_xfg = 0;
+  }
   m_burnedXfgEntries.erase(burnedIt, m_burnedXfgEntries.end());
+
+  // Pop the overall burn tally from this height too.
+  auto totalIt = m_totalBurnedEntries.begin();
+  while (totalIt != m_totalBurnedEntries.end() && totalIt->height < from) {
+    ++totalIt;
+  }
+  if (!m_totalBurnedEntries.empty() && totalIt != m_totalBurnedEntries.begin()) {
+    m_total_burned_xfg = (totalIt - 1)->cumulative_burned;
+  } else if (totalIt == m_totalBurnedEntries.begin()) {
+    m_total_burned_xfg = 0;
+  }
+  m_totalBurnedEntries.erase(totalIt, m_totalBurnedEntries.end());
+
+  auto permIt = m_permanentBurnedEntries.begin();
+  while (permIt != m_permanentBurnedEntries.end() && permIt->height < from) {
+    ++permIt;
+  }
+  if (!m_permanentBurnedEntries.empty() && permIt != m_permanentBurnedEntries.begin()) {
+    m_permanently_burned_xfg = (permIt - 1)->cumulative_burned;
+  } else if (permIt == m_permanentBurnedEntries.begin()) {
+    m_permanently_burned_xfg = 0;
+  }
+  m_permanentBurnedEntries.erase(permIt, m_permanentBurnedEntries.end());
 
   auto diff = blockCount - from;
   blockCount -= diff;
@@ -183,6 +232,74 @@ BankingIndex::BurnedAmount BankingIndex::getBurnedXfgAtHeight(DepositHeight heig
   return it == m_burnedXfgEntries.cbegin() ? 0 : (--it)->cumulative_burned;
 }
 
+BankingIndex::BurnedAmount BankingIndex::getTotalBurnedXfg() const {
+  return m_total_burned_xfg;
+}
+
+BankingIndex::BurnedAmount BankingIndex::getTotalBurnedXfgAtHeight(DepositHeight height) const {
+  if (m_totalBurnedEntries.empty()) return 0;
+  auto it = std::upper_bound(
+    m_totalBurnedEntries.cbegin(), m_totalBurnedEntries.cend(), height,
+    [] (DepositHeight height, const BurnedXfgEntry& entry) { return height < entry.height; });
+  return it == m_totalBurnedEntries.cbegin() ? 0 : (--it)->cumulative_burned;
+}
+
+void BankingIndex::addTotalBurn(BurnedAmount amount, DepositHeight height) {
+  if (amount == 0) return;
+  const uint64_t MAX_BURNED = std::numeric_limits<uint64_t>::max();
+  if (amount > MAX_BURNED - m_total_burned_xfg) {
+    fprintf(stderr, "[BankingIndex] addTotalBurn: overflow rejected (total=%llu amount=%llu)\n",
+            (unsigned long long)m_total_burned_xfg, (unsigned long long)amount);
+    return;
+  }
+  m_total_burned_xfg += amount;
+
+  if (!m_totalBurnedEntries.empty() && m_totalBurnedEntries.back().height == height) {
+    if (amount > MAX_BURNED - m_totalBurnedEntries.back().amount) {
+      fprintf(stderr, "[BankingIndex] addTotalBurn: entry amount overflow rejected at height %u\n", height);
+      return;
+    }
+    m_totalBurnedEntries.back().amount += amount;
+    m_totalBurnedEntries.back().cumulative_burned = m_total_burned_xfg;
+  } else {
+    m_totalBurnedEntries.push_back({ height, amount, m_total_burned_xfg });
+  }
+}
+
+BankingIndex::BurnedAmount BankingIndex::getPermanentlyBurnedXfg() const {
+  return m_permanently_burned_xfg;
+}
+
+BankingIndex::BurnedAmount BankingIndex::getPermanentlyBurnedXfgAtHeight(DepositHeight height) const {
+  if (m_permanentBurnedEntries.empty()) return 0;
+  auto it = std::upper_bound(
+    m_permanentBurnedEntries.cbegin(), m_permanentBurnedEntries.cend(), height,
+    [] (DepositHeight height, const BurnedXfgEntry& entry) { return height < entry.height; });
+  return it == m_permanentBurnedEntries.cbegin() ? 0 : (--it)->cumulative_burned;
+}
+
+void BankingIndex::addPermanentBurn(BurnedAmount amount, DepositHeight height) {
+  if (amount == 0) return;
+  const uint64_t MAX_BURNED = std::numeric_limits<uint64_t>::max();
+  if (amount > MAX_BURNED - m_permanently_burned_xfg) {
+    fprintf(stderr, "[BankingIndex] addPermanentBurn: overflow rejected (perm=%llu amount=%llu)\n",
+            (unsigned long long)m_permanently_burned_xfg, (unsigned long long)amount);
+    return;
+  }
+  m_permanently_burned_xfg += amount;
+
+  if (!m_permanentBurnedEntries.empty() && m_permanentBurnedEntries.back().height == height) {
+    if (amount > MAX_BURNED - m_permanentBurnedEntries.back().amount) {
+      fprintf(stderr, "[BankingIndex] addPermanentBurn: entry amount overflow rejected at height %u\n", height);
+      return;
+    }
+    m_permanentBurnedEntries.back().amount += amount;
+    m_permanentBurnedEntries.back().cumulative_burned = m_permanently_burned_xfg;
+  } else {
+    m_permanentBurnedEntries.push_back({ height, amount, m_permanently_burned_xfg });
+  }
+}
+
 void BankingIndex::addForeverDeposit(BurnedAmount amount, DepositHeight height) {
   if (amount == 0) return;
 
@@ -191,16 +308,20 @@ void BankingIndex::addForeverDeposit(BurnedAmount amount, DepositHeight height) 
   // pushBlock(static_cast<DepositAmount>(amount), 0);
 
   // Add to burned XFG tracking (new functionality)
-  // SECURITY: Check for overflow before adding to cumulative burned amount
   const uint64_t MAX_BURNED = std::numeric_limits<uint64_t>::max();
-  assert(amount <= MAX_BURNED - m_ethereal_xfg && "addForeverDeposit: Overflow in cumulative burned amount!");
+  if (amount > MAX_BURNED - m_ethereal_xfg) {
+    fprintf(stderr, "[BankingIndex] addForeverDeposit: overflow rejected (ethereal=%llu amount=%llu)\n",
+            (unsigned long long)m_ethereal_xfg, (unsigned long long)amount);
+    return;
+  }
 
   m_ethereal_xfg += amount;
 
   if (!m_burnedXfgEntries.empty() && m_burnedXfgEntries.back().height == height) {
-    // Update existing entry
-    // SECURITY: Check for overflow in entry amount as well
-    assert(amount <= MAX_BURNED - m_burnedXfgEntries.back().amount && "addForeverDeposit: Overflow in entry amount!");
+    if (amount > MAX_BURNED - m_burnedXfgEntries.back().amount) {
+      fprintf(stderr, "[BankingIndex] addForeverDeposit: entry amount overflow rejected at height %u\n", height);
+      return;
+    }
     m_burnedXfgEntries.back().amount += amount;
     m_burnedXfgEntries.back().cumulative_burned = m_ethereal_xfg;
   } else {
@@ -231,9 +352,43 @@ void BankingIndex::serialize(ISerializer& s) {
   if (s.type() == ISerializer::INPUT) {
     readSequence<BankingIndexEntry>(std::back_inserter(index), "index", s);
     readSequence<BurnedXfgEntry>(std::back_inserter(m_burnedXfgEntries), "burnedXfgEntries", s);
+    // Migration-safe trailing fields: absent in pre-tally databases, defaults
+    // (0 / empty) stand and the burn rescan fills them on load.
+    try {
+      s(m_total_burned_xfg, "totalBurnedXFG");
+      readSequence<BurnedXfgEntry>(std::back_inserter(m_totalBurnedEntries), "totalBurnedEntries", s);
+    } catch (const std::exception& e) {
+      fprintf(stderr, "[BankingIndex] totalBurned deserialization failed: %s — rescan required\n", e.what());
+      m_total_burned_xfg = 0;
+      m_totalBurnedEntries.clear();
+      m_rescanRequired = true;
+    } catch (...) {
+      fprintf(stderr, "[BankingIndex] totalBurned deserialization failed (unknown) — rescan required\n");
+      m_total_burned_xfg = 0;
+      m_totalBurnedEntries.clear();
+      m_rescanRequired = true;
+    }
+    try {
+      s(m_permanently_burned_xfg, "permanentlyBurnedXFG");
+      readSequence<BurnedXfgEntry>(std::back_inserter(m_permanentBurnedEntries), "permanentBurnedEntries", s);
+    } catch (const std::exception& e) {
+      fprintf(stderr, "[BankingIndex] permanentBurned deserialization failed: %s — rescan required\n", e.what());
+      m_permanently_burned_xfg = 0;
+      m_permanentBurnedEntries.clear();
+      m_rescanRequired = true;
+    } catch (...) {
+      fprintf(stderr, "[BankingIndex] permanentBurned deserialization failed (unknown) — rescan required\n");
+      m_permanently_burned_xfg = 0;
+      m_permanentBurnedEntries.clear();
+      m_rescanRequired = true;
+    }
   } else {
     writeSequence<BankingIndexEntry>(index.begin(), index.end(), "index", s);
     writeSequence<BurnedXfgEntry>(m_burnedXfgEntries.begin(), m_burnedXfgEntries.end(), "burnedXfgEntries", s);
+    s(m_total_burned_xfg, "totalBurnedXFG");
+    writeSequence<BurnedXfgEntry>(m_totalBurnedEntries.begin(), m_totalBurnedEntries.end(), "totalBurnedEntries", s);
+    s(m_permanently_burned_xfg, "permanentlyBurnedXFG");
+    writeSequence<BurnedXfgEntry>(m_permanentBurnedEntries.begin(), m_permanentBurnedEntries.end(), "permanentBurnedEntries", s);
   }
 }
 

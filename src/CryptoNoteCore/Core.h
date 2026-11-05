@@ -45,6 +45,7 @@ namespace CryptoNote {
   struct core_stat_info;
   class miner;
   class CoreConfig;
+  class SwapOfferRelay;
 
   class core : public ICore, public IMinerHandler, public IBlockchainStorageObserver, public ITxPoolObserver {
    public:
@@ -52,10 +53,16 @@ namespace CryptoNote {
      ~core();
 
      bool on_idle() override;
-     virtual bool handle_incoming_tx(const BinaryArray& tx_blob, tx_verification_context& tvc, bool keeped_by_block) override; //Deprecated. Should be removed with CryptoNoteProtocolHandler.
+     virtual bool handle_incoming_tx(const BinaryArray& tx_blob, tx_verification_context& tvc, bool kept_by_block) override; //Deprecated. Should be removed with CryptoNoteProtocolHandler.
      bool handle_incoming_block_blob(const BinaryArray& block_blob, block_verification_context& bvc, bool control_miner, bool relay_block) override;
      virtual i_cryptonote_protocol* get_protocol() override {return m_pprotocol;}
      virtual const Currency& currency() const override { return m_currency; }
+
+     virtual SwapOfferRelay& getSwapRelay() override { return *m_swapRelay; }
+     void setSwapRelay(SwapOfferRelay* relay) { m_swapRelay = relay; }
+
+     virtual CdOfferRelay& getCdRelay() override { return *m_cdRelay; }
+     void setCdRelay(CdOfferRelay* relay) { m_cdRelay = relay; }
 
      //-------------------- IMinerHandler -----------------------
      virtual bool handle_block_found(Block& b) override;
@@ -97,7 +104,7 @@ namespace CryptoNote {
      virtual bool removeMessageQueue(MessageQueue<BlockchainMessage>& messageQueue) override;
 
      virtual std::time_t getStartTime() const;
-     uint8_t getCurrentBlockMajorVersion();
+     uint8_t getCurrentBlockMajorVersion() override;
      uint32_t get_current_blockchain_height();
      bool have_block(const Crypto::Hash& id) override;
      std::vector<Crypto::Hash> buildSparseChain() override;
@@ -142,12 +149,33 @@ namespace CryptoNote {
     bool get_stat_info(core_stat_info &st_inf) override;
 
     virtual bool get_tx_outputs_gindexs(const Crypto::Hash &tx_id, std::vector<uint32_t> &indexs) override;
+    virtual bool get_outs_for_amount(uint64_t amount, const std::vector<uint64_t>& indexes,
+                                     std::vector<Crypto::PublicKey>& keys) override;
     Crypto::Hash get_tail_id();
     virtual bool get_random_outs_for_amounts(const COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_request &req, COMMAND_RPC_GET_RANDOM_OUTPUTS_FOR_AMOUNTS_response &res) override;
-    bool get_random_commitment_outs_for_amount(uint64_t amount, uint64_t count, std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry>& result);
+    virtual bool get_random_commitment_outs_for_amount(uint64_t amount, uint64_t count, uint32_t maxHeight, std::vector<COMMAND_RPC_GET_RANDOM_COMMITMENT_OUTPUTS_out_entry>& result) override;
+    virtual bool get_output_heights(const std::vector<std::pair<uint64_t, uint32_t>>& queries,
+                                    std::vector<uint32_t>& heights) override;
     void pause_mining() override;
     void update_block_template_and_resume_mining() override;
     Blockchain& get_blockchain_storage(){return m_blockchain;}
+    uint64_t getFeePoolBalance() override { return m_blockchain.getFeePoolBalance(); }
+    uint64_t getCdApyVaultBalance() override { return m_blockchain.getCdApyVaultBalance(); }
+    uint64_t getBonusVaultBalance() override { return m_blockchain.getBonusVaultBalance(); }
+    uint64_t getBonusVaultUtxoBalance() override { return m_blockchain.getBonusVaultUtxoBalance(); }
+    std::error_code estimateCdClaim(uint64_t amount, uint32_t creationHeight,
+                                    uint32_t currentHeight, uint32_t term,
+                                    CdClaimEstimate& out) override {
+      out = m_blockchain.estimateCdClaim(amount, creationHeight, currentHeight, term);
+      return {};
+    }
+    std::error_code calculateCdBonus(uint64_t amount, uint32_t creationHeight,
+                                     uint32_t currentHeight, uint64_t& outBonus,
+                                     uint32_t term = 0) override {
+      outBonus = m_currency.calculateCdBonus(amount, creationHeight, currentHeight,
+                                             m_blockchain.getCommitmentIndex(), term);
+      return {};
+    }
     //debug functions
     void print_blockchain(uint32_t start_index, uint32_t end_index);
     void print_blockchain_index();
@@ -166,6 +194,8 @@ namespace CryptoNote {
     uint64_t fullDepositAmount() const;
     uint64_t depositAmountAtHeight(size_t height) const;
     uint64_t getBurnedXfgAtHeight(size_t height) const;
+    void addSwapFee(uint64_t amount);
+    void setXfgMarketValue(uint64_t val);
 
     uint8_t getBlockMajorVersionForHeight(uint32_t height) const;
 
@@ -174,32 +204,123 @@ namespace CryptoNote {
     bool hasCommitment(const Crypto::Hash& commitment) const;
     size_t getCommitmentCount() const;
     size_t getHeatCommitmentCount() const;
+    uint64_t getTotalCdLocked() const;
+    uint64_t getHeatCdFeePool() const;
     size_t getColdCommitmentCount() const;
     Crypto::Hash getCommitmentMerkleRoot() const;
     std::vector<Crypto::Hash> getCommitmentMerkleProof(const Crypto::Hash& commitment) const;
     int64_t getCommitmentLeafIndex(const Crypto::Hash& commitment) const;
     uint64_t getCommitmentHighestBlock() const;
+    std::vector<Crypto::Hash> getCommitmentLeaves() const;
+
+    // Release registry (song provenance)
+    Crypto::Hash getReleaseRegistryRoot() const;
+    size_t getReleaseRegistryCount() const;
+    std::optional<ReleaseRecord> findRelease(const Crypto::Hash& contentHash) const;
+    ReleaseProof getReleaseProof(const Crypto::Hash& contentHash) const;
 
     // Direct CommitmentIndex access (for epoch reports, slash queries)
     const CommitmentIndex& getCommitmentIndex() const;
 
-    // Elderfier consensus accessors
-    std::vector<uint8_t> getCommitmentSignedElderfierIds() const;
-    std::vector<uint8_t> getCommitmentPendingElderfierIds() const;
-    uint64_t getCommitmentConsensusPercentage() const;
-    std::vector<CommitmentIndex::ElderfierSignatureBundle> getSignaturesForCurrentRoot() const;
+    // ICore overrides: CD interest and epoch fee rate via CommitmentIndex
+    virtual std::error_code calculateCdInterest(uint64_t amount, uint32_t creationHeight,
+                                                  uint32_t currentHeight,
+                                                  uint64_t& outInterest,
+                                                  uint32_t term = 0,
+                                                  bool autoRolled = false) override;
+    virtual std::error_code getCommitmentEpochFeeRate(uint32_t epoch,
+                                                       uint64_t& outFeeRate) override;
+    virtual std::error_code getAmmPoolReserves(AmmPoolReserves& out) override;
+    virtual uint64_t getHearthTwap() override;
+    virtual std::error_code getAmmPoolInfo(ICore::AmmPoolInfo& info) override;
 
-    // Elderfier fee tracking
-    size_t getActiveElderfierCount() const;
+    // HEAT stablecoin / Hearth AMM metrics (v11+)
+    struct HeatMetrics {
+      uint64_t heatSupply = 0;
+      uint64_t heatOnDeposit = 0;     // HEAT locked in CDs (excludes mint outputs)
+      uint64_t digmSupply = 0;
+      uint64_t burnedXfg = 0;
+      uint64_t totalBurnedXfg = 0;   // overall burn tally (100% of every XFG destroyed)
+      uint64_t permanentlyBurnedXfg = 0; // SWF XFG permanently retired when converted to HEAT (removed from total supply)
+      uint64_t heatCdFeePool = 0;     // HⲶ∆T in CD fee pool (accrued, not yet distributed)
+      uint64_t swfBurnedXfgPendingHeat = 0; // already-burned XFG awaiting SWF HEAT conversion (removed from circulating, not total supply)
+      uint64_t redemptionPriceNum = 1;  // pool XFG/HⲶ∆T ratio × 10^6
+      uint64_t redemptionPriceDenom = 1000000;
+      uint64_t treasuryBalance = 0;
+      uint64_t treasuryHeatReserve = 0;  // HⲶ∆T minted from 20% swap fee share (for APY floor)
+      uint64_t treasuryLpPendingXfg = 0;    // unburned treasury XFG reserve / LP source
+      uint64_t treasuryCounterXFG = 0;       // treasury counter (alias / v12 rename; same source)
+      uint64_t swfHeatBalance = 0;        // SWF counter HEAT (off-chain DIGM collateral)
+      uint64_t epochSwapFees = 0;
+      uint64_t vaultHeatCdFeePool = 0;
+      uint64_t vaultHeatLpReserve = 0;
+      uint64_t vaultHeatGeneral = 0;
+      uint64_t vaultHeatSwf = 0;
+      uint64_t vaultXfgCdFeePool = 0;
+      uint64_t vaultXfgLpReserve = 0;
+      uint64_t vaultXfgGeneral = 0;
+    };
+    HeatMetrics getHeatMetrics() const;
 
-    // Elderfier registration lifecycle proxies
-    bool canAddressRegisterElderfier(const std::string& address) const;
+    struct AmmQuote {
+      uint64_t expectedOutput = 0;
+      uint64_t priceImpactBps = 0;
+      uint64_t fee = 0;
+      uint64_t mintOutput = 0;  // selling XFG: HEAT a burn of the input mints at the TWAP
+    };
+    AmmQuote getAmmQuote(uint64_t inputAmount, uint8_t direction) const;
+
+    struct AmmPoolInfo {
+      uint64_t reserveXfg = 0;
+      uint64_t reserveHeat = 0;
+      uint64_t totalLpShares = 0;
+      uint64_t spotPrice = 0;
+      uint64_t epochSwapFees = 0;
+    };
+    AmmPoolInfo getAmmPoolInfo() const;
+    uint64_t getPoolTwap() const;
+
+    // Orderbook (v11+)
+    struct OrderbookInfo {
+      uint64_t clearingPrice = 0;     // P_clear, XFG/HEAT ratio × 10^8
+      uint32_t numMatches = 0;
+      uint64_t depthBidXfg = 0;      // total bid depth in atomic XFG
+      uint64_t depthAskXfg = 0;      // total ask depth in atomic XFG
+      uint64_t hearthPoolRatio = 0;  // P_clear avg (pool ratio fallback), HEAT atomics per XFG atomic × COIN
+      bool inBootstrap = true;
+    };
+    OrderbookInfo getOrderbookInfo() const;
+
+    struct OrderbookLevel {
+      uint64_t price;                // XFG/HEAT ratio × 10^8
+      uint64_t depth;                // aggregate depth at this level (atomic XFG)
+    };
+    struct OrderbookState {
+      uint64_t clearingPrice;
+      std::vector<OrderbookLevel> bids;
+      std::vector<OrderbookLevel> asks;
+    };
+    OrderbookState getOrderbookState(uint32_t depth) const;
+
+    struct OrderbookEstimate {
+      uint64_t estimatedFill;
+      uint64_t hearthFill;
+      uint64_t orderbookFill;
+      uint64_t worstCasePrice;
+      uint32_t levelsConsumed;
+    };
+    OrderbookEstimate getOrderbookEstimate(uint8_t side, uint64_t amount) const;
+
 
     // @ Alias system proxies
     bool aliasExists(const std::string& alias) const;
     std::optional<AliasEntry> getAliasByName(const std::string& alias) const;
     std::optional<AliasEntry> getAliasByAddress(const std::string& address) const;
     std::vector<AliasEntry> getAllAliases() const;
+    bool removeAlias(const std::string& alias);
+    bool replaceAliasOwnership(const std::string& alias,
+                               const Crypto::Hash& newAddressHash,
+                               const std::string& newOwnerAddress);
 
     bool is_key_image_spent(const Crypto::KeyImage &key_im);
 
@@ -211,7 +332,7 @@ namespace CryptoNote {
 
     bool check_tx_syntax(const Transaction &tx);  //check correct values, amounts and all lightweight checks not related with database
     bool check_tx_semantic(const Transaction &tx, bool keeped_by_block, uint32_t &height); //check if tx already in memory pool or in main blockchain
-    bool check_tx_mixin(const Transaction& tx, uint8_t blockMajorVersion);   //check if the mixin is not too large
+    bool check_tx_mixin(const Transaction& tx, uint8_t blockMajorVersion, bool keeped_by_block = false);   //check if the mixin is not too large
     bool check_tx_fee(const Transaction& tx, size_t blobSize, uint8_t blockMajorVersion, tx_verification_context& tvc); //check for proper tx fee
 
     bool check_tx_ring_signature(const KeyInput &tx, const Crypto::Hash &tx_prefix_hash, const std::vector<Crypto::Signature> &sig);
@@ -233,6 +354,8 @@ namespace CryptoNote {
     tx_memory_pool m_mempool;
     Blockchain m_blockchain;
     i_cryptonote_protocol *m_pprotocol;
+    SwapOfferRelay* m_swapRelay = nullptr;
+    CdOfferRelay* m_cdRelay = nullptr;
     std::unique_ptr<miner> m_miner;
     std::string m_config_folder;
     cryptonote_protocol_stub m_protocol_stub;

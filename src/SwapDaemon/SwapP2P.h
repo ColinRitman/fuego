@@ -33,6 +33,9 @@ enum class SwapMsgType : uint8_t {
   NONCE_EXCHANGE = 1,
   PRESIG_EXCHANGE = 2,
   SECRET_REVEAL  = 3,
+  // Full signed PeerMessage JSON (SwapPeerProtocol) in payload.
+  // Preferred for all authenticated swap protocol messages.
+  PEER_PROTOCOL  = 4,
   ERROR          = 0xFF
 };
 
@@ -44,7 +47,7 @@ struct SwapMessage {
 
 class SwapP2P {
 public:
-  SwapP2P(uint16_t listenPort, Logging::LoggerRef& logger);
+  SwapP2P(uint16_t listenPort, const std::string& bindAddr, Logging::LoggerRef& logger);
   ~SwapP2P();
 
   // Bind and listen on the configured TCP port.
@@ -65,9 +68,18 @@ public:
   // Register an asynchronous callback for every incoming message.
   void setMessageCallback(std::function<void(const SwapMessage&)> cb);
 
+  // Set a SOCKS5 proxy for outbound connections (e.g. Tor).
+  // Format: "host:port". Empty string = direct connection.
+  void setSocks5Proxy(const std::string& proxy) { m_socks5Proxy = proxy; }
+
 private:
   // Accept incoming connections in a dedicated thread.
   void acceptLoop();
+
+  // Handle one accepted connection on a worker thread: read one framed
+  // message, deliver to the callback + pending queue, close the socket.
+  // Decrements m_activeWorkers on exit.
+  void handleConnection(int clientSock);
 
   // Deserialize raw bytes into a SwapMessage.
   bool parseMessage(const std::vector<uint8_t>& data, SwapMessage& msg);
@@ -81,6 +93,9 @@ private:
   // Read one complete framed message from a connected socket.
   bool readFramedMessage(int sock, SwapMessage& msg);
 
+  // Connect through a SOCKS5 proxy. Returns the connected socket or -1.
+  int connectViaSocks5(const std::string& host, uint16_t port);
+
   // Wire format:
   //   [4 bytes big-endian length of remaining data]
   //   [1 byte  SwapMsgType]
@@ -90,6 +105,7 @@ private:
 
   int m_listenSocket;
   uint16_t m_listenPort;
+  std::string m_bindAddr;
   std::atomic<bool> m_running;
   std::thread m_acceptThread;
 
@@ -97,7 +113,17 @@ private:
   std::mutex m_mutex;
   std::condition_variable m_cv;
 
+  // Bounded per-connection workers so one slow peer can't stall accept().
+  std::atomic<size_t> m_activeWorkers{0};
+  static constexpr size_t MAX_WORKERS = 64;
+
+  // Signalled when the last detached worker exits, so stop() can drain all
+  // workers before the object is destroyed (prevents use-after-free on `this`).
+  std::condition_variable m_workersDoneCv;
+
   std::function<void(const SwapMessage&)> m_callback;
+
+  std::string m_socks5Proxy; // SOCKS5 proxy "host:port" for outbound connections
 
   Logging::LoggerRef& m_logger;
 };

@@ -30,11 +30,13 @@
 #include <System/Event.h>
 #include "Transfers/TransfersSynchronizer.h"
 #include "Transfers/BlockchainSynchronizer.h"
-#include "EldernodeIndexManager.h"  // For elderfier auto-registration
 #include "crypto/subaddress.h"
+#include "CryptoNoteCore/TransactionExtra.h"
 
 namespace CryptoNote
 {
+
+class CommitmentIndex;  // Forward declaration for rolloverDeposit()
 
 class WalletGreen : public IWallet,
                     ITransfersObserver,
@@ -49,7 +51,45 @@ public:
   /* Deposit related functions */
   virtual void createDeposit(uint64_t amount, uint64_t term, std::string sourceAddress, std::string destinationAddress, std::string &transactionHash, const DepositCommitment& commitment = DepositCommitment(), bool useStagedUnlock = false) override;
   virtual void withdrawDeposit(DepositId depositId, std::string &transactionHash) override;
+
+  /* HEAT v10 operations */
+  virtual void mintHeatV10(uint64_t xfgBurned, uint64_t heatMinted, uint64_t fee, uint64_t mixin, std::string &transactionHash);
+  virtual void sendHeatV10(const std::string &recipient, uint64_t amount, uint64_t fee, uint64_t mixin, std::string &transactionHash);
+  /* HEAT CD: spend unlocked HEAT_TERM deposits → finite-term CD commitment (not createDeposit/XFG) */
+  void heatDepositV10(uint64_t amount, uint32_t termEpochs, uint64_t bankingFee, uint64_t fee, uint64_t mixin,
+                      std::string &transactionHash);
+  /* Hearth / CD bridges used by PaymentGate (TUI surface) */
+  void ammSwapV10(uint8_t direction, uint64_t inputAmount, uint64_t expectedOutput, uint64_t minOutput,
+                  uint64_t fee, uint64_t mixin, std::string &transactionHash);
+  void placeLimitOrderV13(uint8_t side, uint64_t amount, uint64_t targetPrice, uint32_t expiration,
+                          uint64_t fee, uint64_t mixin, std::string &transactionHash);
+  void cancelLimitOrderV13(const Crypto::Hash &orderId, uint64_t fee, uint64_t mixin, std::string &transactionHash);
   std::vector<MultisignatureInput> prepareMultisignatureInputs(const std::vector<TransactionOutputInformation> &selectedTransfers);
+
+  // Phase 5: Wallet Auto-Rollover + Compound Interest
+  // Returns deposits whose unlock height is <= (currentHeight + maturingIn)
+  std::vector<DepositId> getMaturingDeposits(uint32_t currentHeight, uint32_t maturingIn = 0) const;
+
+  // Rollover a mature CD to reinvest interest
+  // Spends the CD (including claimedInterest) and creates a new CD with amount + interest
+  // Requires CommitmentIndex reference for interest calculation
+  bool rolloverDeposit(DepositId depositId, uint32_t newTerm,
+                       const CommitmentIndex& commitmentIndex,
+                       std::string &txHashOut);
+  // Overload that accepts a pre-computed interest amount (obtained via INode::getCdInterest).
+  // Used by WalletRpcServer which does not have direct Core access.
+  bool rolloverDeposit(DepositId depositId, uint32_t newTerm,
+                       uint64_t precomputedInterest,
+                       std::string &txHashOut);
+
+  // Caps a formula interest amount by the CD yield pool backing (fee pool +
+  // CD_APY_POOL vault) so the built tx matches what consensus accepts.
+  // v11+: returns the total claimable (pool-backed base + BV-backed bonus)
+  // and reports the bonus portion via bonusOut (declared on-chain with a
+  // TransactionExtraCdBonusClaim). Logs a warning when a cap bites (rare
+  // event).
+  uint64_t capInterestByPool(DepositId depositId, uint64_t formulaInterest,
+                             uint64_t& bonusOut, uint32_t term);
 
   // Burn deposit information for local secret storage
   struct BurnDepositInfo {
@@ -57,23 +97,29 @@ public:
     Crypto::SecretKey secret;
     uint64_t amount;
     std::vector<uint8_t> metadata;
-    bool bpdfGenerated;
     uint64_t timestamp;
 
-    BurnDepositInfo() : amount(0), bpdfGenerated(false), timestamp(0) {}
+    BurnDepositInfo() : amount(0), timestamp(0) {}
     BurnDepositInfo(const std::string& txHash, const Crypto::SecretKey& s, uint64_t amt, const std::vector<uint8_t>& meta)
-      : transactionHash(txHash), secret(s), amount(amt), metadata(meta), bpdfGenerated(false), timestamp(0) {}
+      : transactionHash(txHash), secret(s), amount(amt), metadata(meta), timestamp(0) {}
   };
 
   // Burn deposit secret management
   void addBurnDepositSecret(const std::string& transactionHash, const Crypto::SecretKey& secret, uint64_t amount, const std::vector<uint8_t>& metadata);
   bool getBurnDepositSecret(const std::string& transactionHash, Crypto::SecretKey& secret, uint64_t& amount, std::vector<uint8_t>& metadata);
   bool hasBurnDepositSecret(const std::string& transactionHash);
-  void markBurnDepositBPDFGenerated(const std::string& transactionHash);
   std::vector<BurnDepositInfo> getAllBurnDeposits();
 
-  // Elderfier auto-registration integration
-  void setEldernodeIndexManager(IEldernodeIndexManager* eldernodeIndexManager);
+  // Alias methods
+  // Register an 8-character alias on-chain.  Builds the 0xEA extra, adds the mandatory
+  // ALIAS_REGISTRATION_FEE output to the Fuego Developer Fund (mainnet only), and
+  // submits the transaction.  On success, txHashOut receives the transaction hash.
+  std::error_code registerAlias(const std::string& alias, const std::string& ownerAddress, Crypto::Hash& txHashOut);
+
+  // Look up the alias registered for a given wallet address.
+  // Delegates to m_node via /get_alias_by_address (INode::getAliasByAddress if available,
+  // otherwise returns false).
+  bool getAliasByAddress(const std::string& address, std::string& aliasOut);
 
 private:
 
@@ -121,6 +167,8 @@ private:
   virtual uint64_t getLockedDepositBalance(const std::string &address) const override;
   virtual uint64_t getUnlockedDepositBalance() const override;
   virtual uint64_t getUnlockedDepositBalance(const std::string &address) const override;
+  virtual uint64_t getLockedHeatBalance() const override;
+  virtual uint64_t getUnlockedHeatBalance() const override;
 
   virtual size_t getTransactionCount() const override;
   virtual WalletTransaction getTransaction(size_t transactionIndex) const override;
@@ -162,7 +210,6 @@ private:
                              const Currency &currency,
                              uint32_t height,
                              const std::vector<uint8_t> &transactionExtra);
-  void registerElderfierDeposit(const Deposit &deposit, DepositId depositId);
 
 protected:
   struct NewAddressData
@@ -175,18 +222,41 @@ protected:
   void throwIfNotInitialized() const;
   void throwIfStopped() const;
   void throwIfTrackingMode() const;
+  // Derives a user-owned commitment output key at `outputIndex` of `transaction`,
+  // bound to the primary address's spend public key. Every self-owned commitment
+  // output in this wallet routes through here so none can silently fall back to
+  // the sender/view-key-spendable legacy derivation.
+  Crypto::PublicKey deriveSelfCommitmentKey(const ITransaction& transaction, size_t outputIndex);
+  // Same, but for an output owned by a third party. `recipientViewPublicKey`
+  // drives the ECDH (delivery) and `recipientSpendPublicKey` binds ownership,
+  // so the recipient can spend the output but the sender cannot.
+  Crypto::PublicKey deriveRecipientCommitmentKey(
+    const ITransaction& transaction,
+    size_t outputIndex,
+    const Crypto::PublicKey& recipientViewPublicKey,
+    const Crypto::PublicKey& recipientSpendPublicKey);
+  // Recovers the scalar and key image needed to sign a CommitmentSpend for an
+  // existing deposit. Owner-bound outputs require the recipient spend secret;
+  // legacy outputs fall back to the original ECDH-derived scalar so pre-v11
+  // deposits stay spendable. `recipientSpendSecret` is the primary address's
+  // spend secret.
+  void resolveCommitmentSpendKey(
+    const TransactionOutputInformation& transfer,
+    const Crypto::SecretKey& recipientSpendSecret,
+    KeyPair& outKeyPair,
+    Crypto::KeyImage& outKeyImage) const;
   void doShutdown();
   void clearCaches(bool clearTransactions, bool clearCachedData);
   void clearCacheAndShutdown();
   void convertAndLoadWalletFile(const std::string &path, std::ifstream &&walletFileStream);
   size_t getTxSize(const TransactionParameters &sendingTransaction);
 
-  static void decryptKeyPair(const EncryptedWalletRecord& cipher, Crypto::PublicKey& publicKey, Crypto::SecretKey& secretKey, uint64_t& creationTimestamp, const Crypto::chacha8_key& key);
-    Crypto::chacha8_iv getNextIv() const;
-
+  static void decryptKeyPair(const EncryptedWalletRecord& cipher, Crypto::PublicKey& publicKey, Crypto::SecretKey& secretKey, uint64_t& creationTimestamp, const Crypto::chacha8_key& key, uint8_t version);
   void decryptKeyPair(const EncryptedWalletRecord& cipher, Crypto::PublicKey& publicKey, Crypto::SecretKey& secretKey, uint64_t& creationTimestamp) const;
   static EncryptedWalletRecord encryptKeyPair(const Crypto::PublicKey& publicKey, const Crypto::SecretKey& secretKey, uint64_t creationTimestamp, const Crypto::chacha8_key& key, const Crypto::chacha8_iv& iv);
   EncryptedWalletRecord encryptKeyPair(const Crypto::PublicKey& publicKey, const Crypto::SecretKey& secretKey, uint64_t creationTimestamp) const;
+  Crypto::chacha8_iv getNextIv() const;
+  static void deriveMacKey(const Crypto::chacha8_key &key, uint8_t macKey[32]);
   static void incIv(Crypto::chacha8_iv& iv);
   void incNextIv();
   void initWithKeys(const std::string& path, const std::string& password, const Crypto::PublicKey& viewPublicKey, const Crypto::SecretKey& viewSecretKey);
@@ -319,6 +389,37 @@ protected:
 
   void validateTransactionParameters(const TransactionParameters &transactionParameters) const;
   size_t doTransfer(const TransactionParameters &transactionParameters, Crypto::SecretKey &transactionSK);
+
+  // One HEAT deposit ready to spend: its input and what signs it.
+  struct HeatSpend
+  {
+    TransactionInputCommitmentSpend input;
+    std::vector<Crypto::PublicKey> ring;  // ring keys, in the input's order
+    KeyPair keys;
+    size_t realIndex = 0;
+  };
+  // Unlocked HEAT deposits covering `amount`; returns their total.
+  uint64_t selectHeatDeposits(uint64_t amount, std::vector<size_t> &depositIds) const;
+  // A ring-signable spend of each deposit, with decoys of the deposit's own
+  // amount (rings index commitment outputs by amount).
+  std::vector<HeatSpend> prepareHeatSpends(const std::vector<size_t> &depositIds, uint64_t mixin);
+  // XFG the transaction spends — at least its fee: selects transfers, adds the
+  // change output, and prepares the key inputs.
+  void prepareXfgInputs(ITransaction &transaction, uint64_t xfgNeeded, uint64_t mixin,
+                        std::vector<InputInfo> &keysInfo);
+  // A commitment output this wallet can find and spend: its key is bound to the
+  // primary address's spend public key (deriveSelfCommitmentKey), so the scanner
+  // recognises it and only this wallet's spend secret can sign for it. The signing
+  // side is resolveCommitmentSpendKey; there is no legacy-only spend helper.
+  void addCommitmentToSelf(ITransaction &transaction, uint64_t amount, uint32_t term);
+  void addHeatOutputToSelf(ITransaction &transaction, uint64_t amount)
+  {
+    addCommitmentToSelf(transaction, amount, parameters::HEAT_TERM);
+  }
+  // Adds every input, then signs them. A signature covers the whole prefix,
+  // so ITransaction refuses an input once anything is signed.
+  void addAndSignInputs(ITransaction &transaction, std::vector<InputInfo> &keysInfo,
+                        const std::vector<HeatSpend> &heatSpends);
 
   void requestMixinOuts(const std::vector<OutputToTransfer> &selectedTransfers,
                         uint64_t mixIn,
@@ -454,11 +555,15 @@ protected:
 
   Crypto::PublicKey m_viewPublicKey;
   Crypto::SecretKey m_viewSecretKey;
+  uint64_t m_creationTimestamp;
 
   uint64_t m_actualBalance;
   uint64_t m_pendingBalance;
   uint64_t m_lockedDepositBalance;
   uint64_t m_unlockedDepositBalance;
+
+  uint64_t m_lockedHeatBalance;
+  uint64_t m_unlockedHeatBalance;
 
   uint64_t m_upperTransactionSizeLimit;
   uint32_t m_transactionSoftLockTime;
@@ -467,9 +572,6 @@ protected:
 
   // Burn-secret storage
   std::map<std::string, BurnDepositInfo> m_burnDepositSecrets;
-
-  // Elderfier auto-registration
-  IEldernodeIndexManager* m_eldernodeIndexManager;
 };
 
 } //namespace CryptoNote

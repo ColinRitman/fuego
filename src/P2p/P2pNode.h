@@ -17,6 +17,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <functional>
 #include <list>
 
@@ -74,6 +75,7 @@ private:
 
   Logging::LoggerRef logger;
   bool m_stopRequested;
+  std::atomic<size_t> m_incomingCount{0};
   const P2pNodeConfig m_cfg;
   const PeerIdType m_myPeerId;
   const Crypto::Hash m_genesisHash;

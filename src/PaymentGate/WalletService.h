@@ -79,8 +79,8 @@ public:
   std::error_code createTrackingAddress(const std::string &spendPublicKeyText, std::string &address);
   std::error_code deleteAddress(const std::string &address);
   std::error_code getSpendkeys(const std::string &address, std::string &publicSpendKeyText, std::string &secretSpendKeyText);
-  std::error_code getBalance(const std::string &address, uint64_t &availableBalance, uint64_t &lockedAmount, uint64_t &lockedDepositBalance, uint64_t &unlockedDepositBalance);
-  std::error_code getBalance(uint64_t &availableBalance, uint64_t &lockedAmount, uint64_t &lockedDepositBalance, uint64_t &unlockedDepositBalance);
+  std::error_code getBalance(const std::string &address, uint64_t &availableBalance, uint64_t &lockedAmount, uint64_t &lockedDepositBalance, uint64_t &unlockedDepositBalance, uint64_t &lockedHeatBalance, uint64_t &unlockedHeatBalance);
+  std::error_code getBalance(uint64_t &availableBalance, uint64_t &lockedAmount, uint64_t &lockedDepositBalance, uint64_t &unlockedDepositBalance, uint64_t &lockedHeatBalance, uint64_t &unlockedHeatBalance);
   std::error_code getBlockHashes(uint32_t firstBlockIndex, uint32_t blockCount, std::vector<std::string> &blockHashes);
 std::error_code getViewKey(std::string &viewSecretKey);
   std::error_code getTransactionHashes(const std::vector<std::string> &addresses, const std::string &blockHash,
@@ -101,19 +101,28 @@ std::error_code getViewKey(std::string &viewSecretKey);
   std::error_code deleteDelayedTransaction(const std::string &transactionHash);
   std::error_code sendDelayedTransaction(const std::string &transactionHash);
   std::error_code getUnconfirmedTransactionHashes(const std::vector<std::string> &addresses, std::vector<std::string> &transactionHashes);
-  std::error_code getStatus(uint32_t &blockCount, uint32_t &knownBlockCount, std::string &lastBlockHash, uint32_t &peerCount, uint32_t &depositCount, uint32_t &transactionCount, uint32_t &addressCount, std::string &networkId);
-  std::error_code createDeposit(uint64_t amount, uint64_t term, std::string sourceAddress, std::string &transactionHash, const CryptoNote::DepositCommitment& commitment = CryptoNote::DepositCommitment(), bool useStagedUnlock = false);
+  std::error_code getStatus(uint32_t &blockCount, uint32_t &knownBlockCount, std::string &lastBlockHash, uint32_t &peerCount, uint32_t &depositCount, uint32_t &transactionCount, uint32_t &addressCount);
+  std::error_code createDeposit(uint64_t amount, uint64_t term, std::string sourceAddress, std::string &transactionHash);
   std::error_code storeBurnDepositSecret(const std::string& transactionHash, const Crypto::SecretKey& secret, uint64_t amount, const std::vector<uint8_t>& metadata);
   std::error_code getBurnDepositSecret(const std::string& transactionHash, Crypto::SecretKey& secret, uint64_t& amount, std::vector<uint8_t>& metadata);
-  std::error_code markBurnDepositBPDFGenerated(const std::string& transactionHash);
-  std::error_code generateBurnProofDataFile(const std::string& transactionHash, const std::string& recipientAddress, const std::string& outputPath, const Crypto::SecretKey& secret, uint64_t amount, const std::vector<uint8_t>& metadata, const std::string& networkId);
-  std::error_code generateBurnProofDataFile(const std::string& transactionHash, const std::string& recipientAddress, const std::string& outputPath, const std::string& networkId);
   std::string getDefaultWalletPath();
 
+  std::error_code mintHeatV10(uint64_t xfgBurned, uint64_t heatMinted, uint64_t mixin, std::string &transactionHash);
+  std::error_code sendHeatV10(const std::string &recipient, uint64_t amount, uint64_t mixin, std::string &transactionHash);
+  // Unified TUI / fire_wallet-compatible methods (PaymentGate surface)
+  std::error_code heatDeposit(uint64_t amount, uint32_t termEpochs, uint64_t bankingFee, uint64_t mixin,
+                              const std::string &sourceAddress, std::string &transactionHash);
+  std::error_code ammSwap(uint8_t direction, uint64_t inputAmount, uint64_t expectedOutput, uint64_t minOutput,
+                          uint64_t mixin, std::string &transactionHash);
+  std::error_code placeLimitOrder(uint8_t side, uint64_t amount, uint64_t targetPrice, uint32_t expiration,
+                                  uint64_t mixin, std::string &transactionHash);
+  std::error_code cancelLimitOrder(const std::string &orderIdHex, uint64_t mixin, std::string &transactionHash);
+  std::error_code getLimitOrders(std::vector<GetLimitOrders::LimitOrderInfo> &orders);
+  std::error_code registerAlias(const std::string &alias, const std::string &ownerAddress, std::string &transactionHash);
   std::error_code withdrawDeposit(uint64_t depositId, std::string &transactionHash);
   std::error_code giftDeposit(uint64_t amount, uint64_t term, std::string sourceAddress, std::string destinationAddress, std::string &transactionHash);
   std::error_code getDeposit(uint64_t depositId, uint64_t &amount, uint64_t &term, uint64_t &interest, std::string &creatingTransactionHash, std::string &spendingTransactionHash, bool &locked, uint64_t &height, uint64_t &unlockHeight, std::string &address);
-  std::error_code getDepositWithStagedInfo(uint64_t depositId, uint64_t &amount, uint64_t &term, uint64_t &interest, std::string &creatingTransactionHash, std::string &spendingTransactionHash, bool &locked, uint64_t &height, uint64_t &unlockHeight, std::string &address, bool &useStagedUnlock);
+  std::error_code getDepositWithStagedInfo(uint64_t depositId, uint64_t &amount, uint64_t &term, uint64_t &interest, std::string &creatingTransactionHash, std::string &spendingTransactionHash, bool &locked, uint64_t &height, uint64_t &unlockHeight, std::string &address);
 
   // New methods for dynamic money supply
   std::error_code getMoneySupplyStats(GetMoneySupplyStats::Response &response);
@@ -173,7 +182,6 @@ private:
   std::map<std::string, size_t> transactionIdIndex;
   
   // Staged unlock storage
-  CryptoNote::StagedUnlockStorage m_stagedUnlockStorage;
 };
 
 } //namespace PaymentService

@@ -24,6 +24,7 @@
 
 #include "AdaptorSignature.h"
 
+#include <array>
 #include <cstring>
 #include <mutex>
 
@@ -162,6 +163,25 @@ static void getBasePoint(Crypto::EllipticCurvePoint& G) {
   ge_p3_tobytes(asBytes(G), &G_p3);
 }
 
+// Nothing-up-my-sleeve second generator H for DLEQ proofs.
+// H = hash_to_point("XFG_DLEQ_H") — derived from a fixed seed so that
+// log_G(H) is unknown, making the DLEQ proof binding.
+static void getDleqSecondGenerator(Crypto::EllipticCurvePoint& H) {
+  // Hash the domain string to a scalar, then multiply by G.
+  // This gives a point whose discrete log w.r.t. G is unknown.
+  static const char seed[] = "XFG_DLEQ_H_v1";
+  Crypto::Hash h;
+  Crypto::cn_fast_hash(seed, sizeof(seed) - 1, h);
+  // Reduce to a valid scalar
+  unsigned char scalar[64] = {};
+  std::memcpy(scalar, h.data, 32);
+  sc_reduce(scalar);
+  // Multiply base point by scalar
+  ge_p3 H_p3;
+  ge_scalarmult_base(&H_p3, scalar);
+  ge_p3_tobytes(asBytes(H), &H_p3);
+}
+
 // ---------------------------------------------------------------------------
 // AdaptorSigScheme implementation
 // ---------------------------------------------------------------------------
@@ -203,18 +223,16 @@ AdaptorSignature AdaptorSigScheme::createAdaptor(
   //    sc_mulsub computes: result = c - a * b (mod l)
   sc_mulsub(asBytes(adaptor.s_hat), asBytes(e), asBytes(signerSecret), asBytes(k));
 
-  // 7. Create DLEQ proof that log_G(R) == log_G(R)
-  //    Actually we need to prove that R_hat - T has the same DL as R w.r.t. G.
-  //    The DLEQ proof shows the adaptor is well-formed.
-  //    For the COMIT protocol, we prove: log_G(R) is known to the signer.
-  //    The verifier checks: s_hat*G + e*P == R_hat - T
-  //    The DLEQ proof additionally shows consistency.
-  Crypto::EllipticCurvePoint G_pt;
+  // 7. DLEQ proof: proves log_G(R) == log_H(R_H) where H is a second generator.
+  //    This ensures the nonce k is well-formed and the adaptor binding holds.
+  //    Uses a nothing-up-my-sleeve H so that log_G(H) is unknown.
+  Crypto::EllipticCurvePoint G_pt, H_pt;
   getBasePoint(G_pt);
-  adaptor.proof = createDleqProof(k, G_pt, G_pt);
-  // TODO: The full COMIT DLEQ proof should use a second generator.
-  // For the MVP this proves knowledge of the nonce, which is sufficient
-  // for the adaptor verification equation to hold.
+  getDleqSecondGenerator(H_pt);
+  adaptor.proof = createDleqProof(k, G_pt, H_pt);
+
+  // 8. Store R_H = k*H so the verifier can check the DLEQ proof without the secret k.
+  scalarMultPoint(k, H_pt, adaptor.R_H);
 
   return adaptor;
 }
@@ -259,8 +277,27 @@ bool AdaptorSigScheme::verifyAdaptor(
   unsigned char rhs_bytes[32];
   ge_p3_tobytes(rhs_bytes, &rhs_p3);
 
-  // 4. Check LHS == RHS
-  return std::memcmp(lhs_bytes, rhs_bytes, 32) == 0;
+  // 4. Check adaptor equation: s_hat*G + e*P == R_hat - T
+  if (std::memcmp(lhs_bytes, rhs_bytes, 32) != 0) return false;
+
+  // 5. Verify the DLEQ proof: proves that the prover knows k such that
+  //    R = k*G  (= R_hat - T, computed above as rhs_bytes)  AND
+  //    R_H = k*H  (stored in adaptor.R_H, transmitted in wire format).
+  //
+  //    verifyDleqProof(proof, P1, P2, G, H) checks:
+  //      P1 = k*G  = R = R_hat - T
+  //      P2 = k*H  = R_H
+  //    This ensures the adaptor is well-formed and not malleable.
+
+  Crypto::EllipticCurvePoint G_pt, H_pt;
+  getBasePoint(G_pt);
+  getDleqSecondGenerator(H_pt);
+
+  // R = R_hat - T, already computed as rhs_bytes (32 bytes)
+  Crypto::EllipticCurvePoint R_pt;
+  std::memcpy(asBytes(R_pt), rhs_bytes, 32);
+
+  return verifyDleqProof(adaptor.proof, R_pt, adaptor.R_H, G_pt, H_pt);
 }
 
 Crypto::Signature AdaptorSigScheme::adaptSignature(
@@ -359,9 +396,8 @@ bool AdaptorSigScheme::verifySignature(
   //    with R instead of R_hat and recompute s differently. This is a
   //    protocol design choice.
   //
-  // TODO: Decide whether to support standalone Schnorr verify or only
-  // adaptor verify + extract. For the atomic swap protocol, only
-  // verifyAdaptor + extractSecret are needed on the critical path.
+  // Note: standalone Schnorr verify (without adaptor) is not needed for the
+  // atomic swap protocol — only verifyAdaptor + extractSecret are on the critical path.
 
   ge_p3 P_p3;
   if (ge_frombytes_vartime(&P_p3, asBytes(pubKey)) != 0) return false;
@@ -559,11 +595,50 @@ Crypto::EllipticCurvePoint MoneroSwapProtocol::computeSharedSpendPub(
 Crypto::EllipticCurveScalar MoneroSwapProtocol::computeFullSpendKey(
     const Crypto::EllipticCurveScalar& bobSecret,
     const Crypto::EllipticCurveScalar& extractedAlicePartial) {
-  // Full spend key = a + b (scalar addition mod l)
-  // Bob knows b, and extracts a from the adapted signature.
   Crypto::EllipticCurveScalar fullKey;
-  sc_add(fullKey.data, asBytes(bobSecret), asBytes(extractedAlicePartial));
+  sc_add(asBytes(fullKey), asBytes(bobSecret), asBytes(extractedAlicePartial));
+  sc_reduce32(asBytes(fullKey));
   return fullKey;
+}
+
+// ---------------------------------------------------------------------------
+// AdaptorSigScheme::combineSpendKeys
+// ---------------------------------------------------------------------------
+
+bool AdaptorSigScheme::combineSpendKeys(
+    const std::array<uint8_t, 32>& alice,
+    const std::array<uint8_t, 32>& bob,
+    const std::array<uint8_t, 32>& adaptor,
+    std::array<uint8_t, 32>& outCombined) {
+  // Combine via scalar addition: alice + bob + adaptor (mod ℓ)
+  unsigned char temp[32];
+  
+  // temp = alice + bob
+  sc_add(temp, alice.data(), bob.data());
+  
+  // temp = temp + adaptor
+  sc_add(temp, temp, adaptor.data());
+  
+  // Reduce mod ℓ (Ed25519 group order)
+  sc_reduce32(temp);
+  
+  // Check for zero-result (would brick the sweep)
+  bool isZero = true;
+  for (size_t i = 0; i < 32; ++i) {
+    if (temp[i] != 0) {
+      isZero = false;
+      break;
+    }
+  }
+  
+  if (isZero) {
+    // Don't modify outCombined on failure (preserves caller's sentinel)
+    return false;
+  }
+  
+  // Success: copy temp to outCombined
+  std::memmove(outCombined.data(), temp, 32);
+  return true;
 }
 
 } // namespace XfgSwap

@@ -53,6 +53,7 @@ size_t getSignaturesCount(const TransactionInput& input) {
     size_t operator()(const TransactionInputCommitmentSpend& txin) const { return txin.outputIndexes.size(); }
     size_t operator()(const TransactionInputCommitmentTransfer& txin) const { return txin.outputIndexes.size(); }
     size_t operator()(const TransactionInputUnified& txin) const { return txin.outputIndexes.size(); }
+    size_t operator()(const TransactionInputSwapEscrow& txin) const { return 1; }
   };
 
   return boost::apply_visitor(txin_signature_size_visitor(), input);
@@ -65,10 +66,13 @@ struct BinaryVariantTagGetter: boost::static_visitor<uint8_t> {
   uint8_t operator()(const CryptoNote::TransactionInputCommitmentSpend) { return  0x4; }
   uint8_t operator()(const CryptoNote::TransactionInputCommitmentTransfer) { return  0x8; }
   uint8_t operator()(const CryptoNote::TransactionInputUnified) { return  0x5; }
+  uint8_t operator()(const CryptoNote::TransactionInputSwapEscrow) { return  0x6; }
   uint8_t operator()(const CryptoNote::KeyOutput) { return  0x2; }
   uint8_t operator()(const CryptoNote::MultisignatureOutput) { return  0x3; }
   uint8_t operator()(const CryptoNote::TransactionOutputCommitment) { return  0x4; }
   uint8_t operator()(const CryptoNote::TransactionOutputUnified) { return  0x5; }
+  uint8_t operator()(const CryptoNote::TransactionOutputOrder) { return  0x6; }
+  uint8_t operator()(const CryptoNote::TransactionOutputSwapEscrow) { return  0x7; }
   uint8_t operator()(const CryptoNote::Transaction) { return  0xcc; }
   uint8_t operator()(const CryptoNote::Block) { return  0xbb; }
 };
@@ -121,6 +125,12 @@ void getVariantValue(CryptoNote::ISerializer& serializer, uint8_t tag, CryptoNot
     in = v;
     break;
   }
+  case 0x6: {
+    CryptoNote::TransactionInputSwapEscrow v;
+    serializer(v, "value");
+    in = v;
+    break;
+  }
   default:
     throw std::runtime_error("Unknown variant tag");
   }
@@ -148,6 +158,18 @@ void getVariantValue(CryptoNote::ISerializer& serializer, uint8_t tag, CryptoNot
   }
   case 0x5: {
     CryptoNote::TransactionOutputUnified v;
+    serializer(v, "data");
+    out = v;
+    break;
+  }
+  case 0x6: {
+    CryptoNote::TransactionOutputOrder v;
+    serializer(v, "data");
+    out = v;
+    break;
+  }
+  case 0x7: {
+    CryptoNote::TransactionOutputSwapEscrow v;
     serializer(v, "data");
     out = v;
     break;
@@ -383,11 +405,34 @@ void serialize(TransactionOutputUnified& out, ISerializer& serializer) {
   serializePod(out.proof,      "proof",      serializer);
 }
 
+void serialize(TransactionOutputOrder& out, ISerializer& serializer) {
+  serializer(out.side, "side");
+  serializer(out.price, "price");
+  serializer(out.expiration, "expiration");
+  serializer(out.spendKey, "spend_key");
+  serializer(out.viewKey, "view_key");
+}
+
 void serialize(TransactionInputUnified& in, ISerializer& serializer) {
   serializeVarintVector(in.outputIndexes, serializer, "key_offsets");
   serializer(in.keyImage, "k_image");
   serializePod(in.pseudoCommitment, "pseudo_commitment", serializer);
   serializer(in.sigC0, "sig_c0");
+}
+
+void serialize(TransactionInputSwapEscrow& in, ISerializer& serializer) {
+  serializer(in.amount, "amount");
+  serializer(in.escrowTxId, "escrow_tx_id");
+  serializer(in.escrowOutputIndex, "escrow_output_index");
+  serializer(in.mode, "mode");
+  serializer(in.keyImage, "k_image");
+}
+
+void serialize(TransactionOutputSwapEscrow& out, ISerializer& serializer) {
+  serializer(out.claimKey, "claim_key");
+  serializer(out.refundKey, "refund_key");
+  serializer(out.adaptorPoint, "adaptor_point");
+  serializer(out.refundTimeout, "refund_timeout");
 }
 
 void serialize(ParentBlockSerializer& pbs, ISerializer& serializer) {
@@ -464,7 +509,7 @@ void serialize(ParentBlockSerializer& pbs, ISerializer& serializer) {
 
 void serializeBlockHeader(BlockHeader& header, ISerializer& serializer) {
   serializer(header.majorVersion, "major_version");
-  if (header.majorVersion > BLOCK_MAJOR_VERSION_10) {  // upgradekit
+  if (header.majorVersion > BLOCK_MAJOR_VERSION_13) {  // max: v11 hearth orderbook, v13 DIGM
     throw std::runtime_error("Wrong major version");
   }
 
@@ -494,6 +539,14 @@ void serialize(Block& block, ISerializer& serializer) {
 
   serializer(block.baseTransaction, "miner_tx");
   serializer(block.transactionHashes, "tx_hashes");
+
+  if (block.majorVersion >= BLOCK_MAJOR_VERSION_11) {
+    serializer(block.orderbookClearingPrice, "orderbook_clearing_price");
+    serializer(block.orderbookNumMatches, "orderbook_num_matches");
+    serializer(block.orderbookDepthBidXfg, "orderbook_depth_bid");
+    serializer(block.orderbookDepthAskXfg, "orderbook_depth_ask");
+    serializer(block.hearthPoolRatio, "hearth_pool_ratio");
+  }
 }
 
 void serialize(AccountPublicAddress& address, ISerializer& serializer) {

@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-if(POLICY CMP0167)
-  cmake_policy(SET CMP0167 NEW)
+
+# macOS: target 13.0 to avoid dyld crashes with newer libc++ symbols
+if(APPLE)
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS deployment target" FORCE)
 endif()
 
 if(POLICY CMP0144)
@@ -19,11 +21,19 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_CONFIGURATION_TYPES Debug RelWithDebInfo Release CACHE STRING INTERNAL)
-set(CMAKE_SKIP_INSTALL_RULES ON)
+set(CMAKE_SKIP_INSTALL_RULES OFF)
 set(CMAKE_SKIP_PACKAGE_ALL_DEPENDENCY ON)
 set(CMAKE_SUPPRESS_REGENERATION ON)
 
 project(fuegoX)
+
+# Optionally disable FuegoTor integration to simplify builds (default OFF for safety)
+option(ENABLE_FUEGOTOR "Enable FuegoTor integration" OFF)
+
+# If enabled, add the FuegoTor subdirectory, otherwise skip
+if(ENABLE_FUEGOTOR)
+  add_subdirectory(src/FuegoTor)
+endif()
 
 # --------------------------
 # Version generation
@@ -67,6 +77,8 @@ endif()
 
 # Debug/Release flags - platform-specific
 if(MSVC)
+    # Prevent windows.h from #define'ing ERROR=0, which breaks Logging::ERROR
+    add_definitions(-DNOGDI -DNOMINMAX)
     # MSVC uses different optimization and warning flags
     set(CMAKE_C_FLAGS_DEBUG   "/Zi /Od /MDd")
     set(CMAKE_CXX_FLAGS_DEBUG "/Zi /Od /MDd")
@@ -76,6 +88,15 @@ if(MSVC)
     string(REPLACE "/W3" "/W0" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     string(REPLACE "/W3" "/W0" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
 else()
+    # -fno-strict-aliasing is REQUIRED for correct hashes: jh.c (the CN
+    # finalizer selected for ~1/4 of blocks) type-puns its bitslice state
+    # and GCC miscompiles it at -O1+ under strict aliasing (TBAA), yielding
+    # wrong hash_extra_jh results. Monero and uPlexa build with this flag;
+    # without it the daemon rejects ~25% of valid mainnet blocks with
+    # "too weak proof of work". Applied to the base flags (not per-config)
+    # so Debug, Release, RelWithDebInfo and no-build-type builds all get it.
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fno-strict-aliasing")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-strict-aliasing")
     set(CMAKE_C_FLAGS_DEBUG   "-g3 -O0")
     set(CMAKE_CXX_FLAGS_DEBUG "-g3 -O0")
     set(CMAKE_C_FLAGS_RELEASE   "-O3 -DNDEBUG")
@@ -84,6 +105,14 @@ endif()
 
 message(STATUS "C++ Standard: ${CMAKE_CXX_STANDARD}")
 message(STATUS "C++ Flags: ${CMAKE_CXX_FLAGS}")
+
+# Include project cmake modules (FindBoost.cmake for CMake 4.x compat on Windows)
+if(WIN32)
+  list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+endif()
+
+# Boost MPL limit — needed for large variant types (>20 elements) on all platforms
+add_definitions(-DBOOST_MPL_CFG_NO_PREPROCESSED_HEADERS -DBOOST_MPL_LIMIT_LIST_SIZE=40)
 
 # --------------------------
 # Include directories
@@ -112,25 +141,23 @@ if(APPLE OR FREEBSD)
             set(CMAKE_OSX_SYSROOT "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
         endif()
 
-        # Add C++ standard library headers explicitly
+        # SDK sysroot — required for C compilation (miniupnpc, etc.)
+        # The C++ standard library resolves its own companion headers automatically;
+        # the explicit include can shadow libc++ companion headers on newer Xcode.
+        # Workaround: add C++ headers first so libc++ finds <string.h> etc. before C <string.h>.
         if(EXISTS "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
-            include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1)
-            include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include)
+            set(APPLE_SDK_PATH "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
         elseif(EXISTS "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
-            include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1)
-            include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include)
+            set(APPLE_SDK_PATH "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
         endif()
-
-        # Add C standard library headers
-        if(EXISTS "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
-            include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include)
-        elseif(EXISTS "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
-            include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include)
+        if(APPLE_SDK_PATH)
+            include_directories(BEFORE SYSTEM "${APPLE_SDK_PATH}/usr/include/c++/v1")
+            include_directories(SYSTEM "${APPLE_SDK_PATH}/usr/include")
         endif()
 
         # Add Homebrew include paths for macOS (after standard library paths)
+        # Only use /opt/homebrew for ARM64, skip /usr/local to avoid x86_64 Boost
         include_directories(SYSTEM /opt/homebrew/include)
-        include_directories(SYSTEM /usr/local/include)
 
         # Ensure C targets also get proper system includes
         if(EXISTS "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
@@ -148,17 +175,9 @@ elseif(APPLE)
    include_directories(src/Platform/OSX)
    include_directories(src/Platform/Posix)
    # Add additional system include directories for macOS
+   # Only use /opt/homebrew for ARM64, skip /usr/local to avoid x86_64 Boost
    include_directories(SYSTEM /opt/homebrew/include)
-   include_directories(SYSTEM /usr/local/include)
 
-   # Add C++ standard library headers explicitly
-   if(EXISTS "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk")
-       include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/c++/v1)
-       include_directories(SYSTEM /Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include)
-   elseif(EXISTS "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk")
-       include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1)
-       include_directories(SYSTEM /Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include)
-   endif()
 else()
    include_directories(src/Platform/Linux)
    include_directories(src/Platform/Posix)
@@ -167,11 +186,11 @@ include_directories(src/Platform/Android)
 include_directories(src/Platform/FreeBSD)
 
 # --------------------------
-# Boost - Updated for 1.86
+# Boost - 1.86+ (resolved via find_package; homebrew ships 1.90)
 # --------------------------
 # Link static BOOST libraries everywhere
 set(Boost_NO_BOOST_CMAKE OFF)
-set(Boost_USE_STATIC_LIBS OFF)
+set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME OFF)
 
 if(MINGW)
@@ -179,8 +198,9 @@ if(MINGW)
   include_directories(SYSTEM src/platform/mingw)
 endif()
 
-# Required components
-find_package(Boost REQUIRED COMPONENTS system filesystem thread date_time chrono regex serialization program_options coroutine context atomic)
+# Required components - system is not needed in Boost 1.80+ (header-only since 1.69)
+find_package(Boost REQUIRED COMPONENTS filesystem thread date_time chrono regex serialization program_options coroutine context atomic)
+
 include_directories(SYSTEM ${Boost_INCLUDE_DIRS})
 message(STATUS "Boost Found: ${Boost_INCLUDE_DIRS}")
 message(STATUS "Found Boost Version: ${Boost_VERSION}")
@@ -189,20 +209,14 @@ message(STATUS "Found Boost Version: ${Boost_VERSION}")
 if(MINGW)
   set(Boost_LIBRARIES "${Boost_LIBRARIES};ws2_32;mswsock;iphlpapi;bcrypt")
 elseif(APPLE)
-  # Ensure proper linking on macOS
-  if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
-      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
-  elseif(EXISTS "/usr/local/opt/boost@1.85/lib")
-      set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/boost@1.85/lib -Wl,-rpath,/usr/local/opt/boost@1.85/lib")
+  # Ensure proper linking on macOS - prioritize Homebrew arm64 Boost
+  # at /opt/homebrew (Apple Silicon). Skip x86_64 Boost at /usr/local
+  # to avoid architecture mismatch.
+  if(EXISTS "/opt/homebrew/opt/boost/lib")
+    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost/lib -Wl,-rpath,/opt/homebrew/opt/boost/lib")
+    link_directories("/opt/homebrew/opt/boost/lib")
   endif()
-
-  # Ensure we're using the correct Boost libraries path
-  if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
-      link_directories("/opt/homebrew/opt/boost@1.85/lib")
-  endif()
-  if(EXISTS "/usr/local/opt/boost@1.85/lib")
-      link_directories("/usr/local/opt/boost@1.85/lib")
-  endif()
+  # Skip x86_64 Boost at /usr/local on Apple Silicon to avoid architecture mismatch
 elseif(OPENBSD OR ANDROID)
   set(Boost_LIBRARIES "${Boost_LIBRARIES}")
 elseif(NOT MSVC)
@@ -214,10 +228,16 @@ endif()
 # --------------------------
 # Check for Homebrew installation first (takes precedence on macOS)
 if(APPLE)
-    # Check via Homebrew on macOS first
-    execute_process(COMMAND brew --prefix jsoncpp OUTPUT_VARIABLE BREW_JSONCPP_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE BREW_RESULT)
+    # Check via Homebrew on macOS first.
+    # On Apple Silicon, /opt/homebrew is the native arm64 prefix; /usr/local is
+    # Rosetta/Intel. Prefer the arm64 path when it exists to avoid arch mismatch.
+    set(_BREW_CMD "brew")
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND EXISTS "/opt/homebrew/bin/brew")
+      set(_BREW_CMD "/opt/homebrew/bin/brew")
+    endif()
+    execute_process(COMMAND ${_BREW_CMD} --prefix jsoncpp OUTPUT_VARIABLE BREW_JSONCPP_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE RESULT_VARIABLE BREW_RESULT)
     if(BREW_RESULT EQUAL 0)
-      set(JSONCPP_INCLUDE_DIRS "${BREW_JSONCPP_PREFIX}/include/json")
+      set(JSONCPP_INCLUDE_DIRS "${BREW_JSONCPP_PREFIX}/include")
       set(JSONCPP_LIBRARY_DIRS "${BREW_JSONCPP_PREFIX}/lib")
       set(JSONCPP_LIBRARIES "${BREW_JSONCPP_PREFIX}/lib/libjsoncpp.dylib")
       set(JSONCPP_FOUND TRUE)
@@ -249,35 +269,47 @@ endif()
 if(NOT JSONCPP_FOUND)
   # Manual detection fallback
   set(JSONCPP_FOUND FALSE)
-  set(JSONCPP_LIBRARIES "jsoncpp")
   set(JSONCPP_LIBRARY_DIRS "")
 
   # Try standard locations
   if(EXISTS "/usr/include/json/json.h")
-    set(JSONCPP_INCLUDE_DIRS "/usr/include/json")
+    set(JSONCPP_INCLUDE_DIRS "/usr/include")
+    set(JSONCPP_LIBRARIES "jsoncpp")
     set(JSONCPP_FOUND TRUE)
     message(STATUS "Found jsoncpp headers at /usr/include/json")
   elseif(EXISTS "/usr/include/jsoncpp/json/json.h")
-    set(JSONCPP_INCLUDE_DIRS "/usr/include/jsoncpp/json")
+    set(JSONCPP_INCLUDE_DIRS "/usr/include/jsoncpp")
+    set(JSONCPP_LIBRARIES "jsoncpp")
     set(JSONCPP_FOUND TRUE)
-    message(STATUS "Found jsoncpp headers at /usr/include/jsoncpp/json")
+    message(STATUS "Found jsoncpp headers at /usr/include/jsoncpp")
   elseif(EXISTS "/usr/include/x86_64-linux-gnu/jsoncpp/json/json.h")
-    set(JSONCPP_INCLUDE_DIRS "/usr/include/x86_64-linux-gnu/jsoncpp/json")
+    set(JSONCPP_INCLUDE_DIRS "/usr/include/x86_64-linux-gnu/jsoncpp")
+    set(JSONCPP_LIBRARIES "jsoncpp")
     set(JSONCPP_FOUND TRUE)
-    message(STATUS "Found jsoncpp headers at /usr/include/x86_64-linux-gnu/jsoncpp/json")
+    message(STATUS "Found jsoncpp headers at /usr/include/x86_64-linux-gnu/jsoncpp")
   elseif(WIN32)
     if(EXISTS "C:/vcpkg/installed/x64-windows/include/json/json.h")
-      set(JSONCPP_INCLUDE_DIRS "C:/vcpkg/installed/x64-windows/include/json")
+      set(JSONCPP_INCLUDE_DIRS "C:/vcpkg/installed/x64-windows/include")
+      file(GLOB _vcpkg_jsoncpp_lib "C:/vcpkg/installed/x64-windows/lib/jsoncpp*.lib")
+      if(_vcpkg_jsoncpp_lib)
+        list(GET _vcpkg_jsoncpp_lib 0 JSONCPP_LIBRARIES)
+      else()
+        set(JSONCPP_LIBRARIES "jsoncpp")
+      endif()
+      set(JSONCPP_LIBRARY_DIRS "C:/vcpkg/installed/x64-windows/lib")
       set(JSONCPP_FOUND TRUE)
       message(STATUS "Found jsoncpp via vcpkg at ${JSONCPP_INCLUDE_DIRS}")
+      message(STATUS "jsoncpp library: ${JSONCPP_LIBRARIES}")
     endif()
   endif()
 
   if(JSONCPP_FOUND)
     include_directories(SYSTEM ${JSONCPP_INCLUDE_DIRS})
-  else()
-    include_directories(SYSTEM /usr/include/json /usr/include/jsoncpp/json /usr/include/x86_64-linux-gnu/jsoncpp/json)
+  elseif(NOT WIN32)
+    include_directories(SYSTEM /usr/include /usr/include/jsoncpp /usr/include/x86_64-linux-gnu/jsoncpp)
     message(WARNING "jsoncpp headers not found, using fallback paths")
+  else()
+    message(WARNING "jsoncpp headers not found on Windows; install via vcpkg")
   endif()
 endif()
 
@@ -286,7 +318,11 @@ if(NOT DEFINED JSONCPP_LIBRARIES)
   set(JSONCPP_LIBRARIES "jsoncpp")
 endif()
 if(NOT DEFINED JSONCPP_INCLUDE_DIRS)
-  set(JSONCPP_INCLUDE_DIRS "/usr/include/json")
+  if(WIN32)
+    set(JSONCPP_INCLUDE_DIRS "")
+  else()
+    set(JSONCPP_INCLUDE_DIRS "/usr/include")
+  endif()
 endif()
 if(NOT DEFINED JSONCPP_LIBRARY_DIRS)
   set(JSONCPP_LIBRARY_DIRS "")
@@ -304,25 +340,17 @@ message(STATUS "Boost libraries: ${Boost_LIBRARIES}")
 
 # Configure runtime path for Boost libraries on macOS
 if(APPLE)
-    if(EXISTS "/opt/homebrew/opt/boost@1.85/lib")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/boost@1.85/lib -Wl,-rpath,/opt/homebrew/opt/boost@1.85/lib")
-    elseif(EXISTS "/usr/local/opt/boost@1.85/lib")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/boost@1.85/lib -Wl,-rpath,/usr/local/opt/boost@1.85/lib")
-    endif()
-
-    # Also add ICU library paths
+    # Add ICU library paths (arm64 only)
     if(EXISTS "/opt/homebrew/opt/icu4c/lib")
         set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/opt/homebrew/opt/icu4c/lib -Wl,-rpath,/opt/homebrew/opt/icu4c/lib")
-    elseif(EXISTS "/usr/local/opt/icu4c/lib")
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -L/usr/local/opt/icu4c/lib -Wl,-rpath,/usr/local/opt/icu4c/lib")
     endif()
 endif()
 
 # --------------------------
-# ICU (skipped on Android)
+# ICU (only needed on macOS/Linux)
 # --------------------------
-if(ANDROID)
-    message(STATUS "Android build detected: skipping ICU discovery")
+if(ANDROID OR WIN32)
+    message(STATUS "Skipping ICU discovery (not needed on this platform)")
 else()
     if(APPLE)
         # Ensure proper ICU paths for macOS
@@ -428,6 +456,10 @@ endif()
 option(BUILD_TESTS "Build test executables" OFF)
 if(BUILD_TESTS)
     enable_testing()
+    # external/CMakeLists.txt gates the vendored gtest on DO_TESTS, which nothing
+    # ever set, so -DBUILD_TESTS=ON configured tests/ but never built gtest and
+    # every test executable failed to link with "library 'gtest' not found".
+    set(DO_TESTS ON)
     add_subdirectory(tests)
 endif()
 
@@ -447,15 +479,6 @@ if(APPLE AND ICU_FOUND)
         if(TARGET ${exec_target})
             message(STATUS "Linking ICU to ${exec_target}")
             target_link_libraries(${exec_target} PRIVATE ${ICU_LIBRARIES})
-
-            # Ensure proper rpath for ICU libraries on macOS
-            if(EXISTS "/opt/homebrew/opt/icu4c/lib")
-                set_target_properties(${exec_target} PROPERTIES
-                    LINK_FLAGS "-L/opt/homebrew/opt/icu4c/lib -Wl,-rpath,/opt/homebrew/opt/icu4c/lib")
-            elseif(EXISTS "/usr/local/opt/icu4c/lib")
-                set_target_properties(${exec_target} PROPERTIES
-                    LINK_FLAGS "-L/usr/local/opt/icu4c/lib -Wl,-rpath,/usr/local/opt/icu4c/lib")
-            endif()
         endif()
     endforeach()
 

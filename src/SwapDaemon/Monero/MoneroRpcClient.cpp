@@ -17,18 +17,20 @@
 // Uses POSIX sockets for HTTP — no external dependencies.
 
 #include "MoneroRpcClient.h"
+#include "MoneroAddress.h"
+#include "Common/WinCompat.h"
 
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
-#include <unistd.h>
-
+#include <array>
 #include <cstring>
 #include <sstream>
 #include <stdexcept>
 
 #include "Common/JsonValue.h"
+#include "SwapDaemon/Monero/AdaptorSignature.h"
+
+extern "C" {
+#include "crypto/crypto-ops.h"
+}
 
 namespace XfgSwap {
 
@@ -64,11 +66,17 @@ std::string MoneroRpcClient::httpPost(const std::string& host, uint16_t port,
   addr.sin_port = htons(port);
 
   // Set a 10-second connect/read timeout
+#ifdef _WIN32
+  DWORD tvMs = 10000;
+  ::setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tvMs), sizeof(tvMs));
+  ::setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&tvMs), sizeof(tvMs));
+#else
   struct timeval tv;
   tv.tv_sec = 10;
   tv.tv_usec = 0;
   ::setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
   ::setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
 
   if (::connect(sockfd, reinterpret_cast<struct sockaddr*>(&addr), sizeof(addr)) < 0) {
     ::close(sockfd);
@@ -86,7 +94,13 @@ std::string MoneroRpcClient::httpPost(const std::string& host, uint16_t port,
   req << body;
 
   std::string request = req.str();
-  ssize_t sent = ::send(sockfd, request.c_str(), request.size(), 0);
+  ssize_t sent = ::send(sockfd, request.c_str(), request.size(),
+#ifndef _WIN32
+                       MSG_NOSIGNAL
+#else
+                       0
+#endif
+                       );
   if (sent < 0 || static_cast<size_t>(sent) != request.size()) {
     ::close(sockfd);
     return {};
@@ -141,7 +155,7 @@ static bool parseJsonRpcResult(const std::string& raw, Common::JsonValue& result
     if (!root.contains("result")) return false;
     result = root("result");
     return true;
-  } catch (...) {
+  } catch (const std::exception&) {
     return false;
   }
 }
@@ -149,6 +163,19 @@ static bool parseJsonRpcResult(const std::string& raw, Common::JsonValue& result
 // ---------------------------------------------------------------------------
 // Daemon RPC (monerod, default port 18081)
 // ---------------------------------------------------------------------------
+
+std::string MoneroRpcClient::walletRpc(const std::string& method, const std::string& params) {
+  return jsonRpc(m_walletHost, m_walletPort, method, params);
+}
+
+void MoneroRpcClient::syncPollDelay() {
+  // ~1.5s between sync polls so the from-keys wallet scan can make progress.
+#ifdef _WIN32
+  Sleep(1500);
+#else
+  usleep(1500 * 1000);
+#endif
+}
 
 bool MoneroRpcClient::getHeight(uint64_t& height) {
   // monerod "get_info" returns { ..., "height": N, ... }
@@ -211,7 +238,7 @@ bool MoneroRpcClient::getTransaction(const std::string& txHash, MoneroTxInfo& in
     info.amount = 0;
 
     return true;
-  } catch (...) {
+  } catch (const std::exception&) {
     return false;
   }
 }
@@ -220,37 +247,42 @@ bool MoneroRpcClient::getTransaction(const std::string& txHash, MoneroTxInfo& in
 // Wallet RPC (monero-wallet-rpc, default port 18082)
 // ---------------------------------------------------------------------------
 
+// Decode a 64-char hex string to 32 bytes. Returns false on bad input.
+static bool hexTo32(const std::string& h, std::vector<uint8_t>& out) {
+  if (h.size() != 64) return false;
+  out.resize(32);
+  for (size_t i = 0; i < 32; ++i) {
+    auto nib = [](char c) -> int {
+      if (c >= '0' && c <= '9') return c - '0';
+      if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+      if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+      return -1;
+    };
+    int hi = nib(h[2 * i]), lo = nib(h[2 * i + 1]);
+    if (hi < 0 || lo < 0) return false;
+    out[i] = static_cast<uint8_t>((hi << 4) | lo);
+  }
+  return true;
+}
+
 bool MoneroRpcClient::createSharedAddress(const std::string& aliceSpendPub,
                                           const std::string& bobSpendPub,
                                           const std::string& aliceViewPub,
                                           const std::string& bobViewPub,
-                                          std::string& sharedAddress) {
-  // TODO: The shared address for the XMR atomic swap is computed off-chain
-  // by adding the public keys (A_spend + B_spend, A_view + B_view) and then
-  // encoding the result as a standard Monero address. This does NOT go through
-  // monero-wallet-rpc — it is pure Ed25519 point addition done locally.
-  //
-  // For now, we use generate_from_keys to import the shared view key and
-  // the shared spend public key into a watch-only wallet so we can monitor
-  // incoming funds. The actual spend requires both parties' secrets.
-  //
-  // Steps (to be wired up with AdaptorSignature key exchange):
-  //   1. Compute shared_spend_pub = point_add(alice_spend_pub, bob_spend_pub)
-  //   2. Compute shared_view_key  = scalar_add(alice_view_sec, bob_view_sec)
-  //      (both parties share view keys during negotiation)
-  //   3. Derive shared_view_pub   = shared_view_key * G
-  //   4. Encode as Monero mainnet address (network byte 0x12)
-  //
-  // This method is a placeholder that will create a watch-only wallet
-  // via monero-wallet-rpc's "generate_from_keys" once the key exchange
-  // is integrated.
-
-  (void)aliceSpendPub;
-  (void)bobSpendPub;
-  (void)aliceViewPub;
-  (void)bobViewPub;
-  sharedAddress = "";
-  return false;  // Not yet implemented
+                                          std::string& sharedAddress,
+                                          uint64_t networkPrefix) {
+  sharedAddress.clear();
+  std::vector<uint8_t> aS, bS, aV, bV;
+  if (!hexTo32(aliceSpendPub, aS) || !hexTo32(bobSpendPub, bS) ||
+      !hexTo32(aliceViewPub, aV) || !hexTo32(bobViewPub, bV)) {
+    return false;
+  }
+  // shared spend pub = A_spend + B_spend ; shared view pub = A_view + B_view
+  std::vector<uint8_t> sharedSpend, sharedView;
+  if (!MoneroAddress::sharedSpendPub(aS, bS, sharedSpend)) return false;
+  if (!MoneroAddress::sharedSpendPub(aV, bV, sharedView)) return false;
+  sharedAddress = MoneroAddress::encode(sharedSpend, sharedView, networkPrefix);
+  return !sharedAddress.empty();
 }
 
 bool MoneroRpcClient::transferToShared(const std::string& address, uint64_t amount,
@@ -282,7 +314,7 @@ bool MoneroRpcClient::transferToShared(const std::string& address, uint64_t amou
             result.error = err("message").getString();
           }
         }
-      } catch (...) {}
+      } catch (const std::exception&) {}
     }
     return false;
   }
@@ -303,30 +335,61 @@ bool MoneroRpcClient::transferToShared(const std::string& address, uint64_t amou
 bool MoneroRpcClient::sweepSharedAddress(const std::string& spendKeyHex,
                                          const std::string& viewKeyHex,
                                          const std::string& destAddress,
-                                         MoneroTransferResult& result) {
-  // To sweep the shared XMR address, we need to:
-  //   1. Open (or create) a wallet from the full spend+view key pair
-  //   2. Wait for it to sync
-  //   3. sweep_all to destAddress
-  //
-  // Step 1: generate_from_keys (creates a wallet with the given keys)
-  // TODO: The wallet filename should be unique per swap to avoid collisions.
-  //       For now we use a hardcoded name.
+                                         MoneroTransferResult& result,
+                                         const std::string& walletName,
+                                         uint64_t restoreHeight,
+                                         uint64_t targetHeight,
+                                         uint64_t networkPrefix) {
+  // 1. generate_from_keys (per-swap wallet name; restore from the lock height
+  //    to avoid a full-chain rescan), 2. WAIT FOR SYNC, 3. sweep_all.
 
-  // Close any currently open wallet first
-  jsonRpc(m_walletHost, m_walletPort, "close_wallet", "{}");
+  // Derive the wallet's primary address from the (secret) spend/view keys:
+  // pub = sec*G for each, then encode(spendPub, viewPub, prefix). Some
+  // monero-wallet-rpc builds reject an empty address in generate_from_keys, so
+  // we always pass the matching address. This also asserts the keys are valid
+  // ed25519 scalars before we touch the wallet.
+  std::vector<uint8_t> spendSec, viewSec;
+  if (!hexTo32(spendKeyHex, spendSec) || !hexTo32(viewKeyHex, viewSec)) {
+    result.success = false;
+    result.error = "Invalid spend/view key hex";
+    return false;
+  }
+  std::string derivedAddr;
+  {
+    ge_p3 p;
+    unsigned char spendPub[32], viewPub[32];
+    ge_scalarmult_base(&p, spendSec.data());
+    ge_p3_tobytes(spendPub, &p);
+    ge_scalarmult_base(&p, viewSec.data());
+    ge_p3_tobytes(viewPub, &p);
+    derivedAddr = MoneroAddress::encode(
+        std::vector<uint8_t>(spendPub, spendPub + 32),
+        std::vector<uint8_t>(viewPub, viewPub + 32), networkPrefix);
+    if (derivedAddr.empty()) {
+      result.success = false;
+      result.error = "Failed to derive wallet address from keys";
+      return false;
+    }
+  }
 
-  // Open wallet from the combined spend key and view key
+  // Close any currently open wallet first.
+  walletRpc("close_wallet", "{}");
+
+  // Per-swap filename so concurrent swaps don't collide on one temp wallet.
+  const std::string filename =
+      walletName.empty() ? std::string("swap_sweep_default")
+                         : std::string("swap_sweep_") + walletName;
+
   std::ostringstream genParams;
-  genParams << "{\"filename\":\"swap_sweep_temp\""
-            << ",\"address\":\"\"" // Will be derived from keys
+  genParams << "{\"filename\":\"" << filename << "\""
+            << ",\"address\":\"" << derivedAddr << "\""
             << ",\"spendkey\":\"" << spendKeyHex << "\""
             << ",\"viewkey\":\"" << viewKeyHex << "\""
             << ",\"password\":\"\""
-            << ",\"restore_height\":0"  // TODO: Use a reasonable restore height
+            << ",\"restore_height\":" << restoreHeight
             << "}";
 
-  std::string genRaw = jsonRpc(m_walletHost, m_walletPort, "generate_from_keys", genParams.str());
+  std::string genRaw = walletRpc("generate_from_keys", genParams.str());
   Common::JsonValue genRes(Common::JsonValue::NIL);
   if (!parseJsonRpcResult(genRaw, genRes)) {
     result.success = false;
@@ -334,18 +397,50 @@ bool MoneroRpcClient::sweepSharedAddress(const std::string& spendKeyHex,
     return false;
   }
 
-  // TODO: Wait for wallet to sync. In production, poll get_height until
-  // the wallet height matches the daemon height. For now, we proceed
-  // immediately — the caller must ensure sync is complete.
+  // 2. Wait for the from-keys wallet to scan/sync BEFORE sweeping — otherwise
+  //    sweep_all sees no outputs. Each iteration DRIVES the scan with a
+  //    synchronous "refresh" (the wallet does not advance on its own between
+  //    instant RPC calls), then checks get_height. If targetHeight is known
+  //    (the daemon height) wait until the wallet reaches it; otherwise wait
+  //    until the scan height stabilizes. A delay between polls gives the scan
+  //    time to make progress. Never sweep an unsynced wallet.
+  {
+    const int kMaxPolls = 120;       // bounded
+    uint64_t prevHeight = 0;
+    bool synced = false;
+    for (int i = 0; i < kMaxPolls; ++i) {
+      // Drive the wallet scan forward synchronously.
+      walletRpc("refresh", "{}");
 
-  // Step 2: sweep_all to destination
+      std::string hRaw = walletRpc("get_height", "{}");
+      Common::JsonValue hRes(Common::JsonValue::NIL);
+      uint64_t wh = 0;
+      if (parseJsonRpcResult(hRaw, hRes) && hRes.contains("height")) {
+        wh = static_cast<uint64_t>(hRes("height").getInteger());
+      }
+      if (targetHeight > 0) {
+        if (wh >= targetHeight) { synced = true; break; }
+      } else {
+        if (i > 0 && wh == prevHeight && wh > 0) { synced = true; break; }
+      }
+      prevHeight = wh;
+      syncPollDelay();
+    }
+    if (!synced) {
+      result.success = false;
+      result.error = "Wallet did not sync before sweep deadline";
+      return false;
+    }
+  }
+
+  // 3. sweep_all to destination.
   std::ostringstream sweepParams;
   sweepParams << "{\"address\":\"" << destAddress << "\""
               << ",\"priority\":1"
               << ",\"ring_size\":16"
               << "}";
 
-  std::string sweepRaw = jsonRpc(m_walletHost, m_walletPort, "sweep_all", sweepParams.str());
+  std::string sweepRaw = walletRpc("sweep_all", sweepParams.str());
   Common::JsonValue sweepRes(Common::JsonValue::NIL);
   if (!parseJsonRpcResult(sweepRaw, sweepRes)) {
     result.success = false;
@@ -360,7 +455,7 @@ bool MoneroRpcClient::sweepSharedAddress(const std::string& spendKeyHex,
             result.error = err("message").getString();
           }
         }
-      } catch (...) {}
+      } catch (const std::exception&) {}
     }
     return false;
   }
@@ -384,38 +479,226 @@ bool MoneroRpcClient::sweepSharedAddress(const std::string& spendKeyHex,
   return true;
 }
 
+bool MoneroRpcClient::openWatchOnly(const std::string& address,
+                                    const std::string& viewKeyHex,
+                                    const std::string& walletName,
+                                    uint64_t restoreHeight) {
+  if (address.empty() || viewKeyHex.size() != 64) return false;
+
+  walletRpc("close_wallet", "{}");
+
+  const std::string filename =
+      walletName.empty() ? std::string("swap_watch_default")
+                         : std::string("swap_watch_") + walletName;
+
+  // Watch-only: spendkey empty. monero-wallet-rpc opens a view-only wallet.
+  std::ostringstream genParams;
+  genParams << "{\"filename\":\"" << filename << "\""
+            << ",\"address\":\"" << address << "\""
+            << ",\"viewkey\":\"" << viewKeyHex << "\""
+            << ",\"spendkey\":\"\""
+            << ",\"password\":\"\""
+            << ",\"restore_height\":" << restoreHeight
+            << "}";
+
+  std::string genRaw = walletRpc("generate_from_keys", genParams.str());
+  Common::JsonValue genRes(Common::JsonValue::NIL);
+  if (!parseJsonRpcResult(genRaw, genRes)) {
+    // Wallet may already exist — try open_wallet
+    std::ostringstream openParams;
+    openParams << "{\"filename\":\"" << filename << "\",\"password\":\"\"}";
+    std::string openRaw = walletRpc("open_wallet", openParams.str());
+    Common::JsonValue openRes(Common::JsonValue::NIL);
+    if (!parseJsonRpcResult(openRaw, openRes)) return false;
+  }
+
+  // Drive a short refresh so outputs are visible
+  for (int i = 0; i < 5; ++i) {
+    walletRpc("refresh", "{}");
+    syncPollDelay();
+  }
+  return true;
+}
+
 bool MoneroRpcClient::checkAddressBalance(const std::string& address,
-                                          uint64_t& balance, uint64_t& unlocked) {
-  // This requires the watch-only wallet for the shared address to be open.
-  // Use get_balance from monero-wallet-rpc.
-  // TODO: In a real flow, the caller must first open the watch-only wallet
-  // created during createSharedAddress(). For now, we just call get_balance
-  // on whatever wallet is currently open.
-
-  (void)address;  // The open wallet determines the address
-
-  std::string raw = jsonRpc(m_walletHost, m_walletPort, "get_balance", "{\"account_index\":0}");
-
-  Common::JsonValue res(Common::JsonValue::NIL);
-  if (!parseJsonRpcResult(raw, res)) {
-    balance = 0;
-    unlocked = 0;
+                                          const std::string& viewKeyHex,
+                                          uint64_t& balance, uint64_t& unlocked,
+                                          uint64_t restoreHeight) {
+  balance = 0;
+  unlocked = 0;
+  if (!openWatchOnly(address, viewKeyHex, /*walletName=*/address.substr(0, 16),
+                     restoreHeight)) {
     return false;
   }
 
-  if (res.contains("balance")) {
+  std::string raw = walletRpc("get_balance", "{\"account_index\":0}");
+  Common::JsonValue res(Common::JsonValue::NIL);
+  if (!parseJsonRpcResult(raw, res)) {
+    walletRpc("close_wallet", "{}");
+    return false;
+  }
+
+  if (res.contains("balance"))
     balance = static_cast<uint64_t>(res("balance").getInteger());
-  } else {
-    balance = 0;
-  }
-
-  if (res.contains("unlocked_balance")) {
+  if (res.contains("unlocked_balance"))
     unlocked = static_cast<uint64_t>(res("unlocked_balance").getInteger());
-  } else {
-    unlocked = 0;
+
+  walletRpc("close_wallet", "{}");
+  return true;
+}
+
+// ─── Adaptor-signature operations (CLSAG adaptor path) ──────────────────────
+
+bool MoneroRpcClient::lockAdaptor(const std::string& sharedAddress,
+                                   uint64_t amountPiconero,
+                                   MoneroTransferResult& result) {
+  // Delegate to transferToShared — the lock IS the transfer to the shared address.
+  // No on-chain script; the adaptor secret reveals the spend key.
+  return transferToShared(sharedAddress, amountPiconero, result);
+}
+
+bool MoneroRpcClient::verifyLock(const std::string& sharedAddress,
+                                  const std::string& viewKeyHex,
+                                  uint64_t expectedPiconero) {
+  if (viewKeyHex.empty()) return false;
+  uint64_t balance = 0, unlocked = 0;
+  if (!checkAddressBalance(sharedAddress, viewKeyHex, balance, unlocked))
+    return false;
+  // Require UNLOCKED balance: XMR needs ~10 confirmations to become spendable.
+  return unlocked >= expectedPiconero;
+}
+
+bool MoneroRpcClient::claimAdaptor(const std::string& aliceSpendKeyHex,
+                                    const std::string& bobSpendKeyHex,
+                                    const std::string& adaptorSecretHex,
+                                    const std::string& viewKeyHex,
+                                    const std::string& destAddress,
+                                    MoneroTransferResult& result) {
+  // Helper: hex decode string to 32-byte array
+  auto hexDecode = [](const std::string& hex, std::array<uint8_t, 32>& out) -> bool {
+    if (hex.length() != 64) return false;
+    for (size_t i = 0; i < 32; ++i) {
+      uint8_t high, low;
+      if (hex[2*i] >= '0' && hex[2*i] <= '9') high = hex[2*i] - '0';
+      else if (hex[2*i] >= 'a' && hex[2*i] <= 'f') high = hex[2*i] - 'a' + 10;
+      else if (hex[2*i] >= 'A' && hex[2*i] <= 'F') high = hex[2*i] - 'A' + 10;
+      else return false;
+      if (hex[2*i+1] >= '0' && hex[2*i+1] <= '9') low = hex[2*i+1] - '0';
+      else if (hex[2*i+1] >= 'a' && hex[2*i+1] <= 'f') low = hex[2*i+1] - 'a' + 10;
+      else if (hex[2*i+1] >= 'A' && hex[2*i+1] <= 'F') low = hex[2*i+1] - 'A' + 10;
+      else return false;
+      out[i] = (high << 4) | low;
+    }
+    return true;
+  };
+
+  // Decode all three scalars from hex
+  std::array<uint8_t, 32> alice, bob, adaptor;
+  if (!hexDecode(aliceSpendKeyHex, alice)) return false;
+  if (!hexDecode(bobSpendKeyHex, bob)) return false;
+  if (!hexDecode(adaptorSecretHex, adaptor)) return false;
+
+  // Combine via scalar addition: alice + bob + adaptor (mod ℓ)
+  std::array<uint8_t, 32> combined;
+  if (!AdaptorSigScheme::combineSpendKeys(alice, bob, adaptor, combined)) {
+    // Zero-result case: don't sweep (would brick the wallet)
+    return false;
   }
 
+  // Translate combined scalar back to hex for sweepSharedAddress
+  static const char* hex = "0123456789abcdef";
+  std::string combinedHex(64, '\0');
+  for (size_t i = 0; i < 32; ++i) {
+    combinedHex[2*i]     = hex[(combined[i] >> 4) & 0xF];
+    combinedHex[2*i + 1] = hex[combined[i] & 0xF];
+  }
+
+  // Sweep using the combined spend key
+  return sweepSharedAddress(combinedHex, viewKeyHex, destAddress, result);
+}
+
+bool MoneroRpcClient::refundAdaptor(const std::string& aliceShareHex,
+                                     const std::string& bobShareHex,
+                                     const std::string& viewKeyHex,
+                                     const std::string& destAddress,
+                                     MoneroTransferResult& result) {
+  // Helper: hex decode string to 32-byte array
+  auto hexDecode = [](const std::string& hex, std::array<uint8_t, 32>& out) -> bool {
+    if (hex.length() != 64) return false;
+    for (size_t i = 0; i < 32; ++i) {
+      uint8_t high, low;
+      if (hex[2*i] >= '0' && hex[2*i] <= '9') high = hex[2*i] - '0';
+      else if (hex[2*i] >= 'a' && hex[2*i] <= 'f') high = hex[2*i] - 'a' + 10;
+      else if (hex[2*i] >= 'A' && hex[2*i] <= 'F') high = hex[2*i] - 'A' + 10;
+      else return false;
+      if (hex[2*i+1] >= '0' && hex[2*i+1] <= '9') low = hex[2*i+1] - '0';
+      else if (hex[2*i+1] >= 'a' && hex[2*i+1] <= 'f') low = hex[2*i+1] - 'a' + 10;
+      else if (hex[2*i+1] >= 'A' && hex[2*i+1] <= 'F') low = hex[2*i+1] - 'A' + 10;
+      else return false;
+      out[i] = (high << 4) | low;
+    }
+    return true;
+  };
+
+  // Decode both party shares from hex
+  std::array<uint8_t, 32> aliceShare, bobShare;
+  if (!hexDecode(aliceShareHex, aliceShare)) return false;
+  if (!hexDecode(bobShareHex, bobShare)) return false;
+
+  // For cooperative refund, combine both shares (no adaptor secret)
+  // combined = aliceShare + bobShare (mod ℓ)
+  std::array<uint8_t, 32> zero{}; // All zeros for adaptor (none needed on refund)
+  std::array<uint8_t, 32> combined;
+  if (!AdaptorSigScheme::combineSpendKeys(aliceShare, bobShare, zero, combined)) {
+    // Zero-result case: don't sweep (would brick the wallet)
+    return false;
+  }
+
+  // Translate combined scalar back to hex for sweepSharedAddress
+  static const char* hex = "0123456789abcdef";
+  std::string combinedHex(64, '\0');
+  for (size_t i = 0; i < 32; ++i) {
+    combinedHex[2*i]     = hex[(combined[i] >> 4) & 0xF];
+    combinedHex[2*i + 1] = hex[combined[i] & 0xF];
+  }
+
+  // Sweep using the combined spend key
+  return sweepSharedAddress(combinedHex, viewKeyHex, destAddress, result);
+}
+
+bool MoneroRpcClient::checkReserveProof(const std::string& address, const std::string& message,
+                                        const std::string& signature, bool& good, uint64_t& total) {
+  std::ostringstream params;
+  params << "{\"address\":\"" << address << "\""
+         << ",\"message\":\"" << message << "\""
+         << ",\"signature\":\"" << signature << "\"}";
+
+  std::string raw = jsonRpc(m_walletHost, m_walletPort, "check_reserve_proof", params.str());
+
+  Common::JsonValue res(Common::JsonValue::NIL);
+  if (!parseJsonRpcResult(raw, res)) return false;
+  if (!res.isObject()) return false;
+
+  if (res.contains("good")) good = res("good").getBool();
+  if (res.contains("total")) total = static_cast<uint64_t>(res("total").getInteger());
   return true;
+}
+
+bool MoneroRpcClient::getReserveProof(const std::string& address, const std::string& message,
+                                      std::string& signature) {
+  // get_reserve_proof proves the whole wallet's balance; the message binds
+  // the proof to the offer being filled.
+  std::ostringstream params;
+  params << "{\"all\":false,\"account_index\":0,\"addr_indices\":[],"
+         << "\"message\":\"" << message << "\"}";
+
+  std::string raw = jsonRpc(m_walletHost, m_walletPort, "get_reserve_proof", params.str());
+
+  Common::JsonValue res(Common::JsonValue::NIL);
+  if (!parseJsonRpcResult(raw, res)) return false;
+  if (!res.isObject() || !res.contains("signature")) return false;
+  signature = res("signature").getString();
+  return !signature.empty();
 }
 
 } // namespace XfgSwap

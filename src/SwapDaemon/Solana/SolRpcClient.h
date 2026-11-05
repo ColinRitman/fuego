@@ -41,11 +41,15 @@ struct SolHtlcInfo {
   std::string sender;       // base58 pubkey
   std::string recipient;    // base58 pubkey
   uint64_t amount;          // lamports
-  std::string hashLock;     // 32-byte hex (Keccak-256)
+  std::string hashLock;     // 32-byte hex (Keccak-256) — HTLC locks only
   uint64_t timeoutSlot;
   bool claimed;
   bool refunded;
-  std::string preimage;     // 32-byte hex (set after claim, else all zeros)
+  std::string preimage;     // 32-byte hex: HTLC = revealed preimage;
+                            // PTLC = recovered adaptor secret t (after claim)
+  std::string ptlcPoint;    // 32-byte hex adaptor point T = t*G ("" on legacy
+                            // accounts / all zeros for HTLC locks)
+  uint8_t lockType;         // on-chain lock_type: 0 = HTLC, 1 = PTLC
 };
 
 // Result of a transaction send.
@@ -53,16 +57,21 @@ struct SolTxResult {
   std::string signature;    // base58 tx signature
   bool confirmed;
   std::string error;        // empty on success
+  std::string htlcAddress;  // base58 HTLC state PDA (set by lock) — the
+                            // reference verifyLock/claim must use, NOT the
+                            // tx signature.
 };
 
 class SolRpcClient {
 public:
-  // host: Solana RPC endpoint (e.g., "http://127.0.0.1" for local,
-  //        "https://api.devnet.solana.com" for devnet)
-  // port: RPC port (8899 for local validator, 443 for HTTPS endpoints)
+  // host: local Solana RPC endpoint (127.0.0.1)
+  // port: local validator RPC port (usually 8899)
   // programId: deployed xfg_htlc program ID (base58)
   SolRpcClient(const std::string& host, uint16_t port,
                const std::string& programId);
+
+  bool hasValidProgramId() const;
+  const std::string& programId() const { return m_programId; }
 
   // ─── Basic queries ──────────────────────────────────────────────
 
@@ -78,6 +87,10 @@ public:
   // Check if a transaction is confirmed.
   // Returns false on RPC failure; sets confirmed=true/false.
   bool getSignatureStatus(const std::string& signature, bool& confirmed);
+
+  // Historical status lookup for refund reconciliation. Only a successful
+  // finalized signature is returned with its chain slot.
+  bool getFinalizedSignatureSlot(const std::string& signature, uint64_t& slot);
 
   // ─── HTLC operations ───────────────────────────────────────────
   //
@@ -101,7 +114,24 @@ public:
             uint64_t amountLamports,
             SolTxResult& result);
 
+  // Lock SOL into a PURE PTLC escrow against the adaptor POINT T = t*G
+  // (program instruction `lock_ptlc`, lock_type = 1, no hash commitment).
+  //
+  // senderSecretKey: 64-byte Solana keypair (base58)
+  // recipientPubkey: recipient's Solana pubkey (base58)
+  // ptlcPointHex:    ed25519 adaptor point T, 32 bytes hex
+  //
+  // On success sets result.signature/.confirmed and result.htlcAddress
+  // (PDA over seeds [b"xfg_htlc", sender_pubkey, ptlc_point]).
+  bool lockPtlc(const std::string& senderSecretKey,
+                const std::string& recipientPubkey,
+                const std::string& ptlcPointHex,
+                uint64_t timeoutSlot,
+                uint64_t amountLamports,
+                SolTxResult& result);
+
   // Claim locked SOL by revealing the preimage (adaptor secret).
+  // Legacy HTLC path only — the program rejects this for lock_type == 1.
   //
   // claimerSecretKey: recipient's Solana keypair (base58)
   // htlcAccount:      HTLC state account pubkey (base58)
@@ -110,6 +140,24 @@ public:
              const std::string& htlcAccount,
              const std::string& preimageHex,
              SolTxResult& result);
+
+  // Claim a PURE PTLC escrow with a completed ed25519 adaptor signature
+  // (program instruction `claim_ptlc`). The program verifies
+  // N == s*G + e*P with e = reduce(keccak256(R ‖ T ‖ keccak256(htlc ‖
+  // recipient ‖ amount_le))), recovers t = s − r_hat and enforces t*G == T.
+  //
+  // claimerSecretKey: recipient's Solana keypair (base58)
+  // htlcAccount:      PTLC state account pubkey (base58)
+  // completedSigHex:  Fuego Signature c||s after adaptation, 64 bytes hex
+  //                   (only bytes 32..63 = s are consumed by the equation)
+  // presigRHex:       adaptor nonce point N = (k+t)*G, 32 bytes hex
+  // presigSPrimeHex:  pre-signature response r_hat = k − e·x, 32 bytes hex
+  bool claimPtlc(const std::string& claimerSecretKey,
+                 const std::string& htlcAccount,
+                 const std::string& completedSigHex,
+                 const std::string& presigRHex,
+                 const std::string& presigSPrimeHex,
+                 SolTxResult& result);
 
   // Refund locked SOL after timeout.
   //
@@ -143,6 +191,13 @@ public:
                     uint32_t pollIntervalMs = 2000,
                     uint64_t maxWaitMs = 600000);
 
+  // Verify that a SOL HTLC is on-chain, holds the expected amount, and is
+  // not yet claimed or refunded.
+  // htlcAccount:      HTLC state account pubkey (base58).
+  // expectedLamports: expected locked amount.
+  bool verifyLock(const std::string& htlcAccount,
+                  uint64_t expectedLamports);
+
 private:
   // JSON-RPC call to Solana node.
   std::string jsonRpc(const std::string& method, const std::string& params);
@@ -168,10 +223,29 @@ private:
                                     uint64_t amountLamports,
                                     const std::string& recentBlockhash);
 
+  // Mirrors buildLockTx but targets the `lock_ptlc` instruction:
+  // discriminator "global:lock_ptlc", PDA seeded with ptlc_point instead of
+  // hash_lock. point is the raw 32-byte adaptor point T.
+  std::vector<uint8_t> buildLockPtlcTx(const std::string& senderSecretKey,
+                                        const std::string& recipientPubkey,
+                                        const std::vector<uint8_t>& point,
+                                        uint64_t timeoutSlot,
+                                        uint64_t amountLamports,
+                                        const std::string& recentBlockhash);
+
   std::vector<uint8_t> buildClaimTx(const std::string& claimerSecretKey,
                                      const std::string& htlcAccount,
                                      const std::vector<uint8_t>& preimage,
                                      const std::string& recentBlockhash);
+
+  // Mirrors buildClaimTx but targets `claim_ptlc`: ix data =
+  // disc(8) + completed_sig(64) + presig_r(32) + presig_s_prime(32).
+  std::vector<uint8_t> buildClaimPtlcTx(const std::string& claimerSecretKey,
+                                         const std::string& htlcAccount,
+                                         const std::vector<uint8_t>& completedSig,
+                                         const std::vector<uint8_t>& presigR,
+                                         const std::vector<uint8_t>& presigSPrime,
+                                         const std::string& recentBlockhash);
 
   std::vector<uint8_t> buildRefundTx(const std::string& senderSecretKey,
                                       const std::string& htlcAccount,

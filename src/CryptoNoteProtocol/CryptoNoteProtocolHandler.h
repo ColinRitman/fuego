@@ -96,6 +96,17 @@ namespace CryptoNote
     int handle_notify_new_lite_block(int command, NOTIFY_NEW_LITE_BLOCK::request &arg, CryptoNoteConnectionContext &context);
     int handle_notify_missing_txs(int command, NOTIFY_MISSING_TXS::request &arg, CryptoNoteConnectionContext &context);
 
+    int handle_swap_offer(int command, COMMAND_SWAP_OFFER::request& arg, CryptoNoteConnectionContext& context);
+    int handle_swap_cancel(int command, COMMAND_SWAP_CANCEL::request& arg, CryptoNoteConnectionContext& context);
+    int handle_swap_request(int command, COMMAND_SWAP_REQUEST::request& arg, CryptoNoteConnectionContext& context);
+    int handle_swap_request_result(int command, COMMAND_SWAP_REQUEST_RESULT::request& arg, CryptoNoteConnectionContext& context);
+    int handle_swap_trade(int command, COMMAND_SWAP_TRADE::request& arg, CryptoNoteConnectionContext& context);
+
+    int handle_order_open(int command, COMMAND_ORDER_OPEN::request& arg, CryptoNoteConnectionContext& context);
+    int handle_order_cancel(int command, COMMAND_ORDER_CANCEL::request& arg, CryptoNoteConnectionContext& context);
+    int handle_order_fill(int command, COMMAND_ORDER_FILL::request& arg, CryptoNoteConnectionContext& context);
+    int handle_order_reserve(int command, COMMAND_ORDER_RESERVE::request& arg, CryptoNoteConnectionContext& context);
+    int handle_order_reserve_ack(int command, COMMAND_ORDER_RESERVE_ACK::request& arg, CryptoNoteConnectionContext& context);
 
     //----------------- i_cryptonote_protocol ----------------------------------
     virtual void relay_block(NOTIFY_NEW_BLOCK::request& arg) override;
@@ -109,6 +120,18 @@ namespace CryptoNote
     void recalculateMaxObservedHeight(const CryptoNoteConnectionContext& context);
     int processObjects(CryptoNoteConnectionContext& context, const std::vector<parsed_block_entry>& blocks);
     Logging::LoggerRef logger;
+
+    struct StemTransaction {
+      NOTIFY_NEW_TRANSACTIONS::request request;
+      time_t time_added;
+    };
+    struct HashCompare {
+      bool operator()(const Crypto::Hash& a, const Crypto::Hash& b) const {
+        return memcmp(a.data, b.data, sizeof(a.data)) < 0;
+      }
+    };
+    std::map<Crypto::Hash, StemTransaction, HashCompare> m_stem_transactions;
+    std::mutex m_stem_mutex;
 
   private:
     int doPushLiteBlock(NOTIFY_NEW_LITE_BLOCK::request block, CryptoNoteConnectionContext &context, std::vector<BinaryArray> missingTxs);
