@@ -65,6 +65,40 @@ the maintain-and-compound structure; depth has to be seeded by paired donation
 15k/1.5k). The slice then compounds it as volume grows. It is taken from CD yield,
 so raising it is visible to CD holders and should be disclosed, not slipped in.
 
+### Workstream 3 — three-way Hearth fee split (2026-11-06)
+
+`HEARTH_CD_SHARE_PCT_V12` 70 → **65** (so the maker rebate is 35), and AuntPoL's
+cut is now quoted as a percent **of the taker fee** rather than of the
+accumulator: `SWF_LP_PCT_OF_FEE_PRE_CD = 30`, `SWF_LP_PCT_OF_FEE_V12 = 35`, read
+by `swfLpPctOfFee(uint32_t height)`.
+
+The denomination matters. 35 of a 65-point non-maker side is 53.846…%, which no
+integer percent expresses, so storing AuntPoL's share *of the accumulator* could
+not state 35/35/30 exactly. Quoting it as a share of the fee and rebasing at the
+epoch boundary — `accumulator × pctOfFee / hearthCdSharePct(version)` in 128-bit
+— lands it exactly. Both inputs are read for the same block, since the
+accumulator was filled at settlement using that block's version, and `pctOfFee`
+can never exceed `cdLegPct` because the non-maker side is what it is carved from.
+
+Verified by compiling the helpers standalone against a shadowed header with the
+start height set, over a fee unit: pre-CD **30 / 70 / 0**, v12 **35 / 35 / 30**,
+and with the diversion disabled it falls back to the stock **0 / 70 / 30** — each
+summing to exactly 100%.
+
+| # | Task | Owner | Date | Status |
+|---|------|-------|------|--------|
+| 16 | `HEARTH_CD_SHARE_PCT_V12` → 65 (maker 35) | Claude Opus 5 | 2026-11-06 | DONE |
+| 17 | Re-denominate to `SWF_LP_PCT_OF_FEE_*` + `swfLpPctOfFee`; rebase the epoch split | Claude Opus 5 | 2026-11-06 | DONE |
+| 18 | Verify the split is exact at each stage of the schedule | Claude Opus 5 | 2026-11-06 | DONE |
+
+Rebased onto `claude/usexfg-merge-redo` (clean fuego-suite + audit fixes); both
+earlier SWF commits cherry-picked without conflict. `Blockchain.cpp` now compiles
+to **14 errors, identical to pure upstream**, and no diagnostic names any symbol
+added by this work — the remaining errors are Boost 1.83 in the audit container
+against the project's required 1.86+ (`TransactionExtraField` is a 31-type
+`boost::variant`) plus two GCC `explicit qualification` complaints on
+`isHeatwaveTag`/`carriesHeatwaveTag`.
+
 ### Workstream 2 — diversion schedule, height gate, protocol-share cap (2026-11-06)
 
 Revised after review. Three changes to how the diversion is keyed and bounded:
@@ -104,7 +138,7 @@ while the start height is 0, and with it set to a test value the schedule steps
 | 11 | `SWF_LP_LEG_SHARE_PCT_PRE_CD = 100`, `_V12 = 0` | Claude Opus 5 | 2026-11-06 | DONE |
 | 12 | `PROTOCOL_LP_SHARE_CAP_PCT` + `protocolLpAtCap()`, gating pairing and diversion | Claude Opus 5 | 2026-11-06 | DONE |
 | 13 | Set `SWF_LP_DIVERSION_START_HEIGHT` once the maintainer confirms chain height | — | — | TODO |
-| 14 | Decide the post-CD split (`_V12`); "35/35/30" needs restating as CD-share % | — | — | TODO |
+| 14 | Three-way fee split 35 AuntPoL / 35 maker / 30 CD at v12 | Claude Opus 5 | 2026-11-06 | DONE |
 | 15 | Zero `m_bootstrapXfgOwed`/`m_bootstrapHeatOwed` in `seedHearthPool` if bootstrap repayment is genuinely retired | — | — | TODO |
 
 ### Workstream 1 — SWF repurpose

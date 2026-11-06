@@ -5751,10 +5751,17 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
       // flows to CD yield: this is the "liquidity is sufficient, redirect to
       // CDs" switch, and it needs no separate threshold.
       if (m_ammPool.cdHearthFeeAccumulator > 0 && !protocolLpAtCap()) {
-        const uint64_t lpLegPct = swfLpSharePct(height);
-        if (lpLegPct > 0) {
+        // AuntPoL's cut is quoted as a percent OF THE FEE, while the
+        // accumulator holds only the non-maker side of it, so rebase one onto
+        // the other: accumulator x pctOfFee / cdLegPct. Both must be read for
+        // THIS block — the accumulator was filled at settlement using this
+        // block's version — and pctOfFee can never exceed cdLegPct, since the
+        // non-maker side is what AuntPoL's share is carved out of.
+        const uint64_t pctOfFee = swfLpPctOfFee(height);
+        const uint64_t cdLegPct = hearthCdSharePct(block.majorVersion);
+        if (pctOfFee > 0 && cdLegPct > 0 && pctOfFee <= cdLegPct) {
           const uint64_t hearthToLpLeg = static_cast<uint64_t>(
-              ((uint128_t)m_ammPool.cdHearthFeeAccumulator * lpLegPct) / 100);
+              ((uint128_t)m_ammPool.cdHearthFeeAccumulator * pctOfFee) / cdLegPct);
           if (hearthToLpLeg > 0) {
             if (m_treasuryHeatReserve > UINT64_MAX - hearthToLpLeg) {
               logger(ERROR, BRIGHT_RED) << "AuntPoL HEAT leg overflow on Hearth fee share";

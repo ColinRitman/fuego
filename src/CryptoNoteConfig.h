@@ -444,7 +444,11 @@ const uint64_t HEARTH_FEE_DIVISOR = 10000;
 // of the fee goes back to the makers who quoted it. V12 flips the emphasis to
 // savers once the depth has a track record. The two legs always sum to 100.
 const uint64_t HEARTH_CD_SHARE_PCT_V11 = 30; // v11: 30% CD yield / 70% maker
-const uint64_t HEARTH_CD_SHARE_PCT_V12 = 70; // v12: 70% CD yield / 30% maker
+// v12 is a THREE-way split of the taker fee: 35 AuntPoL / 35 maker / 30 CD.
+// This constant is the non-maker side (AuntPoL + CD = 65), i.e. what lands in
+// cdHearthFeeAccumulator; SWF_LP_PCT_OF_FEE_V12 then carves AuntPoL's 35 out
+// of it at the epoch boundary, leaving 30 for CD yield.
+const uint64_t HEARTH_CD_SHARE_PCT_V12 = 65; // v12: 65% (AuntPoL+CD) / 35% maker
 
 // Share of the Hearth CD fee share (cdHearthFeeAccumulator) redirected to the
 // AuntPoL HEAT leg instead of CD yield, from v12. This is the SWF's funding
@@ -466,8 +470,17 @@ const uint64_t HEARTH_CD_SHARE_PCT_V12 = 70; // v12: 70% CD yield / 30% maker
 // claimants — CDs cannot be created yet — so diverting all of it to AuntPoL
 // costs nobody anything. Once CDs go live the diversion drops to the V12
 // value, and the protocol-share cap below can switch it off entirely.
-const uint64_t SWF_LP_LEG_SHARE_PCT_PRE_CD = 100; // whole CD share → AuntPoL while CDs are inactive
-const uint64_t SWF_LP_LEG_SHARE_PCT_V12 = 0;      // once CDs are live: back to CD yield (see note)
+// AuntPoL's share of the Hearth taker fee, in percent OF THE FEE — not of the
+// accumulator. Denominated this way so a three-way split states exactly: the
+// epoch split takes accumulator x SWF_LP_PCT_OF_FEE / hearthCdSharePct(), which
+// is exact integer math instead of a rounded percentage-of-a-percentage (35 of
+// 65 is 53.84...%, which no integer percent expresses).
+//
+// Resulting fee splits — AuntPoL / maker / CD:
+//   pre-CD (CDs cannot be created yet):  30 / 70 /  0
+//   v12 onward:                          35 / 35 / 30
+const uint64_t SWF_LP_PCT_OF_FEE_PRE_CD = 30; // == hearthCdSharePct(v11): the whole non-maker side
+const uint64_t SWF_LP_PCT_OF_FEE_V12 = 35;    // of 65 non-maker → CD keeps 30
 
 // Height from which the diversion applies. 0 disables it entirely.
 //
@@ -695,19 +708,22 @@ inline uint64_t hearthMakerRebatePct(uint8_t blockMajorVersion) {
   return 100 - hearthCdSharePct(blockMajorVersion);
 }
 
-// Share of the Hearth CD fee share that funds the AuntPoL HEAT leg, at a
-// given height. Keyed on height, not block version, because the v11 split is
-// already consensus for mined v11 blocks: see
-// SWF_LP_DIVERSION_START_HEIGHT. Height is as deterministic as the version
-// under replay, so a reorg recomputes the same share.
-inline uint64_t swfLpSharePct(uint32_t height) {
+// AuntPoL's share of the Hearth taker fee, in percent OF THE FEE, at a given
+// height. Keyed on height, not block version, because the v11 split is already
+// consensus for mined v11 blocks: see SWF_LP_DIVERSION_START_HEIGHT. Height is
+// as deterministic as the version under replay, so a reorg recomputes it.
+//
+// The epoch split divides this by hearthCdSharePct() to get AuntPoL's share of
+// the accumulator, so the two must be read for the SAME block: the accumulator
+// was filled at settlement using that block's version.
+inline uint64_t swfLpPctOfFee(uint32_t height) {
   if (parameters::SWF_LP_DIVERSION_START_HEIGHT == 0 ||
       height < parameters::SWF_LP_DIVERSION_START_HEIGHT) {
     return 0;
   }
   return height >= parameters::UPGRADE_HEIGHT_V12
-             ? parameters::SWF_LP_LEG_SHARE_PCT_V12
-             : parameters::SWF_LP_LEG_SHARE_PCT_PRE_CD;
+             ? parameters::SWF_LP_PCT_OF_FEE_V12
+             : parameters::SWF_LP_PCT_OF_FEE_PRE_CD;
 }
 
 // Mint premium for a block major version. Consensus paths pass the version of
