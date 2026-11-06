@@ -226,6 +226,15 @@ namespace CryptoNote {
     };
     TreasuryLpValue getTreasuryLpValue() const;
 
+    // True once the protocol's own Hearth LP shares have reached
+    // PROTOCOL_LP_SHARE_CAP_PCT of the pool's total. Past that line AuntPoL
+    // stops pairing new deposits and the Hearth fee diversion stops, so the
+    // CD share flows wholly to CD yield. Doubles as the "liquidity is
+    // sufficient" signal: unlike a depth threshold it is not a price, so it
+    // cannot be moved by pushing the pool around — only by someone adding
+    // real liquidity, which dilutes the protocol's share and re-opens both.
+    bool protocolLpAtCap() const;
+
     // One coherent read of every public-accounting counter and vault partition
     // from a single tip, taken under the blockchain state lock. Counters and
     // the UTXOs that back them are separate values on purpose: an RPC handler

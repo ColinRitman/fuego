@@ -5552,6 +5552,21 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
           if (depositXfg > 0 && depositHeat > 0) {
             uint64_t shares = ammMintLpShares(depositXfg, depositHeat,
                 m_ammPool.totalLpShares, m_ammPool.reserveXfg, m_ammPool.reserveHeat);
+            // Protocol-share ceiling: the protocol must not end up owning the
+            // market it is making. Measured on the POST-deposit position, so
+            // the cap cannot be stepped over by one large pairing. Refused
+            // whole rather than trimmed to fit — the legs then carry forward
+            // like any other unpaired excess, and nothing is dropped.
+            if (shares > 0 &&
+                (uint128_t)(m_protocolLpShares + shares) * 100 >
+                    (uint128_t)(m_ammPool.totalLpShares + shares) *
+                        parameters::PROTOCOL_LP_SHARE_CAP_PCT) {
+              logger(INFO) << "Treasury LP Manager: pairing held back at the "
+                           << parameters::PROTOCOL_LP_SHARE_CAP_PCT
+                           << "% protocol-share cap (" << m_protocolLpShares << "/"
+                           << m_ammPool.totalLpShares << " shares); legs carry forward";
+              shares = 0;
+            }
             if (shares > 0) {
               m_ammPool.reserveXfg += depositXfg;
               m_ammPool.reserveHeat += depositHeat;
@@ -5732,8 +5747,11 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
       // The AuntPoL pairing for this epoch has already run by this point, so
       // the credit pairs at the NEXT epoch boundary. That one-epoch lag is
       // harmless: unpaired legs are carried forward by design, never dropped.
-      if (m_ammPool.cdHearthFeeAccumulator > 0) {
-        const uint64_t lpLegPct = swfLpSharePct(block.majorVersion);
+      // At the protocol-share cap the diversion stops and the whole CD share
+      // flows to CD yield: this is the "liquidity is sufficient, redirect to
+      // CDs" switch, and it needs no separate threshold.
+      if (m_ammPool.cdHearthFeeAccumulator > 0 && !protocolLpAtCap()) {
+        const uint64_t lpLegPct = swfLpSharePct(height);
         if (lpLegPct > 0) {
           const uint64_t hearthToLpLeg = static_cast<uint64_t>(
               ((uint128_t)m_ammPool.cdHearthFeeAccumulator * lpLegPct) / 100);
@@ -7869,6 +7887,14 @@ bool CryptoNote::Blockchain::isInCheckpointZone(const uint32_t height) {
   return m_checkpoints.is_in_checkpoint_zone(height);
 }
 
+
+bool CryptoNote::Blockchain::protocolLpAtCap() const {
+  // An empty pool is not "at cap": with no shares outstanding there is
+  // nothing to dominate, and the first pairing has to be allowed through.
+  if (m_ammPool.totalLpShares == 0) return false;
+  return (uint128_t)m_protocolLpShares * 100 >=
+         (uint128_t)m_ammPool.totalLpShares * parameters::PROTOCOL_LP_SHARE_CAP_PCT;
+}
 
 CryptoNote::Blockchain::TreasuryLpValue CryptoNote::Blockchain::getTreasuryLpValue() const {
   TreasuryLpValue v;

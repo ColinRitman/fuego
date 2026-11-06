@@ -65,12 +65,54 @@ the maintain-and-compound structure; depth has to be seeded by paired donation
 15k/1.5k). The slice then compounds it as volume grows. It is taken from CD yield,
 so raising it is visible to CD holders and should be disclosed, not slipped in.
 
+### Workstream 2 — diversion schedule, height gate, protocol-share cap (2026-11-06)
+
+Revised after review. Three changes to how the diversion is keyed and bounded:
+
+- **Keyed on height, not block version.** `swfLpSharePct(uint32_t height)` with
+  `SWF_LP_DIVERSION_START_HEIGHT`, which **defaults to 0 (disabled)**. v11 is live
+  from `UPGRADE_HEIGHT_V11 = 1111111` and its fee routing is already consensus for
+  every v11 block mined, so a version gate cannot express "from here on" inside a
+  version that is already running — lowering the start height below the chain tip
+  would replay those blocks with a different split and fork the network. The
+  height must be set to a value still in the future when the build ships.
+  **Open question for the maintainer: current chain height.**
+- **Whole CD share while CDs are inactive.** `SWF_LP_LEG_SHARE_PCT_PRE_CD = 100`.
+  CDs cannot be created before `UPGRADE_HEIGHT_V12`, so the Hearth CD share has no
+  claimants until then and diverting all of it deprives nobody.
+  `SWF_LP_LEG_SHARE_PCT_V12 = 0` returns it to CD yield at CD activation; set it
+  non-zero if the position still needs feeding then.
+- **`PROTOCOL_LP_SHARE_CAP_PCT = 50` + `Blockchain::protocolLpAtCap()`.** The
+  protocol must not end up owning the market it makes. Past the cap, AuntPoL stops
+  pairing *and* the fee diversion stops, so the CD share flows wholly to CD yield.
+  The cap therefore doubles as the "liquidity is sufficient" switch, and a share
+  ratio is the right signal precisely because it is not a price: it cannot be moved
+  by pushing the pool around, only by someone adding real liquidity, which dilutes
+  the protocol's share and re-opens both. The pairing check is on the
+  **post-deposit** position so the cap cannot be stepped over by one large pairing,
+  and a refused pairing carries its legs forward rather than being trimmed. The
+  genesis seed is tracked as `m_seedLpShares` (its provider's), not as protocol
+  shares, so this starts near 0% with room to grow.
+
+Verified by compiling and running the helper standalone: inert at every height
+while the start height is 0, and with it set to a test value the schedule steps
+0% → 100% at the start height → 0% at `UPGRADE_HEIGHT_V12`.
+
+| # | Task | Owner | Date | Status |
+|---|------|-------|------|--------|
+| 10 | Height-gate the diversion; `swfLpSharePct(uint32_t)`; default disabled | Claude Opus 5 | 2026-11-06 | DONE |
+| 11 | `SWF_LP_LEG_SHARE_PCT_PRE_CD = 100`, `_V12 = 0` | Claude Opus 5 | 2026-11-06 | DONE |
+| 12 | `PROTOCOL_LP_SHARE_CAP_PCT` + `protocolLpAtCap()`, gating pairing and diversion | Claude Opus 5 | 2026-11-06 | DONE |
+| 13 | Set `SWF_LP_DIVERSION_START_HEIGHT` once the maintainer confirms chain height | — | — | TODO |
+| 14 | Decide the post-CD split (`_V12`); "35/35/30" needs restating as CD-share % | — | — | TODO |
+| 15 | Zero `m_bootstrapXfgOwed`/`m_bootstrapHeatOwed` in `seedHearthPool` if bootstrap repayment is genuinely retired | — | — | TODO |
+
 ### Workstream 1 — SWF repurpose
 
 | # | Task | Owner | Date | Status |
 |---|------|-------|------|--------|
 | 1 | Remove the dead SWF XFG→HEAT conversion and its latent spot-price pricing | Claude Opus 5 | 2026-11-05 | DONE |
-| 2 | Add `SWF_LP_LEG_SHARE_PCT_V12` + `swfLpSharePct(uint8_t)`, zero before v12 | Claude Opus 5 | 2026-11-05 | DONE |
+| 2 | Add the diversion constant + `swfLpSharePct` (superseded by workstream 2) | Claude Opus 5 | 2026-11-05 | DONE |
 | 3 | Move the slice from `cdHearthFeeAccumulator` to `m_treasuryHeatReserve` at the epoch boundary | Claude Opus 5 | 2026-11-05 | DONE |
 | 4 | `TreasuryFund` asset 2 → AuntPoL XFG leg across all five touchpoints | Claude Opus 5 | 2026-11-05 | DONE |
 | 5 | Update `AGENTS.md` (AuntPoL funding + SWF semantics) | Claude Opus 5 | 2026-11-05 | DONE |

@@ -458,11 +458,39 @@ const uint64_t HEARTH_CD_SHARE_PCT_V12 = 70; // v12: 70% CD yield / 30% maker
 // taken from the m_cdYieldPool conversion, which mints HEAT against burned
 // XFG that already backs the minter's HEAT.
 //
-// Deliberately conservative: fee revenue cannot bootstrap depth at current
-// pool scale (~286x pool turnover to accrue 1,000 HEAT), so this is the
-// maintain-and-compound structure, not the growth engine. Raise it as volume
-// grows. It is taken from CD yield, so any change is visible to CD holders.
-const uint64_t SWF_LP_LEG_SHARE_PCT_V12 = 20; // v12: 20% of the CD fee share → AuntPoL HEAT leg
+// Fee revenue cannot bootstrap depth at current pool scale (~286x pool
+// turnover to accrue 1,000 HEAT); this is the maintain-and-compound
+// structure, not the growth engine. Depth has to be seeded by paired donation.
+//
+// Before CD activation (UPGRADE_HEIGHT_V12) the Hearth CD share has no
+// claimants — CDs cannot be created yet — so diverting all of it to AuntPoL
+// costs nobody anything. Once CDs go live the diversion drops to the V12
+// value, and the protocol-share cap below can switch it off entirely.
+const uint64_t SWF_LP_LEG_SHARE_PCT_PRE_CD = 100; // whole CD share → AuntPoL while CDs are inactive
+const uint64_t SWF_LP_LEG_SHARE_PCT_V12 = 0;      // once CDs are live: back to CD yield (see note)
+
+// Height from which the diversion applies. 0 disables it entirely.
+//
+// MUST be a height that is still in the future when the build ships. v11
+// activates at UPGRADE_HEIGHT_V11 and its fee routing is already consensus
+// for every v11 block mined: lowering this below the current chain tip would
+// make those blocks replay with a different split and fork the network. It is
+// a height rather than a block version for exactly that reason — a version
+// gate cannot express "from here on" within a version that is already live.
+const uint32_t SWF_LP_DIVERSION_START_HEIGHT = 0;
+
+// Ceiling on the protocol's own share of Hearth LP shares, in percent of
+// m_ammPool.totalLpShares. The protocol must not end up owning the market it
+// is meant to be making: past this line AuntPoL stops pairing new deposits
+// AND the fee diversion stops, so the CD share flows wholly to CD yield.
+//
+// This doubles as the "liquidity is sufficient" signal, and it is the right
+// signal precisely because it is not a price: it cannot be moved by pushing
+// the pool around, only by someone adding real liquidity — which dilutes the
+// protocol's share and re-opens the pipe. The incentive points the right way.
+// The genesis seed is tracked as m_seedLpShares (its provider's), not as
+// protocol shares, so this starts near 0% and has room to grow into.
+const uint64_t PROTOCOL_LP_SHARE_CAP_PCT = 50;
 const uint64_t ORDER_PRICE_TICK = COIN / 100; // min price granularity (1%)
 const uint64_t HEARTH_BACKSTOP_MAX_BPS =
     500; // backstop fills ≤ 5× auction volume per block
@@ -667,15 +695,19 @@ inline uint64_t hearthMakerRebatePct(uint8_t blockMajorVersion) {
   return 100 - hearthCdSharePct(blockMajorVersion);
 }
 
-// Share of the Hearth CD fee share that funds the AuntPoL HEAT leg, for a
-// block major version. Same rule as the helpers above: consensus paths pass
-// the version of the block they are settling, never a default, so a reorg
-// replays the split that block actually settled. Zero before v12, which keeps
-// every historical block's epoch work bit-identical.
-inline uint64_t swfLpSharePct(uint8_t blockMajorVersion) {
-  return blockMajorVersion >= BLOCK_MAJOR_VERSION_12
+// Share of the Hearth CD fee share that funds the AuntPoL HEAT leg, at a
+// given height. Keyed on height, not block version, because the v11 split is
+// already consensus for mined v11 blocks: see
+// SWF_LP_DIVERSION_START_HEIGHT. Height is as deterministic as the version
+// under replay, so a reorg recomputes the same share.
+inline uint64_t swfLpSharePct(uint32_t height) {
+  if (parameters::SWF_LP_DIVERSION_START_HEIGHT == 0 ||
+      height < parameters::SWF_LP_DIVERSION_START_HEIGHT) {
+    return 0;
+  }
+  return height >= parameters::UPGRADE_HEIGHT_V12
              ? parameters::SWF_LP_LEG_SHARE_PCT_V12
-             : 0;
+             : parameters::SWF_LP_LEG_SHARE_PCT_PRE_CD;
 }
 
 // Mint premium for a block major version. Consensus paths pass the version of
