@@ -716,9 +716,16 @@ inline uint64_t hearthMakerRebatePct(uint8_t blockMajorVersion) {
 // The epoch split divides this by hearthCdSharePct() to get AuntPoL's share of
 // the accumulator, so the two must be read for the SAME block: the accumulator
 // was filled at settlement using that block's version.
+// True once the AuntPoL funding rules apply at `height`: the fee diversion and
+// the protocol-share cap on pairing both hang off this one gate, so nothing in
+// this feature alters consensus before the start height is chosen and reached.
+inline bool swfLpRulesActive(uint32_t height) {
+  return parameters::SWF_LP_DIVERSION_START_HEIGHT != 0 &&
+         height >= parameters::SWF_LP_DIVERSION_START_HEIGHT;
+}
+
 inline uint64_t swfLpPctOfFee(uint32_t height) {
-  if (parameters::SWF_LP_DIVERSION_START_HEIGHT == 0 ||
-      height < parameters::SWF_LP_DIVERSION_START_HEIGHT) {
+  if (!swfLpRulesActive(height)) {
     return 0;
   }
   return height >= parameters::UPGRADE_HEIGHT_V12

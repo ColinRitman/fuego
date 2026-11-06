@@ -5557,7 +5557,9 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
             // the cap cannot be stepped over by one large pairing. Refused
             // whole rather than trimmed to fit — the legs then carry forward
             // like any other unpaired excess, and nothing is dropped.
-            if (shares > 0 &&
+            // Applies only from the feature's start height: before it, pairing
+            // must behave exactly as it did when those blocks were mined.
+            if (shares > 0 && swfLpRulesActive(height) &&
                 (uint128_t)(m_protocolLpShares + shares) * 100 >
                     (uint128_t)(m_ammPool.totalLpShares + shares) *
                         parameters::PROTOCOL_LP_SHARE_CAP_PCT) {

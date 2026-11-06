@@ -65,6 +65,24 @@ the maintain-and-compound structure; depth has to be seeded by paired donation
 15k/1.5k). The slice then compounds it as volume grows. It is taken from CD yield,
 so raising it is visible to CD holders and should be disclosed, not slipped in.
 
+### Workstream 4 — gate the pairing cap behind the start height (2026-11-06)
+
+The 50% protocol-share cap on AuntPoL pairing was not behind
+`SWF_LP_DIVERSION_START_HEIGHT`. Only the fee diversion was, so the feature was
+described as dormant while the cap still applied to every block on deploy. On a
+chain already past v11 that is a consensus rule change old nodes would not
+share, and it would bite only when the protocol first reached half the pool
+shares. Both rules now hang off one gate, `swfLpRulesActive(height)`, and
+`swfLpPctOfFee` reads it too.
+
+Checked standalone at both settings: with the shipped default of 0 the rules are
+inactive at every height; with a test start height they switch on exactly there.
+`Blockchain.cpp` still compiles to 14 errors, the same as pure upstream.
+
+| # | Task | Owner | Date | Status |
+|---|------|-------|------|--------|
+| 19 | One gate for the diversion and the cap; pairing cap checks it | Claude Sonnet 5.5 | 2026-11-06 | DONE |
+
 ### Workstream 3 — three-way Hearth fee split (2026-11-06)
 
 `HEARTH_CD_SHARE_PCT_V12` 70 → **65** (so the maker rebate is 35), and AuntPoL's
