@@ -55,7 +55,7 @@ The risk does not vanish. It moves from many individuals' leverage to one rule s
 |---|---|---|
 | Security | Half of each burn is recorded in the Eternal Flame. The block reward formula treats those coins as available and re-emits them to miners, under the 8,000,008.8 XFG cap. | Live |
 | Liquidity, premium | 1% of each burn is withheld from the minter, paired with the HEAT it buys, and added to the Hearth pool as the protocol's own position (AuntPoL). | Live |
-| Liquidity, retained half | The other half of the burn is retained and deployed as AuntPoL's XFG leg. | Specified, not built |
+| Liquidity, retained half | The other half of the burn is kept as real XFG. At each epoch boundary part of it becomes AuntPoL's XFG leg, and just enough is converted to HEAT for the HEAT leg to match. The XFG consumed in that conversion goes to the Eternal Flame in full. | Built, dormant |
 
 The re-emission is bounded by an explicit guard:
 
@@ -67,7 +67,11 @@ baseReward  = (m_moneySupply − Osavvirsak) >> emissionSpeedFactor;
 
 The Eternal Flame moves emission forward inside a total that was committed at genesis. It does not raise the total.
 
-**The retained half, stated exactly.** Today the second half of each burn is recorded in a counter, `m_swfBurnedXfgPendingHeat`, and nowhere else. No vault output holds it. The snapshot code reads the SWF partition's XFG balance and no code ever credits it. The source comment on `bankedBurn` says that only the remainder of a burn after the premium "is destroyed". Until the retain change ships, that half leaves circulation and is not re-emitted. That is the conservative state, and it is what the chain does now. This page describes what the half becomes once it is retained and deployed.
+**The retained half, stated exactly.** In fuego-suite today the second half of each burn is recorded in a counter, `m_swfBurnedXfgPendingHeat`, and nowhere else. No vault output holds it, and the audit RPC describes it as left circulation but still in total supply. The source comment on `bankedBurn` says that only the remainder of a burn after the premium "is destroyed". That half leaves circulation and is not re-emitted. That is the conservative state, and it is what the chain does until the change below is switched on.
+
+On the `claude/swf-auntpol-v2` branch, from a start height that is not yet set, the SWF half of a HEAT mint is kept instead as real XFG in `m_swfXfgReserve`. At each epoch boundary the protocol deploys it. Part stays as AuntPoL's XFG leg, and just enough is converted to HEAT, at the time-weighted price and never the live spot, for the HEAT leg to match. The deployment is sized so the deposit it feeds always fits under the 50% share cap.
+
+**Whenever retained XFG is converted to HEAT, the consumed XFG goes to the Eternal Flame in full.** It is not split 50/50 with the SWF, which would hand half straight back to the reserve being spent, and it is not retired from the supply accounting. Each atom of the reserve leaves it once and lands once, either as the XFG leg or in the Flame.
 
 Parked XFG reaches an individual in two ways. It arrives as a block reward for securing the chain, or by trade: when someone sells HEAT into the pool, the pool pays XFG out of its reserves at the pool price. Nobody withdraws it for free.
 
@@ -80,7 +84,7 @@ Using one asset in two places is not the hazard. The hazard is use that nobody c
 
 | Condition | Individual rehypothecation | Parked XFG |
 |---|---|---|
-| Bounded | Set by the borrower's appetite for leverage | Re-emission stops at the supply cap. The protocol's share of the pool stops at 50% of LP shares. |
+| Bounded | Set by the borrower's appetite for leverage | Re-emission stops at the supply cap. The protocol's share of the pool stops at 50% of LP shares, and the reserve is deployed only up to that headroom. |
 | Uncallable | A lender can demand collateral at the worst moment | Nobody can demand it back. No code path redeems HEAT for XFG. DIGM is designed to redeem against HEAT locked at mint. |
 | Visible | Positions sit in private accounts | Burn tallies, HEAT supply, pool reserves and protocol shares are consensus state. |
 
@@ -161,7 +165,7 @@ Two limits apply. Once DIGM is bridged out, the protocol cannot stop anyone from
 - **HEAT is not redeemable.** Anyone holding it is exposed to the Hearth price.
 - **Deflation is smaller than it looks.** Half of each burn returns to miners through the Flame. When the retained half ships, it stops being deflation for holders and becomes protocol working capital. Holders trade that deflation for depth and an outward connection.
 - **The cost index is a target.** It sets what one HEAT is meant to represent and re-bases quarterly. Its on-chain reader has one consumer, a status endpoint, and appears in no pricing or redemption path. If supply outgrows demand, HEAT trades below its target.
-- **Dilution is possible.** Protocol-minted HEAT to pair with the retained XFG is a wager that added depth attracts added demand. It is bounded by the 50% share cap and must be credited to supply when created. It is not built.
+- **Dilution is possible.** The protocol mints HEAT to pair with the retained XFG. Under the launch defaults that is at most about a quarter of the HEAT users mint, and less whenever the Hearth fee share has already fed the HEAT leg. It is sized to what the legs need, bounded by the 50% share cap, and credited to supply when created. It is a wager that added depth attracts added demand.
 - **Depth is thin.** The seeded pool is a fraction of one percent of supply. Fees compound depth and cannot create it, so the first depth has to be contributed.
 - **Precedent.** Protocol-owned liquidity funded by users selling assets to a treasury has been tried. Several bonding-based tokens marketed their treasuries as a price floor and lost most of their value when demand ended. Fuego promises no floor.
 
@@ -173,9 +177,10 @@ Each item is a specific check against the source. Any one failing breaks the rul
 2. **A token, output or balance that works as a claim on parked XFG.** The SWF counter must stay a statistic with no issuance authority.
 3. **A ceiling denominated in a price.** The share cap must stay in pool shares.
 4. **Interest funded from a burn.** Trace yield to its source. Burn-derived value, the mint premium or the CD creation fee reaching an interest payment fails the rule.
-5. **Protocol-minted HEAT missing from supply.** It must be credited when it is created. This applies once the mechanism is built.
+5. **Protocol-minted HEAT missing from supply.** It must be credited when it is created. `deploySwfReserve` credits `m_heatSupply` in the same step that mints it.
 6. **An epoch-boundary operation priced at spot.** Epoch boundaries are deterministic, so a trade in the closing block sets that rate. Two such sites existed and both were fixed.
 7. **DIGM issued without locked HEAT.** The bridge is where this breaks if it breaks.
+8. **A conversion that credits the Flame with less than the XFG it consumed, or retires that XFG from supply.** `testSwfDeployCreditsConvertedXfgToEternalFlameInFull` pins it, and breaking it on purpose fails the suite.
 
 ## 11 Status
 
@@ -183,9 +188,7 @@ Each item is a specific check against the source. Any one failing breaks the rul
 |---|---|
 | Mint validation, 1% premium, TWAP oracle, Eternal Flame, AMM, AuntPoL pairing from the premium | Live in fuego-suite |
 | Epoch CD-yield priced at TWAP, saturating reserve credit, accumulator carried forward | Branch `claude/usexfg-merge-redo` |
-| SWF conversion removed, 35/35/30 Hearth split, 50% LP-share cap, XFG-leg donation route | Branch `claude/swf-auntpol-v2`. The split and the cap stay dormant until a start height is set. The donation route is gated to v12. |
-| Retain the second half of each burn as AuntPoL's XFG leg | Specified, not built |
-| Protocol-minted HEAT leg, capped and credited to supply | Specified, not built |
+| SWF conversion removed, 35/35/30 Hearth split, 50% LP-share cap, XFG-leg donation route, retained SWF reserve with epoch deployment and full Eternal Flame routing | Branch `claude/swf-auntpol-v2`. Compiled with the project's flags and covered by `core_tests` (354 assertions). The split, the cap and the reserve stay dormant until a start height is set. The donation route is gated to v12. Cache format moves to version 17, so nodes replay once on upgrade. |
 | DIGM bridge and redemption | Not built |
 | Genesis seed recorded as owed to its provider | Accounting only. The one reader sets a flag and no payout exists. Zeroing it is a one-line change, pending. |
 
