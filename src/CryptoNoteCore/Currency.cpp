@@ -159,6 +159,14 @@ namespace CryptoNote
 		return m_testnet ? m_upgradeHeightV11 : parameters::CD_ACTIVATION_HEIGHT;
 	}
 
+	bool Currency::swfLpRulesActive(uint32_t height) const {
+		return CryptoNote::swfLpRulesActive(height, m_swfLpStartHeight);
+	}
+
+	uint64_t Currency::swfLpPctOfFee(uint32_t height) const {
+		return CryptoNote::swfLpPctOfFee(height, m_swfLpStartHeight, m_upgradeHeightV12);
+	}
+
 	uint32_t Currency::heatwaveTagCutoffHeight() const {
 		return m_testnet ? m_upgradeHeightV11 : parameters::HEATWAVE_TAG_CUTOFF_HEIGHT;
 	}
@@ -1731,6 +1739,7 @@ double Currency::getBurnPercentage() const {
     upgradeHeightV10(parameters::UPGRADE_HEIGHT_V10); // upgradekit
     upgradeHeightV11(parameters::UPGRADE_HEIGHT_V11); // HearthAMM+HEAT
     upgradeHeightV12(parameters::UPGRADE_HEIGHT_V12); // CDs + unified outputs
+    swfLpStartHeight(parameters::SWF_LP_DIVERSION_START_HEIGHT); // AuntPoL funding rules; 0 = off
 
     bootstrapBlocks(BOOTSTRAP_BLOCKS);
 

@@ -2665,12 +2665,14 @@ struct COMMAND_RPC_PUBLIC_AUDIT_BALANCES {
     std::string heat_counter;            // SWF HEAT collateral counter, not UTXOs
     std::string vault_swf_xfg;           // SWF partition UTXOs
     std::string vault_swf_heat;
+    std::string retained_xfg;            // real XFG the SWF kept since the funding rules went live
 
     void serialize(ISerializer &s) {
       KV_MEMBER(collateral_pending_xfg)
       KV_MEMBER(heat_counter)
       KV_MEMBER(vault_swf_xfg)
       KV_MEMBER(vault_swf_heat)
+      KV_MEMBER(retained_xfg)
     }
   };
 

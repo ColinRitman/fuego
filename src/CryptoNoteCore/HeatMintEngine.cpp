@@ -94,6 +94,10 @@ bool HeatMintEngine::isHeatMint(const Transaction& tx) const {
   return false;
 }
 
+uint64_t HeatMintEngine::heatForXfg(uint64_t xfg, uint64_t price) {
+  return expectedHeatFor(xfg, price);
+}
+
 uint64_t HeatMintEngine::premiumHeatFor(uint64_t xfgBurned, uint64_t price,
                                         uint8_t blockMajorVersion) const {
   if (price == 0) return 0;

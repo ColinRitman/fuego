@@ -42,6 +42,11 @@ public:
                         uint8_t blockMajorVersion,
                         uint64_t& premiumHeat) const;
 
+  // HEAT that `xfg` buys at `price` (HEAT atomics per XFG atomic x COIN),
+  // rounded down. The one definition of the mint conversion, shared by user
+  // mints, the premium and the protocol's own SWF conversion.
+  static uint64_t heatForXfg(uint64_t xfg, uint64_t price);
+
   // HEAT the mint premium buys at `price`. Exposed so the connect path can
   // credit the reserve with the value settlement already priced.
   uint64_t premiumHeatFor(uint64_t xfgBurned, uint64_t price,

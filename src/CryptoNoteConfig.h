@@ -482,6 +482,21 @@ const uint64_t HEARTH_CD_SHARE_PCT_V12 = 65; // v12: 65% (AuntPoL+CD) / 35% make
 const uint64_t SWF_LP_PCT_OF_FEE_PRE_CD = 30; // == hearthCdSharePct(v11): the whole non-maker side
 const uint64_t SWF_LP_PCT_OF_FEE_V12 = 35;    // of 65 non-maker → CD keeps 30
 
+// Retained SWF reserve. From SWF_LP_DIVERSION_START_HEIGHT the SWF half of a
+// HEAT mint's burn is no longer reduced to a tally of destroyed XFG. It is kept
+// as real, protocol-held XFG (m_swfXfgReserve) and put to work at each epoch
+// boundary as AuntPoL's XFG leg, with just enough of it consumed to mint the
+// matching HEAT leg.
+//
+// Whenever retained XFG is converted to HEAT, the consumed XFG is credited IN
+// FULL to the Eternal Flame. It is not split 50/50 with the SWF (which would
+// hand half straight back to the reserve being spent), and it is not retired
+// from the supply accounting.
+//
+// Percent of the reserve considered for deployment each epoch. The remainder
+// stays parked.
+const uint64_t SWF_DEPLOY_PCT_PER_EPOCH = 100;
+
 // Height from which the diversion applies. 0 disables it entirely.
 //
 // MUST be a height that is still in the future when the build ships. v11
@@ -719,18 +734,18 @@ inline uint64_t hearthMakerRebatePct(uint8_t blockMajorVersion) {
 // True once the AuntPoL funding rules apply at `height`: the fee diversion and
 // the protocol-share cap on pairing both hang off this one gate, so nothing in
 // this feature alters consensus before the start height is chosen and reached.
-inline bool swfLpRulesActive(uint32_t height) {
-  return parameters::SWF_LP_DIVERSION_START_HEIGHT != 0 &&
-         height >= parameters::SWF_LP_DIVERSION_START_HEIGHT;
+// startHeight 0 means the feature is off. Callers pass Currency's value, which
+// defaults to parameters::SWF_LP_DIVERSION_START_HEIGHT.
+inline bool swfLpRulesActive(uint32_t height, uint32_t startHeight) {
+  return startHeight != 0 && height >= startHeight;
 }
 
-inline uint64_t swfLpPctOfFee(uint32_t height) {
-  if (!swfLpRulesActive(height)) {
+inline uint64_t swfLpPctOfFee(uint32_t height, uint32_t startHeight, uint32_t v12Height) {
+  if (!swfLpRulesActive(height, startHeight)) {
     return 0;
   }
-  return height >= parameters::UPGRADE_HEIGHT_V12
-             ? parameters::SWF_LP_PCT_OF_FEE_V12
-             : parameters::SWF_LP_PCT_OF_FEE_PRE_CD;
+  return height >= v12Height ? parameters::SWF_LP_PCT_OF_FEE_V12
+                             : parameters::SWF_LP_PCT_OF_FEE_PRE_CD;
 }
 
 // Mint premium for a block major version. Consensus paths pass the version of
@@ -749,6 +764,24 @@ inline uint64_t heatMintPremiumXfg(uint64_t xfgBurned,
   const uint64_t bps = heatMintPremiumBps(blockMajorVersion);
   if (bps == 0) return 0;
   return (xfgBurned / 10000) * bps + ((xfgBurned % 10000) * bps) / 10000;
+}
+
+// How a burn already net of the mint premium is routed: MINT_BURN_EF_PCT to the
+// Eternal Flame, MINT_BURN_TREASURY_PCT to the SWF. One definition, used by the
+// connect path, the cache rescan and the reorg undo, so the three cannot drift
+// apart. Exact floor of x * pct / 100 without a 128-bit multiply.
+struct MintBurnSplit {
+  uint64_t ef = 0;
+  uint64_t swf = 0;
+};
+inline MintBurnSplit mintBurnSplit(uint64_t banked) {
+  auto pctOf = [](uint64_t x, uint64_t pct) {
+    return (x / 100) * pct + ((x % 100) * pct) / 100;
+  };
+  MintBurnSplit s;
+  s.ef = pctOf(banked, parameters::MINT_BURN_EF_PCT);
+  s.swf = pctOf(banked, parameters::MINT_BURN_TREASURY_PCT);
+  return s;
 }
 
 // Atomic-swap fee split for a block major version. Same rule as the Hearth

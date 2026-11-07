@@ -76,7 +76,7 @@ bool operator<(const Crypto::KeyImage& keyImage1, const Crypto::KeyImage& keyIma
 }
 }
 
-#define CURRENT_BLOCKCACHE_STORAGE_ARCHIVE_VER 16  // v16: retired legacy AMM LP settlement removed from pushTransaction/popTransaction (forces replay so no cache can carry reserves computed by the deleted branch)
+#define CURRENT_BLOCKCACHE_STORAGE_ARCHIVE_VER 17  // v17: adds m_swfXfgReserve (and its epoch-snapshot field), so a cache written before it cannot be read back in the wrong layout. v16: retired legacy AMM LP settlement removed from pushTransaction/popTransaction (forces replay so no cache can carry reserves computed by the deleted branch)
 #define CURRENT_BLOCKCHAININDICES_STORAGE_ARCHIVE_VER 1
 
 namespace CryptoNote {
@@ -202,6 +202,35 @@ uint64_t bankedBurn(const CryptoNote::TransactionExtraField& f, uint8_t blockMaj
     return (auth.xfgBurned > premiumXfg) ? (auth.xfgBurned - premiumXfg) : 0;
   }
   return 0;
+}
+
+// Where one burn's halves go. The EF half is consumed and credited to the
+// Eternal Flame. The SWF half has two treatments:
+//   - A HEAT mint's SWF half is KEPT once the AuntPoL funding rules are active at
+//     the block's height: real XFG the protocol holds in m_swfXfgReserve, not yet
+//     consumed (it is consumed, if at all, when it is deployed at an epoch
+//     boundary, and then goes to the Eternal Flame in full).
+//   - Every other burn, and every burn before activation, keeps the historical
+//     treatment: the half is destroyed and only tallied in m_swfBurnedXfgPendingHeat.
+// The connect path, the cache rescan and the reorg undo all call this, so the
+// three cannot disagree about which treatment a burn got.
+struct BurnRoute {
+  uint64_t banked = 0;
+  uint64_t ef = 0;
+  uint64_t swf = 0;
+  bool swfRetained = false;
+};
+
+BurnRoute routeBurn(const CryptoNote::TransactionExtraField& f, uint8_t blockMajorVersion,
+                    bool swfRulesActive) {
+  BurnRoute r;
+  r.banked = bankedBurn(f, blockMajorVersion);
+  if (r.banked == 0) return r;
+  const CryptoNote::MintBurnSplit split = CryptoNote::mintBurnSplit(r.banked);
+  r.ef = split.ef;
+  r.swf = split.swf;
+  r.swfRetained = f.type() == typeid(CryptoNote::TransactionExtraHeatMintAuth) && swfRulesActive;
+  return r;
 }
 
 bool isSettlementTag(const CryptoNote::TransactionExtraField& f) {
@@ -395,6 +424,7 @@ public:
       s(m_bs.m_treasuryLpPendingXfg, "treasury_counter_xfg");
        s(m_bs.m_swfBurnedXfgPendingHeat, "swf_balance");
        s(m_bs.m_swfHeatBalance, "swf_heat_balance");
+      s(m_bs.m_swfXfgReserve, "swf_xfg_reserve");
       s(m_bs.m_bonusVaultBalance, "rollover_vault_balance");
       s(m_bs.m_bonusVaultPendingXfg, "bonus_vault_pending_xfg");
       s(m_bs.m_totalSwapFeesCollected, "total_swap_fees_collected");
@@ -1021,14 +1051,14 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
         if (parseTransactionExtra(tx.tx.extra, extraFields)) {
           for (const auto& field : extraFields) {
             // Same burns, same routing as pushToBankingIndex.
-            const uint64_t burned = bankedBurn(field, block.bl.majorVersion);
+            const BurnRoute route = routeBurn(field, block.bl.majorVersion, m_currency.swfLpRulesActive(b));
+            const uint64_t burned = route.banked;
             if (burned > 0) {
               totalRescannedBurns += burned;
-              // Overall tally: 100% of the burn. EF bucket: its 50% routing share.
-              m_bankingIndex.addTotalBurn(burned, b);
-              uint64_t efShare = static_cast<uint64_t>(
-                  ((uint128_t)burned * CryptoNote::parameters::MINT_BURN_EF_PCT) / 100);
-              m_bankingIndex.addForeverDeposit(efShare, b);
+              // Overall tally: what was consumed. A retained SWF half was not.
+              // EF bucket: its 50% routing share.
+              m_bankingIndex.addTotalBurn(route.swfRetained ? burned - route.swf : burned, b);
+              m_bankingIndex.addForeverDeposit(route.ef, b);
           }
         }
       }
@@ -1125,6 +1155,7 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
     m_bonusVaultPendingXfg = 0;
     m_swfBurnedXfgPendingHeat = 0;
     m_swfHeatBalance = 0;
+    m_swfXfgReserve = 0;
     m_treasuryHeatReserve = 0;
     m_treasuryXfgReserve = 0;
     m_treasuryLpReserve = 0;
@@ -1241,6 +1272,7 @@ if (!m_upgradeDetectorV2.init() || !m_upgradeDetectorV3.init() || !m_upgradeDete
         preEpoch.treasurySwapFeeXfg = m_treasurySwapFeeXfg;
         preEpoch.treasuryLpPendingXfg = m_treasuryLpPendingXfg;
         preEpoch.swfHeatBalance = m_swfHeatBalance;
+        preEpoch.swfXfgReserve = m_swfXfgReserve;
         preEpoch.protocolLpShares = m_protocolLpShares;
         preEpoch.treasuryLpYield = m_treasuryLpYield;
         preEpoch.bootstrapRepaymentVault = m_bootstrapRepaymentVault;
@@ -3687,6 +3719,7 @@ bool CryptoNote::Blockchain::pushBlock(const Block &blockData, const std::vector
       preEpoch.treasurySwapFeeXfg = m_treasurySwapFeeXfg;
       preEpoch.treasuryLpPendingXfg = m_treasuryLpPendingXfg;
       preEpoch.swfHeatBalance = m_swfHeatBalance;
+        preEpoch.swfXfgReserve = m_swfXfgReserve;
       preEpoch.protocolLpShares = m_protocolLpShares;
       preEpoch.treasuryLpYield = m_treasuryLpYield;
       preEpoch.bootstrapRepaymentVault = m_bootstrapRepaymentVault;
@@ -4874,18 +4907,26 @@ void CryptoNote::Blockchain::rebuildOrderbookFromUtxoSet(uint32_t height) {
         for (const auto& field : extraFields) {
           // XFG burns: the historical 0x08 tag and, from v11, HEAT mints —
           // which fed nothing before, though a mint is the main XFG burn.
-          const uint64_t burned = bankedBurn(field, block.bl.majorVersion);
+          const BurnRoute route = routeBurn(field, block.bl.majorVersion, m_currency.swfLpRulesActive(block.height));
+          const uint64_t burned = route.banked;
           if (burned > 0) {
-            permanentBurns += static_cast<uint64_t>(
-                ((uint128_t)burned * CryptoNote::parameters::MINT_BURN_EF_PCT) / 100);
-            // Overall burn tally: 100% of the burn.
-            m_bankingIndex.addTotalBurn(burned, block.height);
-            uint64_t treasuryShare = static_cast<uint64_t>(
-                ((uint128_t)burned * CryptoNote::parameters::MINT_BURN_TREASURY_PCT) / 100);
-            if (m_swfBurnedXfgPendingHeat <= UINT64_MAX - treasuryShare) {
-              m_swfBurnedXfgPendingHeat += treasuryShare;
+            permanentBurns += route.ef;
+            if (route.swfRetained) {
+              // The SWF half is kept, so it is not part of the consumed tally.
+              m_bankingIndex.addTotalBurn(burned - route.swf, block.height);
+              if (m_swfXfgReserve <= UINT64_MAX - route.swf) {
+                m_swfXfgReserve += route.swf;
+              } else {
+                logger(ERROR, BRIGHT_RED) << "SWF XFG reserve overflow in HEAT burn routing";
+              }
             } else {
-              logger(ERROR, BRIGHT_RED) << "SWF balance overflow in HEAT burn routing";
+              // Overall burn tally: 100% of the burn.
+              m_bankingIndex.addTotalBurn(burned, block.height);
+              if (m_swfBurnedXfgPendingHeat <= UINT64_MAX - route.swf) {
+                m_swfBurnedXfgPendingHeat += route.swf;
+              } else {
+                logger(ERROR, BRIGHT_RED) << "SWF balance overflow in HEAT burn routing";
+              }
             }
             logger(DEBUGGING) << "Detected XFG burn in block " << block.height << ": " << burned << " XFG";
 
@@ -5236,6 +5277,23 @@ void CryptoNote::Blockchain::rebuildOrderbookFromUtxoSet(uint32_t height) {
     }
   }
 
+void CryptoNote::Blockchain::undoSwfBurnRouting(const BlockEntry &block, uint32_t height) {
+  const bool rulesActive = m_currency.swfLpRulesActive(height);
+  for (const auto& blockTx : block.transactions) {
+    std::vector<TransactionExtraField> fields;
+    if (!parseTransactionExtra(blockTx.tx.extra, fields)) continue;
+    for (const auto& f : fields) {
+      const BurnRoute route = routeBurn(f, block.bl.majorVersion, rulesActive);
+      if (route.swfRetained) {
+        m_swfXfgReserve = m_swfXfgReserve >= route.swf ? m_swfXfgReserve - route.swf : 0;
+      } else {
+        m_swfBurnedXfgPendingHeat = m_swfBurnedXfgPendingHeat >= route.swf
+            ? m_swfBurnedXfgPendingHeat - route.swf : 0;
+      }
+    }
+  }
+}
+
 bool CryptoNote::Blockchain::pushBlock(BlockEntry &block) {
   Crypto::Hash blockHash = get_block_hash(block.bl);
 
@@ -5515,6 +5573,15 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
         }
       }
 
+      // Retained SWF reserve into AuntPoL's legs, when the funding rules are
+      // active (SWF_LP_DIVERSION_START_HEIGHT). Runs before the pairing below so
+      // the legs it tops up pair in this same epoch.
+      if (block.majorVersion >= BLOCK_MAJOR_VERSION_11 && m_currency.swfLpRulesActive(height)) {
+        if (!deploySwfReserve(height)) {
+          return false;
+        }
+      }
+
       // Treasury LP Manager: the protocol's own Hearth LP position, funded from
       // BOTH assets WITHOUT cross-conversion and WITHOUT imbalanced deposits:
       //   XFG: the treasury counter (treasury fee share + XFG donations).
@@ -5528,9 +5595,10 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
       if (block.majorVersion >= BLOCK_MAJOR_VERSION_11) {
         // Both legs are funded by the mint premium: the withheld premium XFG
         // is credited to m_treasuryLpPendingXfg at connect, and the HEAT it
-        // buys is credited to m_treasuryHeatReserve. No SWF transfer is
-        // involved — the SWF is the protocol collateral reserve and is never
-        // spent to pair AuntPoL.
+        // buys is credited to m_treasuryHeatReserve. When the funding rules are
+        // active the legs are also topped up from the retained SWF reserve
+        // (deploySwfReserve, just above). The old tally of destroyed XFG
+        // (m_swfBurnedXfgPendingHeat) is never spent: nothing stands behind it.
         const uint64_t availXfg = m_treasuryLpPendingXfg;
         const uint64_t availHeat = m_treasuryHeatReserve;
         uint64_t depositXfg = 0;
@@ -5559,7 +5627,7 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
             // like any other unpaired excess, and nothing is dropped.
             // Applies only from the feature's start height: before it, pairing
             // must behave exactly as it did when those blocks were mined.
-            if (shares > 0 && swfLpRulesActive(height) &&
+            if (shares > 0 && m_currency.swfLpRulesActive(height) &&
                 (uint128_t)(m_protocolLpShares + shares) * 100 >
                     (uint128_t)(m_ammPool.totalLpShares + shares) *
                         parameters::PROTOCOL_LP_SHARE_CAP_PCT) {
@@ -5759,7 +5827,7 @@ bool CryptoNote::Blockchain::processBlockEpochWork(const Block& block, uint32_t 
         // THIS block — the accumulator was filled at settlement using this
         // block's version — and pctOfFee can never exceed cdLegPct, since the
         // non-maker side is what AuntPoL's share is carved out of.
-        const uint64_t pctOfFee = swfLpPctOfFee(height);
+        const uint64_t pctOfFee = m_currency.swfLpPctOfFee(height);
         const uint64_t cdLegPct = hearthCdSharePct(block.majorVersion);
         if (pctOfFee > 0 && cdLegPct > 0 && pctOfFee <= cdLegPct) {
           const uint64_t hearthToLpLeg = static_cast<uint64_t>(
@@ -6171,17 +6239,7 @@ void CryptoNote::Blockchain::popBlock(const Crypto::Hash& blockHash) {
   // The banking index drops the block's tally and Eternal Flame entries
   // itself; nothing undid the SWF share, so every reorg across a burn left it
   // credited. (Epoch-boundary blocks also restore it from their snapshot.)
-  for (const auto& blockTx : m_blocks.back().transactions) {
-    std::vector<TransactionExtraField> fields;
-    if (!parseTransactionExtra(blockTx.tx.extra, fields)) continue;
-    for (const auto& f : fields) {
-      const uint64_t burned = bankedBurn(f, m_blocks.back().bl.majorVersion);
-      const uint64_t swfShare = static_cast<uint64_t>(
-          ((uint128_t)burned * parameters::MINT_BURN_TREASURY_PCT) / 100);
-      m_swfBurnedXfgPendingHeat = m_swfBurnedXfgPendingHeat >= swfShare
-          ? m_swfBurnedXfgPendingHeat - swfShare : 0;
-    }
-  }
+  undoSwfBurnRouting(m_blocks.back(), poppedHeight);
 
   m_bankingIndex.popBlock();
 
@@ -6239,6 +6297,7 @@ void CryptoNote::Blockchain::popBlock(const Crypto::Hash& blockHash) {
     m_treasurySwapFeeXfg = snap.treasurySwapFeeXfg;
     m_treasuryLpPendingXfg = snap.treasuryLpPendingXfg;
     m_swfHeatBalance = snap.swfHeatBalance;
+    m_swfXfgReserve = snap.swfXfgReserve;
     m_protocolLpShares = snap.protocolLpShares;
     m_treasuryLpYield = snap.treasuryLpYield;
     m_bootstrapRepaymentVault = snap.bootstrapRepaymentVault;
@@ -7905,6 +7964,108 @@ bool CryptoNote::Blockchain::protocolLpAtCap() const {
          (uint128_t)m_ammPool.totalLpShares * parameters::PROTOCOL_LP_SHARE_CAP_PCT;
 }
 
+CryptoNote::Blockchain::SwfDeployPlan CryptoNote::Blockchain::planSwfDeployment(
+    uint64_t reserveXfg, uint64_t pendingLegXfg, uint64_t pendingLegHeat, uint64_t twap,
+    uint64_t poolReserveXfg, uint64_t totalLpShares, uint64_t protocolLpShares,
+    uint64_t deployPct, uint64_t capPct) {
+  SwfDeployPlan plan;
+  if (reserveXfg == 0 || twap == 0 || poolReserveXfg == 0 || totalLpShares == 0 || deployPct == 0) {
+    return plan;
+  }
+
+  // Headroom under the LP-share ceiling, in the XFG the deposit may carry. The
+  // deposit mints shares s = dx * T / reserveXfg, and it is allowed while
+  // (P + s) * 100 <= (T + s) * cap, i.e. s <= (cap * T - 100 * P) / (100 - cap).
+  // Sizing the deployment to this headroom means the deposit it feeds always
+  // fits, so no HEAT is minted for a pairing the ceiling would refuse.
+  uint128_t sMax;
+  if (capPct >= 100) {
+    sMax = totalLpShares;
+  } else {
+    const uint128_t room = (uint128_t)capPct * totalLpShares;
+    const uint128_t held = (uint128_t)100 * protocolLpShares;
+    if (room <= held) return plan;
+    sMax = (room - held) / (100 - capPct);
+    if (sMax > totalLpShares) sMax = totalLpShares;
+  }
+  const uint128_t dxMax = (uint128_t)poolReserveXfg * sMax / totalLpShares;
+  if (dxMax <= pendingLegXfg) return plan;
+
+  uint128_t deploy = (uint128_t)reserveXfg * deployPct / 100;
+  const uint128_t room = dxMax - pendingLegXfg;
+  if (deploy > room) deploy = room;
+  if (deploy == 0) return plan;
+
+  // Match the legs. After deploying `deploy` XFG with `convert` of it turned into
+  // HEAT, the XFG leg holds pendingLegXfg + deploy - convert and the HEAT leg holds
+  // pendingLegHeat + heat(convert). Equal value at the TWAP means
+  //   convert = (pendingLegXfg + deploy - xfgValueOf(pendingLegHeat)) / 2,
+  // clamped to [0, deploy]. When the HEAT leg is already long (for example fed by
+  // the Hearth fee share) nothing is converted and nothing is minted.
+  const uint128_t heatLegValue = (uint128_t)pendingLegHeat * parameters::COIN / twap;
+  const uint128_t xfgSide = (uint128_t)pendingLegXfg + deploy;
+  uint128_t convert = xfgSide > heatLegValue ? (xfgSide - heatLegValue) / 2 : 0;
+  if (convert > deploy) convert = deploy;
+
+  uint64_t heat = HeatMintEngine::heatForXfg(static_cast<uint64_t>(convert), twap);
+  if (heat == 0) {
+    // Too small to buy a single HEAT atomic: consuming XFG for nothing is waste.
+    convert = 0;
+  }
+
+  plan.deployXfg = static_cast<uint64_t>(deploy);
+  plan.convertXfg = static_cast<uint64_t>(convert);
+  plan.legXfg = plan.deployXfg - plan.convertXfg;
+  plan.heat = convert == 0 ? 0 : heat;
+  return plan;
+}
+
+bool CryptoNote::Blockchain::deploySwfReserve(uint32_t height) {
+  if (m_swfXfgReserve == 0 || m_ammPool.isEmpty()) return true;
+  // The TWAP of the blocks below this one, never the live spot: epoch boundaries
+  // are deterministic and epoch work runs after the block's transactions settle,
+  // so a spot read here could be set by a trade in the closing block.
+  const uint64_t twap = twapBefore(height);
+  if (twap == 0 || protocolLpAtCap()) return true;
+
+  const SwfDeployPlan plan = planSwfDeployment(
+      m_swfXfgReserve, m_treasuryLpPendingXfg, m_treasuryHeatReserve, twap,
+      m_ammPool.reserveXfg, m_ammPool.totalLpShares, m_protocolLpShares,
+      parameters::SWF_DEPLOY_PCT_PER_EPOCH, parameters::PROTOCOL_LP_SHARE_CAP_PCT);
+  if (plan.deployXfg == 0) return true;
+
+  if (m_treasuryLpPendingXfg > UINT64_MAX - plan.legXfg ||
+      m_treasuryHeatReserve > UINT64_MAX - plan.heat ||
+      m_heatSupply > UINT64_MAX - plan.heat) {
+    logger(ERROR, BRIGHT_RED) << "SWF reserve deployment overflow";
+    return false;
+  }
+
+  m_swfXfgReserve -= plan.deployXfg;
+  m_treasuryLpPendingXfg += plan.legXfg;
+
+  if (plan.convertXfg > 0) {
+    // The consumed XFG goes to the Eternal Flame in full. It is not split 50/50
+    // with the SWF (that would hand half straight back to the reserve being
+    // spent) and it is not retired from the supply accounting: the Flame is where
+    // consumed XFG is recycled to pay for security.
+    m_bankingIndex.addForeverDeposit(plan.convertXfg, height);
+    m_bankingIndex.addTotalBurn(plan.convertXfg, height);
+    const_cast<Currency&>(m_currency).syncEternalFlame(m_bankingIndex.getBurnedXfgAmount());
+
+    // The HEAT this buys is protocol-minted inventory for the HEAT leg. It is
+    // credited to supply here, at creation, so it is never undisclosed issuance.
+    m_treasuryHeatReserve += plan.heat;
+    m_heatSupply += plan.heat;
+  }
+
+  logger(INFO) << "SWF reserve deployed: " << m_currency.formatAmount(plan.legXfg)
+               << " XFG kept as the XFG leg | " << m_currency.formatAmount(plan.convertXfg)
+               << " XFG -> Eternal Flame in full, minting "
+               << m_currency.formatAmount(plan.heat) << " HEAT for the HEAT leg";
+  return true;
+}
+
 CryptoNote::Blockchain::TreasuryLpValue CryptoNote::Blockchain::getTreasuryLpValue() const {
   TreasuryLpValue v;
   if (m_ammPool.totalLpShares == 0 || m_protocolLpShares == 0) return v;
@@ -7952,6 +8113,7 @@ CryptoNote::Blockchain::PublicAuditSnapshot CryptoNote::Blockchain::getPublicAud
   snap.protocolLpValueHeat = lp.heat;
 
   snap.swfHeatCounter = m_swfHeatBalance;
+  snap.swfXfgReserve = m_swfXfgReserve;
   snap.vaultSwfXfg = m_vault.partitionBalance(VaultPartition::SWF, AssetType::XFG);
   snap.vaultSwfHeat = m_vault.partitionBalance(VaultPartition::SWF, AssetType::HEAT);
 

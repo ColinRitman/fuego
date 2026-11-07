@@ -2922,6 +2922,7 @@ bool RpcServer::on_get_public_audit(const COMMAND_RPC_GET_PUBLIC_AUDIT::request&
   res.swf_accounts.heat_counter = atomic(snap.swfHeatCounter);
   res.swf_accounts.vault_swf_xfg = atomic(snap.vaultSwfXfg);
   res.swf_accounts.vault_swf_heat = atomic(snap.vaultSwfHeat);
+  res.swf_accounts.retained_xfg = atomic(snap.swfXfgReserve);
 
   res.status = CORE_RPC_STATUS_OK;
   return true;

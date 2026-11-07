@@ -740,8 +740,8 @@ struct TestChain {
   std::filesystem::path dir;
   bool ok = false;
 
-  explicit TestChain(const std::string& tag)
-      : currency(CurrencyBuilder(log).currency()),
+  explicit TestChain(const std::string& tag, uint32_t swfLpStartHeight = 0)
+      : currency(CurrencyBuilder(log).swfLpStartHeight(swfLpStartHeight).currency()),
         pool(currency, chain, timeProvider, log),
         chain(currency, pool, log, false, false),
         dir(std::filesystem::temp_directory_path() /
@@ -1123,6 +1123,43 @@ public:
   }
   static uint32_t m_currency_upgrade_height_v11(const Blockchain& chain) {
     return chain.m_currency.upgradeHeight(BLOCK_MAJOR_VERSION_11);
+  }
+
+  // ---- retained SWF reserve ----
+  static uint64_t swfXfgReserve(const Blockchain& c) { return c.m_swfXfgReserve; }
+  static void setSwfXfgReserve(Blockchain& c, uint64_t v) { c.m_swfXfgReserve = v; }
+  static uint64_t swfTally(const Blockchain& c) { return c.m_swfBurnedXfgPendingHeat; }
+  static uint64_t pendingLegXfg(const Blockchain& c) { return c.m_treasuryLpPendingXfg; }
+  static uint64_t heatLeg(const Blockchain& c) { return c.m_treasuryHeatReserve; }
+  static uint64_t heatSupply(const Blockchain& c) { return c.m_heatSupply; }
+  static void setProtocolShares(Blockchain& c, uint64_t v) { c.m_protocolLpShares = v; }
+  static void pushSpot(Blockchain& c, uint32_t h, uint64_t price) { c.m_blockSpotHistory.push_back({h, price}); }
+  static bool deploy(Blockchain& c, uint32_t h) { return c.deploySwfReserve(h); }
+  static uint64_t efTotal(const Blockchain& c) { return c.m_bankingIndex.getBurnedXfgAmount(); }
+  static uint64_t totalBurned(const Blockchain& c) { return c.m_bankingIndex.getTotalBurnedXfg(); }
+  static uint64_t permanentlyBurned(const Blockchain& c) { return c.m_bankingIndex.getPermanentlyBurnedXfg(); }
+
+  // One block carrying a single transaction whose extra is `extra`.
+  static Blockchain::BlockEntry blockWith(uint32_t height, uint8_t version,
+                                          const std::vector<uint8_t>& extra) {
+    Blockchain::BlockEntry b{};
+    b.height = height;
+    b.bl.majorVersion = version;
+    Blockchain::TransactionEntry t{};
+    t.tx.extra = extra;
+    b.transactions.push_back(t);
+    return b;
+  }
+  static void connectBurns(Blockchain& c, const Blockchain::BlockEntry& b) { c.pushToBankingIndex(b, 0); }
+  static void undoBurns(Blockchain& c, const Blockchain::BlockEntry& b) { c.undoSwfBurnRouting(b, b.height); }
+
+  static bool snapshotKeepsSwfReserve(uint64_t v) {
+    Blockchain::EpochStateSnapshot a{};
+    a.swfXfgReserve = v;
+    CryptoNote::BinaryArray blob = CryptoNote::storeToBinary<Blockchain::EpochStateSnapshot>(a);
+    Blockchain::EpochStateSnapshot b{};
+    CryptoNote::loadFromBinary<Blockchain::EpochStateSnapshot>(b, blob);
+    return b.swfXfgReserve == v;
   }
 };
 } // namespace CryptoNote
@@ -1507,6 +1544,342 @@ void testVaultSelectUtxosDeterministicTies() {
   TEST(sel[0].globalOutputIndex == 100);
 }
 
+// ---- Retained SWF reserve -------------------------------------------------
+//
+// From the funding rules' start height the SWF half of a HEAT mint's burn is
+// KEPT as real XFG and deployed at epoch boundaries. Whenever retained XFG is
+// converted to HEAT, the consumed XFG goes to the Eternal Flame in full.
+
+namespace {
+
+constexpr uint64_t kCoin = parameters::COIN;
+// 10 XFG per HEAT, the launch ratio: 0.1 HEAT atomics per XFG atomic, scaled by COIN.
+constexpr uint64_t kLaunchTwap = kCoin / 10;
+
+uint64_t xfgAtoms(uint64_t whole) { return whole * kCoin; }
+
+struct SeedPool { uint64_t rx, rh, shares; };
+
+SeedPool seedPool() {
+  SeedPool p;
+  p.rx = parameters::HEARTH_POOL_SEED_XFG * kCoin;
+  p.rh = parameters::HEARTH_POOL_SEED_HEAT * kCoin;
+  p.shares = ammInitialLpShares(p.rx, p.rh);
+  return p;
+}
+
+// The shares the epoch pairing would mint from these legs at the pool ratio.
+uint64_t pairedShares(uint64_t legXfg, uint64_t legHeat, const SeedPool& p) {
+  if (legXfg == 0 || legHeat == 0) return 0;
+  const uint64_t hFromX = static_cast<uint64_t>(((uint128_t)legXfg * p.rh) / p.rx);
+  uint64_t dx = 0, dh = 0;
+  if (hFromX <= legHeat) { dx = legXfg; dh = hFromX; }
+  else { dh = legHeat; dx = static_cast<uint64_t>(((uint128_t)legHeat * p.rx) / p.rh); }
+  if (dx == 0 || dh == 0) return 0;
+  return ammMintLpShares(dx, dh, p.shares, p.rx, p.rh);
+}
+
+// Fixed seed so a failure reproduces.
+struct Lcg {
+  uint64_t s;
+  explicit Lcg(uint64_t seed) : s(seed) {}
+  uint64_t next() { s = s * 6364136223846793005ULL + 1442695040888963407ULL; return s >> 11; }
+  uint64_t upTo(uint64_t max) { return max == 0 ? 0 : next() % (max + 1); }
+};
+
+}  // namespace
+
+// The burn split is one definition shared by connect, rescan and reorg undo. It
+// must equal the 128-bit formula it replaced, for every amount.
+void testMintBurnSplitMatchesTheOldFormula() {
+  const uint64_t samples[] = {0, 1, 2, 3, 99, 100, 101, 199, 200, 9999, 10000, 1234567891ULL,
+                              80000088000008ULL, UINT64_MAX / 3, UINT64_MAX - 1, UINT64_MAX};
+  bool exact = true, conserved = true;
+  for (uint64_t b : samples) {
+    const MintBurnSplit sp = mintBurnSplit(b);
+    const uint64_t ef = static_cast<uint64_t>(((uint128_t)b * parameters::MINT_BURN_EF_PCT) / 100);
+    const uint64_t sw = static_cast<uint64_t>(((uint128_t)b * parameters::MINT_BURN_TREASURY_PCT) / 100);
+    if (sp.ef != ef || sp.swf != sw) exact = false;
+    if (sp.ef + sp.swf > b || b - sp.ef - sp.swf > 1) conserved = false;
+  }
+  TEST(exact);
+  TEST(conserved);
+}
+
+// The plan converts just enough for the two legs to match in value, and no more.
+void testSwfPlanMatchesTheLegs() {
+  const SeedPool p = seedPool();
+  const uint64_t cap = parameters::PROTOCOL_LP_SHARE_CAP_PCT;
+  auto plan = [&](uint64_t R, uint64_t X, uint64_t H, uint64_t twap, uint64_t P) {
+    return Blockchain::planSwfDeployment(R, X, H, twap, p.rx, p.shares, P, 100, cap);
+  };
+
+  // Empty legs: half converted, half kept, and the HEAT leg matches the XFG leg.
+  const auto a = plan(xfgAtoms(1000), 0, 0, kLaunchTwap, 0);
+  TEST(a.deployXfg == xfgAtoms(1000));
+  TEST(a.convertXfg == xfgAtoms(500));
+  TEST(a.legXfg == xfgAtoms(500));
+  TEST(a.heat == 50 * kCoin);
+  TEST(a.heat == HeatMintEngine::heatForXfg(a.convertXfg, kLaunchTwap));
+  TEST(a.legXfg + a.convertXfg == a.deployXfg);
+
+  // HEAT leg already long (say, fed by the Hearth fee share): nothing is converted
+  // and nothing is minted.
+  const auto b = plan(xfgAtoms(500), 0, 100 * kCoin, kLaunchTwap, 0);
+  TEST(b.convertXfg == 0);
+  TEST(b.heat == 0);
+  TEST(b.legXfg == xfgAtoms(500));
+
+  // XFG leg already long: everything deployed is converted, and no more.
+  const auto c = plan(xfgAtoms(100), xfgAtoms(2000), 0, kLaunchTwap, 0);
+  TEST(c.convertXfg == xfgAtoms(100));
+  TEST(c.legXfg == 0);
+  TEST(c.heat == 10 * kCoin);
+
+  // Nothing to do without a TWAP, without a reserve, or without room.
+  TEST(plan(xfgAtoms(1000), 0, 0, 0, 0).deployXfg == 0);
+  TEST(plan(0, 0, 0, kLaunchTwap, 0).deployXfg == 0);
+  // At exactly half the shares (rounded up: the seed's share count is odd) there is no room.
+  TEST(plan(xfgAtoms(1000), 0, 0, kLaunchTwap, (p.shares + 1) / 2).deployXfg == 0);
+
+  // Partial room: the deployment is cut to the headroom under the ceiling.
+  // P = 0.4 T leaves 0.2 T of shares, which is 20% of the pool's XFG.
+  const auto d = plan(xfgAtoms(5000), 0, 0, kLaunchTwap, p.shares * 4 / 10);
+  // Share counts are integers, so the headroom is 2000 XFG to within a few atoms.
+  TEST(d.deployXfg <= xfgAtoms(2000) + 20);
+  TEST(d.deployXfg + 20 >= xfgAtoms(2000));
+}
+
+// Property: whatever the inputs, the deposit a plan feeds always fits under the
+// LP-share ceiling, and the plan is internally consistent. The ceiling is why no
+// HEAT is minted for a pairing that would be refused.
+void testSwfPlanNeverOvershootsTheShareCeiling() {
+  const SeedPool p = seedPool();
+  const uint64_t cap = parameters::PROTOCOL_LP_SHARE_CAP_PCT;
+  Lcg rng(0xF1AE5EEDULL);
+  bool fits = true, consistent = true, nonEmptyMintsHeat = true, balanced = true;
+  int deployed = 0;
+  for (int i = 0; i < 4000; ++i) {
+    const uint64_t R = 1 + rng.upTo(p.rx);
+    const uint64_t X = rng.upTo(p.rx / 4);
+    const uint64_t H = rng.upTo(p.rh / 4);
+    const uint64_t twap = kLaunchTwap / 2 + rng.upTo(kLaunchTwap * 3 / 2);
+    const uint64_t P = rng.upTo(p.shares * 7 / 10);
+    const auto pl = Blockchain::planSwfDeployment(R, X, H, twap, p.rx, p.shares, P, 100, cap);
+    if (pl.deployXfg == 0) continue;
+    ++deployed;
+    if (pl.convertXfg + pl.legXfg != pl.deployXfg || pl.deployXfg > R) consistent = false;
+    if (pl.heat != HeatMintEngine::heatForXfg(pl.convertXfg, twap)) consistent = false;
+    if (pl.convertXfg > 0 && pl.heat == 0) nonEmptyMintsHeat = false;
+    const uint64_t s = pairedShares(X + pl.legXfg, H + pl.heat, p);
+    if ((uint128_t)(P + s) * 100 > (uint128_t)(p.shares + s) * cap) fits = false;
+    // Neither clamp hit: the legs are equal in value to within one HEAT atomic.
+    if (pl.convertXfg > 0 && pl.convertXfg < pl.deployXfg) {
+      const uint128_t xfgSide = (uint128_t)X + pl.legXfg;
+      const uint128_t heatSide = (uint128_t)(H + pl.heat) * kCoin / twap;
+      const uint128_t diff = xfgSide > heatSide ? xfgSide - heatSide : heatSide - xfgSide;
+      if (diff > kCoin / twap + 2) balanced = false;
+    }
+  }
+  TEST(deployed > 500);
+  TEST(fits);
+  TEST(consistent);
+  TEST(nonEmptyMintsHeat);
+  TEST(balanced);
+}
+
+// The rule: XFG consumed converting the SWF's XFG to HEAT goes to the Eternal Flame
+// in full. Not 50/50 with the SWF, not retired from supply.
+void testSwfDeployCreditsConvertedXfgToEternalFlameInFull() {
+  TestChain t("swfdeploy", 1);
+  TEST(t.ok);
+  Blockchain& c = t.chain;
+  VaultCoreTestAccess::pushSpot(c, 1, kLaunchTwap);
+  VaultCoreTestAccess::pushSpot(c, 2, kLaunchTwap);
+  VaultCoreTestAccess::setSwfXfgReserve(c, xfgAtoms(1000));
+
+  const uint64_t ef0 = VaultCoreTestAccess::efTotal(c);
+  const uint64_t burned0 = VaultCoreTestAccess::totalBurned(c);
+  const uint64_t perm0 = VaultCoreTestAccess::permanentlyBurned(c);
+  const uint64_t tally0 = VaultCoreTestAccess::swfTally(c);
+  const uint64_t supply0 = VaultCoreTestAccess::heatSupply(c);
+  const uint64_t legX0 = VaultCoreTestAccess::pendingLegXfg(c);
+  const uint64_t legH0 = VaultCoreTestAccess::heatLeg(c);
+
+  TEST(VaultCoreTestAccess::deploy(c, 10));
+
+  const uint64_t converted = xfgAtoms(500);
+  const uint64_t minted = HeatMintEngine::heatForXfg(converted, kLaunchTwap);
+  TEST(minted == 50 * kCoin);
+  TEST(VaultCoreTestAccess::swfXfgReserve(c) == 0);
+  TEST(VaultCoreTestAccess::efTotal(c) - ef0 == converted);           // all of it, not half
+  TEST(VaultCoreTestAccess::totalBurned(c) - burned0 == converted);
+  TEST(VaultCoreTestAccess::permanentlyBurned(c) == perm0);           // not retired from supply
+  TEST(VaultCoreTestAccess::swfTally(c) == tally0);                   // none handed back to the SWF
+  TEST(VaultCoreTestAccess::pendingLegXfg(c) - legX0 == xfgAtoms(500));
+  TEST(VaultCoreTestAccess::heatLeg(c) - legH0 == minted);
+  TEST(VaultCoreTestAccess::heatSupply(c) - supply0 == minted);       // disclosed at creation
+
+  // Every XFG atom of the reserve left it once and landed once.
+  TEST(xfgAtoms(1000) == (VaultCoreTestAccess::pendingLegXfg(c) - legX0) +
+                         (VaultCoreTestAccess::efTotal(c) - ef0));
+
+  // Nothing left to deploy: a second call moves nothing.
+  const uint64_t ef1 = VaultCoreTestAccess::efTotal(c);
+  TEST(VaultCoreTestAccess::deploy(c, 11));
+  TEST(VaultCoreTestAccess::efTotal(c) == ef1);
+  TEST(VaultCoreTestAccess::heatSupply(c) - supply0 == minted);
+}
+
+// No TWAP, or no room under the LP-share ceiling: the reserve waits, and no HEAT is
+// minted for a pairing that could not happen.
+void testSwfDeployWaitsForTwapAndRoom() {
+  {
+    TestChain t("swfwait-twap", 1);
+    TEST(t.ok);
+    VaultCoreTestAccess::setSwfXfgReserve(t.chain, xfgAtoms(1000));
+    const uint64_t supply0 = VaultCoreTestAccess::heatSupply(t.chain);
+    TEST(VaultCoreTestAccess::deploy(t.chain, 10));
+    TEST(VaultCoreTestAccess::swfXfgReserve(t.chain) == xfgAtoms(1000));
+    TEST(VaultCoreTestAccess::heatSupply(t.chain) == supply0);
+  }
+  {
+    TestChain t("swfwait-cap", 1);
+    TEST(t.ok);
+    Blockchain& c = t.chain;
+    VaultCoreTestAccess::pushSpot(c, 1, kLaunchTwap);
+    VaultCoreTestAccess::pushSpot(c, 2, kLaunchTwap);
+    VaultCoreTestAccess::setSwfXfgReserve(c, xfgAtoms(1000));
+    VaultCoreTestAccess::setProtocolShares(c, (c.getAmmPool().totalLpShares + 1) / 2);
+    TEST(c.protocolLpAtCap());
+    const uint64_t ef0 = VaultCoreTestAccess::efTotal(c);
+    const uint64_t supply0 = VaultCoreTestAccess::heatSupply(c);
+    TEST(VaultCoreTestAccess::deploy(c, 10));
+    TEST(VaultCoreTestAccess::swfXfgReserve(c) == xfgAtoms(1000));
+    TEST(VaultCoreTestAccess::efTotal(c) == ef0);
+    TEST(VaultCoreTestAccess::heatSupply(c) == supply0);
+  }
+}
+
+// Connect then undo: the SWF half is kept (reserve) only for a HEAT mint while the
+// rules are active, and destroyed and tallied otherwise. The undo must reverse
+// whichever treatment the connect applied, exactly.
+void testBurnRoutingKeepsTheSwfHalfOnlyWhenRulesAreActive() {
+  const uint8_t v = BLOCK_MAJOR_VERSION_12;
+  const uint64_t burned = xfgAtoms(10000);
+  const uint64_t banked = burned - heatMintPremiumXfg(burned, v);
+  const MintBurnSplit split = mintBurnSplit(banked);
+  std::vector<uint8_t> mint;
+  TEST(addHeatMintAuthToExtra(mint, burned, 1));
+
+  // Rules off, the shipped default: destroyed and tallied, exactly as before.
+  {
+    TestChain t("route-off");
+    TEST(t.ok);
+    const auto blk = VaultCoreTestAccess::blockWith(5, v, mint);
+    VaultCoreTestAccess::connectBurns(t.chain, blk);
+    TEST(VaultCoreTestAccess::swfTally(t.chain) == split.swf);
+    TEST(VaultCoreTestAccess::swfXfgReserve(t.chain) == 0);
+    TEST(VaultCoreTestAccess::totalBurned(t.chain) == banked);
+    TEST(VaultCoreTestAccess::efTotal(t.chain) == split.ef);
+    VaultCoreTestAccess::undoBurns(t.chain, blk);
+    TEST(VaultCoreTestAccess::swfTally(t.chain) == 0);
+    TEST(VaultCoreTestAccess::swfXfgReserve(t.chain) == 0);
+  }
+
+  // Rules on: kept as real XFG, not tallied, and not counted as consumed.
+  {
+    TestChain t("route-on", 1);
+    TEST(t.ok);
+    const auto blk = VaultCoreTestAccess::blockWith(5, v, mint);
+    VaultCoreTestAccess::connectBurns(t.chain, blk);
+    TEST(VaultCoreTestAccess::swfXfgReserve(t.chain) == split.swf);
+    TEST(VaultCoreTestAccess::swfTally(t.chain) == 0);
+    TEST(VaultCoreTestAccess::totalBurned(t.chain) == banked - split.swf);
+    TEST(VaultCoreTestAccess::efTotal(t.chain) == split.ef);
+    VaultCoreTestAccess::undoBurns(t.chain, blk);
+    TEST(VaultCoreTestAccess::swfXfgReserve(t.chain) == 0);
+    TEST(VaultCoreTestAccess::swfTally(t.chain) == 0);
+  }
+
+  // Rules on but before the start height: still the historical treatment.
+  {
+    TestChain t("route-early", 100);
+    TEST(t.ok);
+    const auto blk = VaultCoreTestAccess::blockWith(5, v, mint);
+    VaultCoreTestAccess::connectBurns(t.chain, blk);
+    TEST(VaultCoreTestAccess::swfTally(t.chain) == split.swf);
+    TEST(VaultCoreTestAccess::swfXfgReserve(t.chain) == 0);
+    VaultCoreTestAccess::undoBurns(t.chain, blk);
+    TEST(VaultCoreTestAccess::swfTally(t.chain) == 0);
+  }
+
+  // Rules on, but a historical 0x08 burn rather than a HEAT mint: not retained.
+  {
+    TestChain t("route-legacy", 1);
+    TEST(t.ok);
+    TransactionExtraHeatCommitment hc{};
+    hc.amount = xfgAtoms(1000);
+    std::vector<uint8_t> legacy;
+    TEST(addHeatCommitmentToExtra(legacy, hc));
+    const MintBurnSplit ls = mintBurnSplit(hc.amount);
+    const auto blk = VaultCoreTestAccess::blockWith(5, v, legacy);
+    VaultCoreTestAccess::connectBurns(t.chain, blk);
+    TEST(VaultCoreTestAccess::swfTally(t.chain) == ls.swf);
+    TEST(VaultCoreTestAccess::swfXfgReserve(t.chain) == 0);
+    VaultCoreTestAccess::undoBurns(t.chain, blk);
+    TEST(VaultCoreTestAccess::swfTally(t.chain) == 0);
+  }
+}
+
+// The start height lives in Currency, defaults to the config constant (0, off),
+// and the Hearth fee split it schedules is exact at each stage.
+void testSwfFundingScheduleAndFeeSplit() {
+  Logging::LoggerGroup log;
+  const Currency off = CurrencyBuilder(log).currency();
+  TEST(parameters::SWF_LP_DIVERSION_START_HEIGHT == 0);
+  TEST(!off.swfLpRulesActive(0));
+  TEST(!off.swfLpRulesActive(UINT32_MAX));
+  TEST(off.swfLpPctOfFee(parameters::UPGRADE_HEIGHT_V12 + 1) == 0);
+
+  const uint32_t start = 1500000;
+  const Currency on = CurrencyBuilder(log).swfLpStartHeight(start).currency();
+  const uint32_t v12 = on.upgradeHeight(BLOCK_MAJOR_VERSION_12);
+  TEST(!on.swfLpRulesActive(start - 1));
+  TEST(on.swfLpRulesActive(start));
+  TEST(on.swfLpPctOfFee(start - 1) == 0);
+  TEST(on.swfLpPctOfFee(start) == parameters::SWF_LP_PCT_OF_FEE_PRE_CD);
+  TEST(on.swfLpPctOfFee(v12 - 1) == parameters::SWF_LP_PCT_OF_FEE_PRE_CD);
+  TEST(on.swfLpPctOfFee(v12) == parameters::SWF_LP_PCT_OF_FEE_V12);
+
+  // AuntPoL / maker / CD of one taker fee, as the epoch split computes them:
+  // the accumulator holds the non-maker side, AuntPoL's cut is rebased onto it.
+  auto split = [&](uint32_t height, uint8_t version, uint64_t& lp, uint64_t& maker, uint64_t& cd) {
+    const uint64_t fee = 100000000;
+    const uint64_t acc = fee * hearthCdSharePct(version) / 100;
+    const uint64_t pct = on.swfLpPctOfFee(height);
+    lp = acc * pct / hearthCdSharePct(version);
+    cd = acc - lp;
+    maker = fee - acc;
+  };
+  uint64_t lp = 0, maker = 0, cd = 0;
+  split(start, BLOCK_MAJOR_VERSION_11, lp, maker, cd);
+  TEST(lp == 30000000 && maker == 70000000 && cd == 0);   // 30 / 70 / 0 before CDs exist
+  split(v12, BLOCK_MAJOR_VERSION_12, lp, maker, cd);
+  TEST(lp == 35000000 && maker == 35000000 && cd == 30000000);   // 35 / 35 / 30 from v12
+  split(start - 1, BLOCK_MAJOR_VERSION_11, lp, maker, cd);
+  TEST(lp == 0 && maker == 70000000 && cd == 30000000);   // gate not reached: stock v11
+}
+
+// A snapshot that omits the reserve would restore it to whatever the field held,
+// so a reorg across an epoch boundary would corrupt the reserve.
+void testEpochSnapshotCarriesTheSwfReserve() {
+  TEST(VaultCoreTestAccess::snapshotKeepsSwfReserve(0));
+  TEST(VaultCoreTestAccess::snapshotKeepsSwfReserve(123456789012ULL));
+  TEST(VaultCoreTestAccess::snapshotKeepsSwfReserve(UINT64_MAX));
+}
+
+
 int main() {
   testCdInterestCompounding();
   testLegacyDepositWithdrawsForPrincipal();
@@ -1546,6 +1919,14 @@ int main() {
   testVaultSetSpendKeyRebuildsKeyImageIndex();
   testVaultAllBalancesSaturate();
   testVaultSelectUtxosDeterministicTies();
+  testMintBurnSplitMatchesTheOldFormula();
+  testSwfPlanMatchesTheLegs();
+  testSwfPlanNeverOvershootsTheShareCeiling();
+  testSwfDeployCreditsConvertedXfgToEternalFlameInFull();
+  testSwfDeployWaitsForTwapAndRoom();
+  testBurnRoutingKeepsTheSwfHalfOnlyWhenRulesAreActive();
+  testSwfFundingScheduleAndFeeSplit();
+  testEpochSnapshotCarriesTheSwfReserve();
   fprintf(stderr, "=== Treasury/Core Tests ===\nPassed: %d / %d\n", tests_passed, tests_run);
   return tests_passed == tests_run ? 0 : 1;
 }

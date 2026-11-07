@@ -2,7 +2,7 @@
 
 **Started**: 2026-11-05
 **Agent**: Claude Opus 5
-**Status**: CODE DONE / BUILD NOT VERIFIED — Boost absent from the audit container, so `make -j$(nproc)` could not run. Build, tests, and wallet-side support are open; see sign-off.
+**Status**: CODE DONE, COMPILED AND TESTED (workstream 5). Dormant until `SWF_LP_DIVERSION_START_HEIGHT` is set. Wallet/RPC emission of an asset-2 donation is still open; see sign-off.
 **Branch**: `claude/swf-auntpol-liquidity` (alternate — not the audit-fix branch)
 **Scope**: `src/CryptoNoteConfig.h`, `src/CryptoNoteCore/Blockchain.cpp`, `AGENTS.md`
 
@@ -64,6 +64,67 @@ the maintain-and-compound structure; depth has to be seeded by paired donation
 (e.g. 5,000 XFG + 500 HEAT at the 10:1 ratio takes the pool from 10k/1k to
 15k/1.5k). The slice then compounds it as volume grows. It is taken from CD yield,
 so raising it is visible to CD holders and should be disclosed, not slipped in.
+
+### Workstream 5 — retained SWF reserve, converted XFG to the Eternal Flame in full (2026-11-07)
+
+**The rule (maintainer):** whenever XFG from the SWF is converted to HEAT, that XFG goes in full to the
+Eternal Flame.
+
+**Why it needed a retained reserve.** `m_swfBurnedXfgPendingHeat` tallies XFG a burn already destroyed, and that
+burn already paid for the minter's HEAT. Converting it again would spend one payment twice. So the SWF half of a
+HEAT mint is now *kept* as real XFG (`m_swfXfgReserve`) from the start height. Converting that XFG is its first and
+only consumption, which is what lets the rule hold: each atom of the reserve leaves it once and lands once, either as
+AuntPoL's XFG leg or in the Flame. This reverses workstream 4 task 18 of the v11 entry ("the SWF is never spent to
+pair AuntPoL") for the new reserve only; the old tally is still never spent.
+
+**What it does.**
+- Connect (`pushToBankingIndex`): a HEAT mint's SWF half goes to `m_swfXfgReserve` when
+  `Currency::swfLpRulesActive(height)`; every other burn, and every burn before the start height, keeps the
+  historical tally. One helper, `routeBurn`, decides this for connect, the cache rescan and the reorg undo
+  (`undoSwfBurnRouting`, extracted from `popBlock` unchanged otherwise), so they cannot disagree. Total-burn
+  tally counts only what was consumed.
+- Epoch boundary (`deploySwfReserve`, before the AuntPoL pairing): `planSwfDeployment` keeps part of the reserve as
+  the XFG leg and converts just enough to HEAT at `twapBefore(height)` for the two legs to match in value. It mints
+  nothing the legs do not need (zero when the HEAT leg is already long), reads no live spot, and is sized to the
+  headroom under the 50% LP-share cap so the deposit it feeds always fits. The consumed XFG goes to the Flame in
+  full (`addForeverDeposit` + `addTotalBurn` + `syncEternalFlame`), not 50/50 and not `addPermanentBurn`. The minted
+  HEAT is credited to `m_treasuryHeatReserve` and to `m_heatSupply` at creation.
+- Reversal: the reserve is in `EpochStateSnapshot`, so a boundary block restores it like the other counters.
+- Visible: `swf_accounts.retained_xfg` in the public audit RPC.
+
+**Interpretations to confirm.** Parameters I chose, all one-line constants: deploy 100% of the reserve each epoch
+(`SWF_DEPLOY_PCT_PER_EPOCH`), "match legs" sizing rather than a fixed 50%, HEAT minted into AuntPoL's HEAT leg
+(option b) rather than a counter balance (option a), and a retained reserve that waits when the TWAP is missing or
+the cap is reached. At the launch ratio with empty legs this converts half of the reserve, so protocol-minted HEAT is
+at most about a quarter of what users mint.
+
+**Operational cost.** `CURRENT_BLOCKCACHE_STORAGE_ARCHIVE_VER` 16 to 17: the new counter and snapshot field change the
+cache layout, so every node replays once on upgrade.
+
+**Correction to earlier entries.** Workstreams 1 to 4 and the audit-fixes entry attribute the "14 compile errors" to
+Boost 1.83 against the required 1.86. That was wrong. The project defines `BOOST_MPL_LIMIT_LIST_SIZE=40` in
+`CMakeLists.txt` and my ad hoc invocations omitted it, so the parity check against upstream compared two broken
+compiles and could have hidden real diagnostics. With the project's flags and clang 18, pure upstream and this branch
+compile with 0 errors. GCC 13 additionally rejects two qualified definitions in `Blockchain.cpp` (`isHeatwaveTag`,
+`carriesHeatwaveTag`) on pure upstream too; that is not from this work.
+
+**Verification.** Out-of-tree build (clang 18, Debug) of `CryptoNoteCore` and the test executables:
+`core_tests` 354/354 (265 existing plus 89 new assertions), `test_hearth_amm` 31/31, `heat_mint_engine_tests` 20/20.
+The new tests cover: the burn split against the 128-bit formula it replaced; the planner on empty, HEAT-long,
+XFG-long, no-TWAP, no-reserve, at-cap and partial-headroom cases; a 4000-case property test that the deposit a plan
+feeds never takes the protocol past the ceiling; the Eternal Flame receiving exactly the converted XFG with nothing
+retired and nothing handed back to the SWF; connect then undo restoring both treatments exactly (rules off, on, before
+the start height, and a non-mint burn); the schedule and the 30/70/0 and 35/35/30 splits; and the snapshot
+round-trip. Two deliberate breakages (Flame credited half; undo skipped) were each caught and then reverted.
+
+| # | Task | Owner | Date | Status |
+|---|------|-------|------|--------|
+| 20 | `m_swfXfgReserve`: connect, rescan, undo (`routeBurn`), snapshot, cache, reset, RPC | Claude Sonnet 5.5 | 2026-11-07 | DONE |
+| 21 | `planSwfDeployment` + `deploySwfReserve`; converted XFG to the Eternal Flame in full | Claude Sonnet 5.5 | 2026-11-07 | DONE |
+| 22 | Start height moved into `Currency` (builder, default 0) so the active path is testable | Claude Sonnet 5.5 | 2026-11-07 | DONE |
+| 23 | 89 new `core_tests` assertions; mutation-checked | Claude Sonnet 5.5 | 2026-11-07 | DONE |
+| 24 | Set `SWF_LP_DIVERSION_START_HEIGHT` | — | — | TODO (needs chain height) |
+| 25 | Confirm the interpretations above | — | — | TODO |
 
 ### Workstream 4 — gate the pairing cap behind the start height (2026-11-06)
 
@@ -177,9 +238,9 @@ while the start height is 0, and with it set to a test value the schedule steps
 
 | Gate | Status | Signed | Date |
 |------|--------|--------|------|
-| All tasks DONE | NO — tasks 6-9 open | — | — |
-| Build compiles | NOT VERIFIED — no Boost in audit container | — | — |
-| Tests pass | NOT RUN | — | — |
+| All tasks DONE | NO — tasks 6, 24, 25 open (task 8 and 9 closed by workstream 5) | — | — |
+| Build compiles | YES — clang 18 with the project's flags; 0 errors (see workstream 5) | Claude Sonnet 5.5 | 2026-11-07 |
+| Tests pass | YES — `core_tests` 354/354, `test_hearth_amm` 31/31, `heat_mint_engine_tests` 20/20 | Claude Sonnet 5.5 | 2026-11-07 |
 | Brace/paren balance + hunk placement + scope checks reviewed | YES | Claude Opus 5 | 2026-11-05 |
 
 ---
@@ -244,8 +305,8 @@ arithmetic for an unreachable branch adds split risk without benefit.
 | Gate | Status | Signed | Date |
 |------|--------|--------|------|
 | All tasks DONE | NO — tasks 4, 5 open | — | — |
-| Build compiles | NOT VERIFIED — no Boost in audit container | — | — |
-| Tests pass | NOT RUN | — | — |
+| Build compiles | YES — included in the tree built in the SWF entry's workstream 5 (the earlier "not verified" was a missing compile flag, not Boost) | Claude Sonnet 5.5 | 2026-11-07 |
+| Tests pass | YES — same run as above; no regression test for the epoch TWAP fix yet (task 4) | Claude Sonnet 5.5 | 2026-11-07 |
 | Brace/paren balance + hunk placement reviewed | YES | Claude Opus 5 | 2026-11-05 |
 
 ---

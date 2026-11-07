@@ -235,6 +235,29 @@ namespace CryptoNote {
     // real liquidity, which dilutes the protocol's share and re-opens both.
     bool protocolLpAtCap() const;
 
+    // What one epoch deployment of the retained SWF reserve does. Pure: the
+    // consensus step and the tests share it.
+    //   deployXfg  = convertXfg + legXfg, taken from the reserve
+    //   convertXfg = consumed to mint the HEAT leg; credited IN FULL to the
+    //                Eternal Flame
+    //   legXfg     = kept, joins AuntPoL's XFG leg
+    //   heat       = HEAT minted for the HEAT leg (heatForXfg(convertXfg, twap))
+    struct SwfDeployPlan {
+      uint64_t deployXfg = 0;
+      uint64_t convertXfg = 0;
+      uint64_t legXfg = 0;
+      uint64_t heat = 0;
+    };
+    // Sizes the conversion so the two AuntPoL legs end up equal in value at the
+    // TWAP ("match legs"), mints nothing the legs do not need, and never lets the
+    // deposit it feeds take the protocol past the LP-share ceiling. Reads the TWAP
+    // and the share counts only, never the pool's live spot.
+    static SwfDeployPlan planSwfDeployment(uint64_t reserveXfg, uint64_t pendingLegXfg,
+                                           uint64_t pendingLegHeat, uint64_t twap,
+                                           uint64_t poolReserveXfg, uint64_t totalLpShares,
+                                           uint64_t protocolLpShares, uint64_t deployPct,
+                                           uint64_t capPct);
+
     // One coherent read of every public-accounting counter and vault partition
     // from a single tip, taken under the blockchain state lock. Counters and
     // the UTXOs that back them are separate values on purpose: an RPC handler
@@ -278,6 +301,7 @@ namespace CryptoNote {
       uint64_t protocolLpValueHeat = 0;
 
       uint64_t swfHeatCounter = 0;
+      uint64_t swfXfgReserve = 0;
       uint64_t vaultSwfXfg = 0;
       uint64_t vaultSwfHeat = 0;
     };
@@ -295,6 +319,10 @@ namespace CryptoNote {
     // Deprecated alias — keep for external consumers until RPC/docs migrated
     uint64_t getTreasuryCounterXFG() const { return getTreasuryLpPendingXfg(); }
     uint64_t getSwfHeatBalance() const { return m_swfHeatBalance; }
+    // Real, protocol-held XFG kept from the SWF half of HEAT mints since
+    // SWF_LP_DIVERSION_START_HEIGHT. Unlike m_swfBurnedXfgPendingHeat (a tally of
+    // XFG already destroyed) this is spendable by the protocol's own rules.
+    uint64_t getSwfXfgReserve() const { return m_swfXfgReserve; }
     // getTreasuryXfgReserve() removed — m_treasuryXfgReserve is dead code (never incremented, only restored from snapshots)
     uint64_t getProtocolLpShares() const { return m_protocolLpShares; }
     bool withdrawTreasuryLp(uint64_t sharesToBurn);
@@ -539,6 +567,7 @@ namespace CryptoNote {
       uint64_t treasurySwapFeeXfg;
       uint64_t treasuryLpPendingXfg;
       uint64_t swfHeatBalance;
+      uint64_t swfXfgReserve;
       uint64_t feePoolBalance;
       uint64_t cdHearthFeeAccumulator;
       bool bootstrapRepaid;
@@ -565,6 +594,7 @@ namespace CryptoNote {
         s(treasurySwapFeeXfg, "treasury_swap_fee_xfg");
         s(treasuryLpPendingXfg, "treasury_lp_pending_xfg");
         s(swfHeatBalance, "swf_heat_balance");
+        s(swfXfgReserve, "swf_xfg_reserve");
         s(feePoolBalance, "fee_pool_balance");
         s(cdHearthFeeAccumulator, "cd_hearth_fee_accumulator");
         s(bootstrapRepaid, "bootstrap_repaid");
@@ -633,6 +663,10 @@ namespace CryptoNote {
     uint64_t m_bootstrapXfgOwed = 0;
     uint64_t m_bootstrapRepaymentVault = 0;
     uint64_t m_swfBurnedXfgPendingHeat = 0; // SWF-owned XFG already burned, pending HEAT conversion
+    // XFG the SWF half of HEAT mints KEEPS (gated by swfLpRulesActive). Real
+    // inventory, not a tally: deployed as AuntPoL's XFG leg at epoch boundaries,
+    // with the part converted to HEAT credited in full to the Eternal Flame.
+    uint64_t m_swfXfgReserve = 0;
     IndexManager m_indexManager;
     // LP share tracking: maps global commitment output index → LP shares held
     parallel_flat_hash_map<uint64_t, uint64_t> m_lpCommitmentShares;
@@ -809,6 +843,9 @@ namespace CryptoNote {
     friend class VaultCoreTestAccess;
     difficulty_type get_next_difficulty_for_alternative_chain(const std::list<blocks_ext_by_hash::iterator> &alt_chain, BlockEntry &bei);
     void pushToBankingIndex(const BlockEntry &block, uint64_t interest);
+    // Exact inverse of the SWF-half routing pushToBankingIndex did for this block's
+    // burns: the retained reserve for gated HEAT mints, the legacy tally otherwise.
+    void undoSwfBurnRouting(const BlockEntry &block, uint32_t height);
     bool prevalidate_miner_transaction(const Block &b, uint32_t height);
     bool validate_miner_transaction(const Block &b, uint32_t height, size_t cumulativeBlockSize, uint64_t alreadyGeneratedCoins, uint64_t fee, uint64_t &reward, int64_t &emissionChange, const std::vector<Transaction>& blockTransactions = {});
     bool rollback_blockchain_switching(std::list<Block> &original_chain, size_t rollback_height);
@@ -851,6 +888,10 @@ namespace CryptoNote {
     void rebuildOrderbookFromUtxoSet(uint32_t height);
     bool pushTransaction(BlockEntry &block, const Crypto::Hash &transactionHash, TxIndex transactionIndex);
     bool processBlockEpochWork(const Block& block, uint32_t height, const Crypto::Hash& blockHash);
+    // Deploys the retained SWF reserve at an epoch boundary: part stays as AuntPoL's
+    // XFG leg, part is converted to HEAT for the HEAT leg with the consumed XFG
+    // credited in full to the Eternal Flame. The caller applies the activation gate.
+    bool deploySwfReserve(uint32_t height);
     void processFciBlock(const Block& block, uint32_t height, uint32_t epochBlocks);
     void rebuildFciState(uint32_t blockCount);
     void rollbackFciBlock(uint32_t poppedHeight);

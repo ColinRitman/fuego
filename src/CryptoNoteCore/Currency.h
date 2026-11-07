@@ -203,6 +203,12 @@ public:
   // First height at which a pre-v11 block may not carry HEAT, Hearth or
   // legacy-burn tags (parameters::HEATWAVE_TAG_CUTOFF_HEIGHT; testnet: v11).
   uint32_t heatwaveTagCutoffHeight() const;
+  // The AuntPoL funding rules (retained SWF reserve, Hearth fee diversion,
+  // protocol-share cap on pairing) apply from this height; 0 = off. Defaults to
+  // parameters::SWF_LP_DIVERSION_START_HEIGHT.
+  bool swfLpRulesActive(uint32_t height) const;
+  // AuntPoL's share of the Hearth taker fee at `height`, in percent of the fee.
+  uint64_t swfLpPctOfFee(uint32_t height) const;
   uint8_t blockMajorVersionAtHeight(uint32_t height) const;
   unsigned int upgradeVotingThreshold() const { return m_upgradeVotingThreshold; }
   uint32_t upgradeVotingWindow() const { return m_upgradeVotingWindow; }
@@ -436,6 +442,7 @@ private:
    uint32_t m_upgradeHeightV10; // upgradekit
     uint32_t m_upgradeHeightV11; // HearthAMM + HEAT
     uint32_t m_upgradeHeightV12; // HEAT CDs + unified outputs
+    uint32_t m_swfLpStartHeight = 0; // AuntPoL funding rules; 0 = off
 
   uint32_t m_bootstrapBlocks;
 
@@ -571,6 +578,7 @@ public:
   CurrencyBuilder& upgradeHeightV10(uint64_t val) { m_currency.m_upgradeHeightV10 = static_cast<uint32_t>(val); return *this; }//upgradekit
     CurrencyBuilder& upgradeHeightV11(uint64_t val) { m_currency.m_upgradeHeightV11 = static_cast<uint32_t>(val); return *this; }//HearthAMM+HEAT
     CurrencyBuilder& upgradeHeightV12(uint64_t val) { m_currency.m_upgradeHeightV12 = static_cast<uint32_t>(val); return *this; }//CDs+unified outputs
+    CurrencyBuilder& swfLpStartHeight(uint32_t val) { m_currency.m_swfLpStartHeight = val; return *this; }
     CurrencyBuilder& bootstrapBlocks(uint64_t val) { m_currency.m_bootstrapBlocks = static_cast<uint32_t>(val); return *this; }
 
 
